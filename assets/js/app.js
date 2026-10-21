@@ -532,13 +532,19 @@
     setHTML('#popFootToken', F.fmtWan(today.tokens || 0));
     const box = $('[data-chart="popHourly"]');
     if (!box) return;
+    // 小窗只有一屏宽，不摆 24 根柱：滑动窗口 = 最近 12 小时，
+    // 末尾最多留 3 个空白格，整点往后走时窗口自动右移（新数据进来才展示）
+    const nowHour = (D.meta && D.meta.nowHour != null) ? D.meta.nowHour : new Date().getHours();
+    const end = Math.min(23, nowHour + 3);
+    const start = Math.max(0, end - 11);
+    const rows = (D.hourly || []).slice(start, end + 1);
     const paint = () => C.bar(box, {
-      data: (D.hourly || []).map(hr => ({
+      data: rows.map(hr => ({
         label: hr.label, short: F.pad(hr.hour), value: hr.points, isNow: hr.isNow,
         tipTitle: `${F.pad(hr.hour)}:00–${F.pad((hr.hour + 1) % 24)}:00`
       })),
       tone: 'c1', valueName: '消耗', sum: today.consumed,
-      nowIndex: D.meta.nowHour, xEvery: 6, showValues: false, maxBarW: 16
+      nowIndex: nowHour - start, xEvery: 3, showValues: false, maxBarW: 18
     });
     // 小窗首帧容器可能还是 0 高（boot 遮罩 / 布局未定型），量到尺寸再画，最多等 3 秒
     let n = 0;
@@ -733,7 +739,7 @@
 
   /* ---------------- 额度与消耗：今日 / 本周 / 本月 三个口径 ---------------- */
 
-  const QUOTA_LABEL = { day: '今日', week: '本周', month: '本月' };
+  const QUOTA_LABEL = { day: '今日', week: '本周', cycle: '本期' };
 
   /** 区间内已消耗多少分：D.daily 只带 MM-DD，按当年补齐成日期再比较 */
   function quotaWindow(kind) {
@@ -761,42 +767,46 @@
     return { sum, count, from };
   }
 
-  /** 环图的"额度"跟着区间走：今日=每日可用，本周=本周可用，本月=每日可用×当月天数
-   *  底部三项统计保持固定口径（本周可用 / 周期剩余 / 每日可用），不随切换变化。 */
+  /** 环图的"额度"跟着区间走：今日=每日可用，本周=本周可用，本期=总额度（副标题显示周期剩余）
+   *  底部三项统计按数值从小到大排列，不随切换变化。 */
   function renderQuotaCard(acc, configured) {
     const kind = state.quotaRange || 'week';
     const lb = QUOTA_LABEL[kind] || '本周';
-    const win = quotaWindow(kind);
     const al = allowance(acc);
-    const now = new Date();
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    const budget = !configured ? 0
-      : kind === 'day' ? al.perDay
-      : kind === 'week' ? al.perWeek
-      : al.perDay * daysInMonth;
-    const used = win.sum;
+    const cycleUsed = acc.used || 0;
+    const cycleLeft = acc.available || 0;
+
+    let used = 0, budget = 0;
+    if (kind === 'day') { used = quotaWindow('day').sum; budget = al.perDay; }
+    else if (kind === 'cycle') { used = cycleUsed; budget = Math.max(1, cycleUsed + cycleLeft); }
+    else { used = quotaWindow('week').sum; budget = al.perWeek; }
+
     const pct = budget > 0 ? Math.min(1, used / budget) : 0;
     const over = Math.max(0, used - budget);
+    const sub = !configured ? '点头像连接账号'
+      : kind === 'cycle' ? `周期剩余 ${F.credit(cycleLeft)} · 已用 ${F.credit(cycleUsed)}`
+        : budget > 0
+          ? `额度 ${F.credit(budget)} · ${over > 0 ? '超 ' + F.credit(over) : '剩 ' + F.credit(budget - used)}`
+          : '额度为 0';
 
     C.gauge($('[data-chart="gauge"]'), {
       value: configured ? pct : 0,
       label: configured ? `${lb}已用` : '未连接云端',
-      sub: configured
-        ? (budget > 0
-          ? `额度 ${F.credit(budget)} · ${over > 0 ? '超 ' + F.credit(over) : '剩 ' + F.credit(budget - used)}`
-          : '额度为 0')
-        : '点头像连接账号'
+      sub
     });
 
-    // 三项统计固定不变，只有环图随区间切换
-    setText('#quotaK1', '本周可用');
-    setText('#quotaK2', '周期剩余');
-    setText('#quotaK3', '每日可用');
-    setText('#quotaWeek', configured ? F.credit(al.perWeek) : '—');
-    setText('#quotaLeft', configured ? F.credit(al.available) : '—');
-    setText('#quotaDay', configured ? F.credit(al.perDay) : '—');
-    const k3 = $('#quotaDay');
-    if (k3) k3.classList.toggle('warn', configured && pct > .9);
+    // 三项统计：固定口径，按数值从小到大排序（小的在前）
+    const stats = [
+      { id: 'quotaWeek', label: '本周可用', value: al.perWeek },
+      { id: 'quotaLeft', label: '周期剩余', value: al.available },
+      { id: 'quotaDay', label: '每日可用', value: al.perDay, warn: true }
+    ].sort((a, b) => (a.value || 0) - (b.value || 0));
+    const statsBox = $('.quota-stats');
+    if (statsBox) {
+      statsBox.innerHTML = stats.map(s =>
+        `<div><span>${s.label}</span><b id="${s.id}"${s.warn ? ' class="warn"' : ''}>${configured ? F.credit(s.value) : '—'}</b></div>`
+      ).join('');
+    }
 
     const qh = $('#quotaHint');
     if (qh) {

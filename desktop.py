@@ -937,12 +937,7 @@ def main():
         threading.Timer(1.0, app.show_popup).start()
     elif "--main" in sys.argv:
         threading.Timer(1.0, app.show_main).start()
-    else:
-        def greeting():
-            time.sleep(3.0)
-            tray.notify("WorkBuddy 积分观测台已在托盘",
-                        "单击托盘图标，在屏幕右下角查看今日真实积分用量。")
-        threading.Thread(target=greeting, daemon=True).start()
+    # 默认托盘常驻：不再弹「已在托盘」的气泡提示（用户明确要求去掉启动弹窗）
 
     # 启动时尝试回填上次登录态（有存档则无需再次扫码）
     def _auto_restore():
