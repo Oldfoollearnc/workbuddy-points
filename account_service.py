@@ -142,6 +142,7 @@ class AccountService:
             "daily": [],
             "cloudWeek": None,
             "cloudModels": [],
+            "usageRows": [],
             "lastSync": None,
             "lastError": None,
             "interval": 60,
@@ -155,7 +156,7 @@ class AccountService:
         try:
             with open(CACHE, encoding="utf-8") as f:
                 d = json.load(f)
-            for k in ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "lastSync", "interval", "origin"):
+            for k in ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "usageRows", "lastSync", "interval", "origin"):
                 if k in d:
                     self.state[k] = d[k]
             self.interval_min = 60 if d.get("interval") is None else max(0, int(d.get("interval")))
@@ -166,7 +167,7 @@ class AccountService:
         try:
             with open(CACHE, "w", encoding="utf-8") as f:
                 json.dump({k: self.state[k] for k in
-                           ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "lastSync", "interval", "origin")},
+                           ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "usageRows", "lastSync", "interval", "origin")},
                           f, ensure_ascii=False, indent=2)
         except Exception:
             pass
@@ -441,6 +442,7 @@ class AccountService:
                     "daily": mapped["daily"],
                     "cloudWeek": mapped.get("cloudWeek"),
                     "cloudModels": mapped.get("cloudModels") or [],
+                    "usageRows": mapped.get("usageRows") or [],
                     "user": mapped["user"],
                     "lastSync": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "lastError": None,
@@ -504,6 +506,21 @@ class AccountService:
             rec["points"] = round(rec["points"] + _num(r.get("credit")), 2)
             rec["calls"] += 1
 
+        # 逐笔明细（云端口径）：换一台电脑登录同一账号，看到的也是这一份
+        usage_rows = []
+        for r in rows:
+            t = str(r.get("requestTime") or "")[:19]
+            if not t:
+                continue
+            usage_rows.append({
+                "t": t,
+                "credit": round(_num(r.get("credit")), 4),
+                "model": str(r.get("model") or ""),
+                "purpose": str(r.get("agentPurpose") or ""),
+            })
+        usage_rows.sort(key=lambda x: x["t"], reverse=True)
+        usage_rows = usage_rows[:1500]     # 30 天足够，防止缓存无限增长
+
         # 账号身份（昵称/头像/手机号）
         ident = {}
         try:
@@ -562,6 +579,7 @@ class AccountService:
                           "paid": bool(sm.get("IsPaidUser"))}, **ident),
             "cloudWeek": {"models": cloud_models, "days": cloud_week},
             "cloudModels": cloud_models_detail,
+            "usageRows": usage_rows,
             "cloud": {
                 "available": round(available, 2),
                 "total": round(total, 2),

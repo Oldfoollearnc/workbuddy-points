@@ -42,10 +42,7 @@
 <div class="popup-shell" id="popupShell">
   <div class="popup-card">
     <header class="pop-head">
-      <div class="pop-brand">
-        <img class="logo-img" src="assets/icon.png" alt="">
-        <div class="pop-brand-text"><b>WorkBuddy</b><em>积分观测台 · 今日用量</em></div>
-      </div>
+      <div class="pop-drag" id="popDrag" title="拖动小窗"></div>
       <div class="pop-tools">
         <button class="pop-btn" id="popRefresh" title="刷新本地记录（只读本机会话记录，不请求云端）" aria-label="刷新本地记录">
           <svg class="i"><use href="#i-refresh"/></svg><span>刷新本地</span>
@@ -79,13 +76,11 @@
         <span>本机记录实时；云端同步有延迟（<b id="popSyncAt">—</b>）</span>
       </p>
 
-      <section class="pop-block">
+      <section class="pop-block pop-block--grow">
         <div class="pop-block-head"><h3>今日消耗构成</h3><span id="popTotal">—</span></div>
         <div class="pop-comp">
           <div class="pop-donut" id="popDonut"></div>
-          <div class="comp-list comp-list--sm" id="popCompList"></div>
         </div>
-        <div class="comp-bar comp-bar--sm" id="popCompBar"></div>
       </section>
 
       <section class="pop-block">
@@ -93,10 +88,6 @@
         <div class="pop-bars" id="popBars"></div>
       </section>
 
-      <section class="pop-block pop-block--flex">
-        <div class="pop-block-head"><h3>最近消耗</h3><span id="popRecentCount">—</span></div>
-        <div class="pop-list" id="popList"></div>
-      </section>
     </div>
 
     <footer class="pop-foot">
@@ -240,7 +231,7 @@
               <span class="kpi-icon tint-green"><svg class="i"><use href="#i-refresh"/></svg></span>
             </div>
             <div class="kpi-value"><span data-count="todayReq">0</span><em>次</em></div>
-            <div class="kpi-foot"><span class="chip chip-good" id="kpiEarnedSub">平均每次</span><span class="muted"><b id="kpiNet">—</b> 分 / 次</span></div>
+            <div class="kpi-foot"><span class="chip chip-good" id="kpiEarnedSub">平均每次</span><span class="muted"><b id="kpiNet">—</b> 分/次</span></div>
             <div class="kpi-spark" data-spark="todayEarned"></div>
           </article>
 
@@ -250,7 +241,7 @@
               <span class="kpi-icon tint-violet"><svg class="i"><use href="#i-chart"/></svg></span>
             </div>
             <div class="kpi-value"><span data-count="todayToken" data-decimals="0">0</span><em>万</em></div>
-            <div class="kpi-foot"><span class="chip" id="kpiDaysSub">累计上下文</span><span class="muted" id="kpiAvg">—</span></div>
+            <div class="kpi-foot"><span class="chip" id="kpiDaysSub">平均上下文</span><span class="muted" id="kpiAvg">—</span></div>
             <div class="kpi-spark" data-spark="daysLeft"></div>
           </article>
         </div>

@@ -855,6 +855,13 @@
       const fmtTokens = v => (v == null ? '—' : shortNum(v) + ' Token');
       const fmtCalls = v => (v == null ? '—' : fmt(v) + ' 次');
 
+      // 入场动效：从左上角起，一列推一列（每列延迟 14ms）。
+      // container.dataset.played 保证同一次进入页面只播一次，resize/切主题不重播。
+      const play = cfg.animate !== false && motionLevel() !== 'off'
+        && container.dataset.played !== '1' && container.clientWidth > 0;
+      if (play) container.dataset.played = '1';
+      const cells = [];
+
       let prevMonth = -1;
       for (let col = 0; col < weeks; col++) {
         const colStart = new Date(start);
@@ -881,12 +888,19 @@
         const v = rec ? rec.points : 0;
         const x = padL + col * (cellW + gap);
         const y = padT + row * (cellH + gap);
+        const future = d > today;
         const rect = el('rect', {
           x, y, width: cellW, height: cellH, rx: Math.min(3.4, cellH * .16),
-          fill: colors[level(v)]
+          fill: colors[level(v)],
+          opacity: future ? '.32' : '1'
         }, svg);
-        const future = d > today;
-        if (future) rect.setAttribute('opacity', '.32');
+        if (play) {
+          rect.style.opacity = '0';
+          rect.style.transformBox = 'fill-box';
+          rect.style.transformOrigin = 'center';
+          rect.style.transform = 'scale(.82)';
+        }
+        cells.push({ node: rect, col, op: future ? 0.32 : 1 });
 
         const wd = '日一二三四五六'[d.getDay()];
         const rowsTip = [
@@ -898,6 +912,17 @@
         rect.addEventListener('mouseenter', ev => showTip(`<div class="tt-title">${title}</div>${tipRows(rowsTip)}`, ev.clientX, ev.clientY));
         rect.addEventListener('mousemove', ev => showTip(`<div class="tt-title">${title}</div>${tipRows(rowsTip)}`, ev.clientX, ev.clientY));
         rect.addEventListener('mouseleave', hideTip);
+      }
+
+      if (play && cells.length) {
+        requestAnimationFrame(() => {
+          cells.forEach(c => {
+            const delay = c.col * 14;
+            c.node.style.transition = `opacity 260ms ease-out ${delay}ms, transform 340ms cubic-bezier(.16,1,.3,1) ${delay}ms`;
+            c.node.style.opacity = String(c.op);
+            c.node.style.transform = 'scale(1)';
+          });
+        });
       }
 
       // 星期标签（一、三、五）

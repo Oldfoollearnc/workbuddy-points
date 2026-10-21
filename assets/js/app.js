@@ -169,7 +169,12 @@
     if (!bridge.has()) return false;
     try {
       const a = await bridge.call('get_account');
-      if (a) { ACCOUNT = a; return true; }
+      if (a) {
+        ACCOUNT = a;
+        renderAvatar();        // 头像/昵称随账号一起更新，避免顶栏一直停在 "WB"
+        renderAccountCard();   // 悬浮栏内容也同步刷新（隐藏时也写，展开即最新）
+        return true;
+      }
     } catch (e) { /* ignore */ }
     return false;
   }
@@ -383,7 +388,7 @@
           + `今日消耗 / 模型 / 项目取<b>本机记录</b>，实时。`;
     } else {
       txt = `当前只有<b>本机记录</b>：消耗与 Token 实时，但<b>不含账号余额</b>；`
-          + `到「设置 → 账号与云端」扫码后可显示可用积分与周期。`;
+          + `点右上角头像 → 连接账号（扫码一次），之后自动显示可用积分与周期。`;
     }
     if (D.meta && D.meta.sourceKind === 'db') {
       txt += ' 未找到会话明细，已按 <b>workbuddy.db</b> 估算。';
@@ -524,9 +529,8 @@
       ? `剩 ${al.leftWorkdays} 个工作日 · 每日约 ${F.credit(al.perDay)}`
       : '连接账号后自动计算');
 
-    setText('#popTotal', `共 ${F.credit(today.consumed)} 分`);
+    setText('#popTotal', `${(D.models || []).filter(m => m.points > 0).length || 0} 个模型`);
     setText('#popUpdated', `${source === 'real' ? '本机' : '演示'} ${D.meta.updated || '—'}`);
-    setText('#popRecentCount', `${Math.min(4, (D.ledger || []).length)} 条`);
     const popCloud = $('#popCloud');
     if (popCloud) {
       const st = (ACCOUNT && ACCOUNT.lastSync) ? String(ACCOUNT.lastSync).slice(11, 16) : '';
@@ -543,29 +547,24 @@
     const prog = $('#popProgress');
     if (prog) requestAnimationFrame(() => { prog.style.width = ((configured ? acc.usedPct : 0) * 100).toFixed(2) + '%'; });
 
-    const bar = $('#popCompBar'), list = $('#popCompList'), donut = $('#popDonut');
+    /* 今日消耗构成：只保留一种可视化（环形图），不再叠加横条与文字列表 */
+    const donut = $('#popDonut');
     const compRows = (D.models || []).filter(m => m.points > 0);
-    const compSum = compRows.reduce((a, b) => a + b.points, 0) || today.consumed || 1;
     if (donut) {
       if (compRows.length) {
         C.donut(donut, {
           items: compRows.map(m => ({ name: m.name, value: m.points, tone: m.tone })),
           legend: false,
-          size: 84,
-          hRatio: 0.80,
-          valueOutside: true,
-          centerLabel: '今日',
+          size: 190,
+          hRatio: 0.72,
+          valueOutside: true,               // 数字放环下方，绝不与圆环重叠
+          centerLabel: compRows.length > 1 ? '模型' : '单一',
           centerUnit: '分',
-          // 四位数以上不再带小数，避免环内文字溢出压到圆环
           centerFormat: v => (v >= 1000 ? F.fmt(Math.round(v)) : F.credit(v))
         });
       } else {
         donut.innerHTML = '<div class="comp-empty" style="font-size:10px;text-align:center">今日暂无消耗</div>';
       }
-    }
-    if (bar) {
-      bar.innerHTML = compRows.map(m =>
-        `<i style="width:${((m.points / compSum) * 100).toFixed(2)}%;background:${C.toneColor(m.tone)}"></i>`).join('');
     }
 
     // 今日时段（小窗内保持一份极简柱图，填满垂直空间）
@@ -578,37 +577,9 @@
       });
     }
     setText('#popPeak', D.peakPoints ? `峰值 ${F.pad(D.peakHour)}:00 · ${F.credit(D.peakPoints)} 分` : '—');
-    if (list) {
-      list.innerHTML = compRows.slice(0, 3).map(m => `
-        <div class="comp-row comp-row--sm">
-          <i class="dot" style="background:${C.toneColor(m.tone)}"></i>
-          <span class="nm" title="${m.name}">${m.name}</span>
-          <span class="val">${F.credit(m.points)}</span>
-          <span class="pct">${((m.points / compSum) * 100).toFixed(0)}%</span>
-        </div>`).join('') || '<div class="comp-empty">今日暂无消耗</div>';
-    }
 
-    renderPopupList();
   }
 
-  function renderPopupList() {
-    const box = $('#popList');
-    if (!box) return;
-    const q = (state.popQuery || '').trim().toLowerCase();
-    const rows = (D.ledger || [])
-      .filter(e => !q || [e.model, e.project, e.task].join(' ').toLowerCase().includes(q))
-      .slice(0, 4);
-    box.innerHTML = rows.map(e => {
-      const t = e.time instanceof Date ? e.time : new Date(e.time);
-      return `<div class="pop-row">
-        <i class="swatch" style="background:${C.toneColor(e.tone)}"></i>
-        <span class="nm"><b>${e.model}</b><span class="tm">${F.clock(t)}</span></span>
-        <span class="pt">-${F.credit(e.points)}</span>
-      </div>`;
-    }).join('') || '<div class="pop-empty">暂无记录</div>';
-  }
-
-  /** 消耗构成：环形图 + 横向堆叠条 + 明细列表（三者同一数据源，合计可对） */
   function renderComposition(items, totalAll) {
     const bar = $('#compBar'), list = $('#compList'), donutBox = $('#compDonut');
     const rows = (items || []).filter(m => m.points > 0);
@@ -679,13 +650,14 @@
 
     countUp($('[data-count="todayReq"]'), today.requests);
     setText('#kpiNet', (today.avgPerRequest || 0).toFixed(2));
+    setText('#kpiEarnedSub', '均价');
 
     const tk = today.tokens || 0;
     const useYi = tk >= 1e8;
     const tkNode = $('[data-count="todayToken"]');
     countUp(tkNode, useYi ? tk / 1e8 : tk / 1e4, useYi ? { decimals: 2 } : {});
     if (tkNode && tkNode.nextElementSibling) tkNode.nextElementSibling.textContent = useYi ? '亿' : '万';
-    setText('#kpiAvg', `${F.fmtWan(tk)} Token`);
+    setText('#kpiAvg', `${F.fmtWan(tk / Math.max(1, today.requests))} / 次`);
 
     const sparks = {
       available: D.daily.slice(-14).map(d => d.balance),
@@ -729,17 +701,19 @@
     // 单一模型时补一行真实统计，避免 100% 环图信息量过低
     const note = $('#compNote');
     if (note) {
+      const common = `<span>平均 <b>${(today.avgPerRequest || 0).toFixed(2)}</b> 分/次</span>`
+        + `<span title="每次调用的 totalTokens 含整段上下文，逐次相加会重复计入">上下文累计 <b>${F.fmtWan(today.tokens || 0)}</b>（按次）</span>`;
       note.innerHTML = D.models.length <= 1
-        ? `<span><b>${F.fmt(today.requests)}</b> 次调用</span><span>平均 <b>${(today.avgPerRequest || 0).toFixed(2)}</b> 分/次</span><span>累计上下文 <b>${F.fmtWan(today.tokens || 0)}</b> Token</span>`
-        : `<span>共 <b>${D.models.length}</b> 个模型</span><span>平均 <b>${(today.avgPerRequest || 0).toFixed(2)}</b> 分/次</span><span>累计上下文 <b>${F.fmtWan(today.tokens || 0)}</b> Token</span>`;
+        ? `<span><b>${F.fmt(today.requests)}</b> 次调用</span>${common}`
+        : `<span>共 <b>${D.models.length}</b> 个模型</span>${common}`;
     }
 
     renderTrend();
 
     C.gauge($('[data-chart="gauge"]'), {
       value: configured ? acc.usedPct : 0,
-      label: configured ? '本周期已用' : '未设置额度',
-      sub: configured ? `周期剩余 ${cycleDaysLeft()} 天` : '在设置中填写额度'
+      label: configured ? '本周期已用' : '未连接云端',
+      sub: configured ? `周期剩余 ${cycleDaysLeft()} 天` : '点头像连接账号'
     });
     const al = allowance(acc);
     setText('#quotaWeek', configured ? F.credit(al.perWeek) : '—');
@@ -939,7 +913,18 @@
 
     const list = $('#insightList');
     if (list) {
-      list.innerHTML = D.insights.map((it, i) => `
+      const connected = !!(ACCOUNT && ACCOUNT.status === 'connected');
+      const items = (D.insights || []).filter(it => !(connected && /额度/.test(it.title || '')));
+      if (connected) {
+        const al = allowance(effAccount());
+        items.push({
+          icon: 'i-clock',
+          title: '额度可用性',
+          text: `本周期剩余 <b>${F.credit(al.available)}</b> 分，按剩余 <b>${al.leftWorkdays}</b> 个工作日折算，`
+              + `每日约 <b>${F.credit(al.perDay)}</b> 分；有效期至 <b>${(ACCOUNT.cloud && ACCOUNT.cloud.expireAtText) || '—'}</b>。`
+        });
+      }
+      list.innerHTML = items.map((it, i) => `
         <div class="insight-item" style="animation-delay:${i * 60}ms">
           <span class="badge"><svg class="i"><use href="#${it.icon || 'i-info'}"/></svg></span>
           <div><h4>${it.title}</h4><p>${it.text}</p></div>
@@ -951,11 +936,49 @@
      流水
      ========================================================= */
 
+  /* 动作口径：云端只给 agentPurpose，这里翻译成中文；未知就原样展示 */
+  const PURPOSE_TEXT = {
+    conversation: '对话生成', conversation_topic: '会话命名', 'enhance-prompt': '提示词优化',
+    agent: 'Agent 任务', 'code-completion': '代码补全', 'inline-completion': '行内补全',
+    edit: '编辑', 'apply-patch': '应用补丁', review: '代码评审', summarize: '总结',
+    'image-generation': '图像生成', 'video-generation': '视频生成'
+  };
+
+  /**
+   * 流水数据源：登录云端的账号优先用「云端逐笔」。
+   * 原因：云端逐笔是账号级的，换一台电脑登录同一账号看到的是同一份；
+   * 本机 JSONL 只覆盖"这台机器"，换机后昨天的明细就断了。
+   * 代价：云端不返回项目（cwd）与 Token，这两列在云端行里显示 "—"。
+   */
+  function cloudLedgerRows() {
+    const rows = (ACCOUNT && ACCOUNT.status === 'connected' && Array.isArray(ACCOUNT.usageRows))
+      ? ACCOUNT.usageRows : null;
+    if (!rows || !rows.length) return null;
+    return rows.map((r, i) => ({
+      id: 'c' + i,
+      time: String(r.t || '').replace(' ', 'T'),
+      type: 'consume',
+      points: Number(r.credit) || 0,
+      model: r.model || '未知模型',
+      task: PURPOSE_TEXT[r.purpose] || r.purpose || '—',
+      project: '—',
+      tokens: null,
+      requests: 1,
+      tone: 'c1',
+      src: 'cloud'
+    }));
+  }
+
+  let ledgerSource = 'local';
+
   function ledgerRows() {
     const q = state.ledgerQuery.trim().toLowerCase();
     const now = new Date();
     const todayKey = `${now.getFullYear()}-${F.pad(now.getMonth() + 1)}-${F.pad(now.getDate())}`;
-    return D.ledger.filter(e => {
+    const cloud = cloudLedgerRows();
+    const src = cloud || D.ledger;
+    ledgerSource = cloud ? 'cloud' : 'local';
+    return src.filter(e => {
       const t = e.time instanceof Date ? e.time : new Date(e.time);
       const key = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())}`;
       if (state.ledgerType === 'today' && key !== todayKey) return false;
@@ -975,13 +998,30 @@
     const today = D.today;
     const maxPts = Math.max(...all.map(e => e.points), 0.01);
 
-    setHTML('#ledgerSub', `本机记录 · 共 ${F.fmt(D.meta.records || 0)} 次调用，覆盖 ${D.meta.days || 0} 天`);
+    // 云端流水：今日合计取自云端行本身，保证"行加起来 = 顶上的数"
+    let cloudToday = null;
+    if (ledgerSource === 'cloud') {
+      const now = new Date();
+      const key = `${now.getFullYear()}-${F.pad(now.getMonth() + 1)}-${F.pad(now.getDate())}`;
+      cloudToday = all.reduce((a, e) => {
+        const t = e.time instanceof Date ? e.time : new Date(e.time);
+        const k = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())}`;
+        if (k === key) { a.sum += e.points; a.calls += 1; }
+        return a;
+      }, { sum: 0, calls: 0 });
+    }
+    const dayTotal = ledgerSource === 'cloud' ? (cloudToday.sum || 1) : (today.consumed || 1);
+
+    setHTML('#ledgerSub', ledgerSource === 'cloud'
+      ? `云端逐笔 · ${F.fmt(all.length)} 条（账号级，换电脑登录同一账号看到的是同一份；项目与 Token 云端不返回）`
+      : `本机记录 · 共 ${F.fmt(D.meta.records || 0)} 次调用，覆盖 ${D.meta.days || 0} 天`);
     const sum = $('#ledgerSummary');
     if (sum) {
+      const cloudSrc = ledgerSource === 'cloud';
       sum.innerHTML = `
-        <div><span>今日消耗</span><b>${F.credit(today.consumed)} <small style="font-size:10px;color:var(--text-3)">分</small></b></div>
-        <div><span>今日调用</span><b>${F.fmt(today.requests)} <small style="font-size:10px;color:var(--text-3)">次</small></b></div>
-        <div><span>今日 Token</span><b>${F.fmtWan(today.tokens || 0)}</b></div>
+        <div><span>今日消耗${cloudSrc ? '（云端）' : ''}</span><b>${F.credit(cloudSrc ? cloudToday.sum : today.consumed)} <small style="font-size:10px;color:var(--text-3)">分</small></b></div>
+        <div><span>今日调用${cloudSrc ? '（云端）' : ''}</span><b>${F.fmt(cloudSrc ? cloudToday.calls : today.requests)} <small style="font-size:10px;color:var(--text-3)">次</small></b></div>
+        <div><span>今日 Token</span><b>${cloudSrc ? '—' : F.fmtWan(today.tokens || 0)}</b></div>
         <div><span>筛选结果</span><b>${all.length} <small style="font-size:10px;color:var(--text-3)">条</small></b></div>`;
     }
 
@@ -1001,27 +1041,30 @@
       body.innerHTML = rows.map((e, i) => {
         const t = e.time instanceof Date ? e.time : new Date(e.time);
         const wd = '日一二三四五六'[t.getDay()];
-        const share = e.points / (today.consumed || 1);
         const key = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())} ${F.clock(t)}`;
         const group = groups[key] || { list: [], sum: 0 };
         const isFirst = !seen[key];
         seen[key] = true;
         const grouped = group.list.length > 1;
+        // 首行展示的是该分钟合计，占比必须用合计算，否则会出现"-0.52 / 0.54%"这种对不上的组合
+        const shownPts = (isFirst && grouped) ? group.sum : e.points;
+        const share = shownPts / dayTotal;
         const timeCell = isFirst
           ? `<span class="t">${F.dateKey(t)} ${F.clock(t)}${grouped ? `<i class="minute-badge">×${group.list.length}</i>` : ''}<small>周${wd}</small></span>`
           : `<span class="t t--cont"><i class="rail"></i></span>`;
         // 同一分钟的积分合计放到「积分」列；时间徽标只留 ×N
+        const fmtPt = v => (v > 0 ? '-' + F.credit(v) : '0');
         const ptCell = (isFirst && grouped)
-          ? `<span class="pt pt-group">-${F.credit(group.sum)}<small>×${group.list.length} 合计</small></span>`
-          : `<span class="pt${isFirst ? '' : ' is-sub'}">-${F.credit(e.points)}</span>`;
+          ? `<span class="pt pt-group">${fmtPt(group.sum)}<small>×${group.list.length} 合计</small></span>`
+          : `<span class="pt${isFirst ? '' : ' is-sub'}">${fmtPt(e.points)}</span>`;
         return `<div class="table-row${isFirst ? '' : ' is-cont'}" style="animation-delay:${Math.min(i, 12) * 18}ms">
           ${timeCell}
           <span><i class="badge-type badge-consume">消耗</i></span>
-          <span class="nm"><i class="legend-dot" style="display:inline-block;vertical-align:middle;margin-right:5px;background:${C.toneColor(e.tone)}"></i>${e.model}<small>${F.fmtWan(e.tokens || 0)} Token</small></span>
+          <span class="nm"><i class="legend-dot" style="display:inline-block;vertical-align:middle;margin-right:5px;background:${C.toneColor(e.tone)}"></i>${e.model}${e.tokens == null ? '' : `<small>${F.fmtWan(e.tokens)} Token</small>`}</span>
           <span class="dim">${e.task}</span>
           <span class="dim">${e.project}</span>
           ${ptCell}
-          <span class="share-cell"><i class="share-bar"><i style="width:${Math.max(4, (e.points / maxPts) * 100).toFixed(1)}%"></i></i><span>${(share * 100) < 1 ? (share * 100).toFixed(2) : (share * 100).toFixed(1)}%</span></span>
+          <span class="share-cell"><i class="share-bar"><i style="width:${Math.max(4, (shownPts / maxPts) * 100).toFixed(1)}%"></i></i><span>${(share * 100) < 1 ? (share * 100).toFixed(2) : (share * 100).toFixed(1)}%</span></span>
         </div>`;
       }).join('');
     }
@@ -1094,7 +1137,9 @@
     setText('#cloudAvail', credit(c.available));
     setText('#cloudUsed', credit(c.used));
     const plan = u.plan || '';
-    setText('#cloudCycle', c.cycleStartText ? `${c.cycleStartText} 起${plan ? ' · ' + plan : ''}` : (plan || '—'));
+    setText('#cloudCycle', c.cycleStartText ? `${String(c.cycleStartText).slice(5)} 起` : (plan || '—'));
+    const cycEl = $('#cloudCycle');
+    if (cycEl) cycEl.title = c.cycleStartText ? `${c.cycleStartText} 起${plan ? ' · ' + plan : ''}` : (plan || '');
     setText('#cloudExpire', c.expireAtText || '—');
 
     // 账号身份
@@ -1133,7 +1178,7 @@
     if (sel && document.activeElement !== sel) sel.value = String(ACCOUNT.interval == null ? 60 : ACCOUNT.interval);
     setText('#cloudHint', ACCOUNT.lastError
       ? `最近一次同步失败：${ACCOUNT.lastError}（登录态可能已过期，点「连接账号」重新扫码）`
-      : '登录态经 DPAPI 加密保存在本机，不上传；「刷新」只读本机记录，云端按上方间隔同步');
+      : '登录态经 DPAPI 加密保存在本机，不上传；「刷新」只读本机记录，云端按设置里的间隔同步');
   }
 
   function renderSettings() {
@@ -1201,6 +1246,11 @@
     setText('#pageSub', s);
     $$('.view').forEach(v => v.classList.toggle('is-active', v.dataset.view === view));
     $('#views').scrollTop = 0;
+    // 每次进入用量分析重新播放一次日历「一列推一列」的入场动效
+    if (view === 'analytics') {
+      const cal = $('[data-chart="calendar"]');
+      if (cal) delete cal.dataset.played;
+    }
     const dr = $('.stack-legend');
     if (dr && view !== 'analytics') dr.remove();
     renderActive(true);
