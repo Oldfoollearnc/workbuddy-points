@@ -14,6 +14,13 @@
   const HASH_MODE = HASH.find(x => x === 'popup' || x === 'main') || null;
   const HASH_VIEW = HASH.find(x => ['overview', 'analytics', 'ledger', 'settings'].includes(x)) || null;
 
+  // #tooltip 在标记里被包进了 .app-shell，而小窗模式下 .app-shell 是 display:none，
+  // 结果小窗里所有图表都没有悬浮提示。统一把它挂到 body 上，两个窗口共用。
+  (function reparentTip() {
+    const tip = document.getElementById('tooltip');
+    if (tip && tip.parentElement !== document.body) document.body.appendChild(tip);
+  })();
+
   const TITLES = {
     overview: ['总览', 'WorkBuddy 账号的积分余额与今日使用情况'],
     analytics: ['用量分析', '消耗日历、模型用量与项目排行的真实拆解'],
@@ -25,6 +32,7 @@
     mode: HASH_MODE || (qs.get('mode') === 'popup' ? 'popup' : 'main'),
     view: HASH_VIEW || 'overview',
     range: 7,
+    quotaRange: 'week',
     ledgerType: 'all',
     ledgerQuery: '',
     ledgerLimit: 24,
@@ -67,7 +75,8 @@
   const PREF_KEY = 'pi.prefs.v1';
   const prefs = Object.assign(
     { theme: 'light', motion: 'full', countUp: true, labels: true, tray: true,
-      holiday: true, signin: true, localRefresh: 60 },
+      holiday: true, signin: true, localRefresh: 60,
+      calGlow: true, calIntro: true, groupMinute: true, notice: true },
     readPrefs()
   );
 
@@ -359,6 +368,7 @@
   }
 
   let lastRender = -1e9;
+  let lastCalSig = '';
   function renderActive(force) {
     const now = performance.now();
     if (!force && now - lastRender < 250) return;
@@ -378,6 +388,8 @@
   function renderNotice() {
     const el = $('#noticeText');
     if (!el) return;
+    const box = $('#dataNotice');
+    if (box) box.hidden = prefs.notice === false;   // 设置里可关掉，把首屏留给数字
     const connected = ACCOUNT && ACCOUNT.status === 'connected';
     const sync = ACCOUNT && ACCOUNT.lastSync ? String(ACCOUNT.lastSync).slice(5, 16) : '';
     const iv = ACCOUNT && ACCOUNT.interval;
@@ -509,70 +521,33 @@
     }, sec * 1000);
   }
 
-  /* ---------------- 小窗：消耗构成（排行条） ---------------- */
+  /* ---------------- 小窗：今日消耗时段分布（复刻总览那张柱状图） ---------------- */
 
-  /** 小窗空间小，用"排行条"代替饼图：一行一个模型，条长即占比，右侧给积分与百分比。 */
-  function renderPopModels() {
-    const box = $('#popModels');
-    if (!box) return;
-    const rows = (D.models || []).filter(m => m.points > 0).sort((a, b) => b.points - a.points);
-    const sum = rows.reduce((a, b) => a + b.points, 0) || 1;
-    if (!rows.length) {
-      box.innerHTML = '<div class="comp-empty">今日暂无消耗</div>';
-      return;
-    }
-    const top = rows.slice(0, 3);
-    const rest = rows.slice(3);
-    const restPts = rest.reduce((a, b) => a + b.points, 0);
-    const row = (dot, name, pts, pct, cls) => `
-      <div class="pm-row ${cls || ''}">
-        <i class="pm-dot" style="background:${dot}"></i>
-        <span class="pm-name" title="${name}">${name}</span>
-        <span class="pm-bar"><i style="width:${Math.max(2.5, pct).toFixed(1)}%;background:${dot}"></i></span>
-        <b class="pm-val">${F.credit(pts)}</b>
-        <span class="pm-pct">${pct < 10 ? pct.toFixed(1) : pct.toFixed(0)}%</span>
-      </div>`;
-    box.innerHTML = top.map(m => row(C.toneColor(m.tone), m.name, m.points, (m.points / sum) * 100)).join('')
-      + (rest.length ? row('var(--text-3)', `其他 ${rest.length} 个`, restPts, (restPts / sum) * 100, 'pm-row--rest') : '');
-  }
-
-  /* ---------------- 小窗：今日时段（与主页不同的抬升动画） ---------------- */
-
-  /** 24 根柱：底部坐标 + 悬浮高亮与气泡 + 逐根"抬升"（主页是描线式生长，这里用弹性缩放区分）。 */
+  /** 与总览「今日消耗时段分布」同一套 C.bar 组件、同一份数据，只是刻度与柱宽按小窗收窄。 */
   function renderPopHours() {
-    const box = $('#popHours');
+    const today = D.today;
+    setText('#popPeak', D.peakPoints ? `峰值 ${F.pad(D.peakHour)}:00 · ${F.credit(D.peakPoints)} 分` : '今日暂无消耗');
+    setHTML('#popFootReq', F.fmt(today.requests));
+    setHTML('#popFootAvg', (today.avgPerRequest || 0).toFixed(2));
+    setHTML('#popFootToken', F.fmtWan(today.tokens || 0));
+    const box = $('[data-chart="popHourly"]');
     if (!box) return;
-    const rows = D.hourly || [];
-    const max = Math.max(...rows.map(r => r.points), 0.01);
-    const total = rows.reduce((a, b) => a + b.points, 0) || 1;
-    const nowHour = (D.meta && D.meta.nowHour != null) ? D.meta.nowHour : new Date().getHours();
-    // 三条参考线（0 / 中值 / 满量程）：数据稀疏时也能看出量级，不像"凭空一根柱子"
-    const g1 = max * 0.39, g2 = max * 0.78;
-    const lines = `
-      <div class="ph-lines">
-        <span style="bottom:39%"><em>${F.credit(g1)}</em></span>
-        <span style="bottom:78%"><em>${F.credit(g2)}</em></span>
-      </div>`;
-    box.innerHTML = `
-      <div class="ph-plot">
-        ${lines}
-        <div class="ph-grid">
-        ${rows.map((r, i) => {
-          // 最高柱只占 72%，留出顶部余量：柱体不会顶到标题，视觉上更像图表
-          const h = Math.max(1.5, (r.points / max) * 78);
-          const cls = ['ph-col'];
-          if (!r.points) cls.push('is-none');
-          if (r.hour === nowHour) cls.push('is-now');
-          const tip = `${F.pad(r.hour)}:00 · ${F.credit(r.points)} 分 · ${((r.points / total) * 100).toFixed(0)}%`;
-          // --h 放在列上：柱高与气泡位置都用它（气泡是列的兄弟节点，读不到柱上的变量）
-          return `<div class="${cls.join(' ')}" data-i="${i}" style="--h:${h.toFixed(1)}%">
-            <i class="ph-bar" style="animation-delay:${i * 9}ms"></i>
-            <span class="ph-tip">${tip}</span>
-          </div>`;
-        }).join('')}
-        </div>
-      </div>
-      <div class="ph-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>`;
+    const paint = () => C.bar(box, {
+      data: (D.hourly || []).map(hr => ({
+        label: hr.label, short: F.pad(hr.hour), value: hr.points, isNow: hr.isNow,
+        tipTitle: `${F.pad(hr.hour)}:00–${F.pad((hr.hour + 1) % 24)}:00`
+      })),
+      tone: 'c1', valueName: '消耗', sum: today.consumed,
+      nowIndex: D.meta.nowHour, xEvery: 6, showValues: false, maxBarW: 16
+    });
+    // 小窗首帧容器可能还是 0 高（boot 遮罩 / 布局未定型），量到尺寸再画，最多等 3 秒
+    let n = 0;
+    const wait = () => {
+      if (box.clientWidth && box.clientHeight) { paint(); return; }
+      if (n++ > 30) return;
+      setTimeout(wait, 100);
+    };
+    wait();
   }
 
   function renderPopup() {
@@ -595,7 +570,6 @@
       ? `剩 ${al.leftWorkdays} 个工作日 · 每日约 ${F.credit(al.perDay)}`
       : '连接账号后自动计算');
 
-    setText('#popTotal', `${(D.models || []).filter(m => m.points > 0).length || 0} 个模型`);
     setText('#popUpdated', `${source === 'real' ? '本机' : '演示'} ${D.meta.updated || '—'}`);
     const popCloud = $('#popCloud');
     if (popCloud) {
@@ -613,11 +587,7 @@
     const prog = $('#popProgress');
     if (prog) requestAnimationFrame(() => { prog.style.width = ((configured ? acc.usedPct : 0) * 100).toFixed(2) + '%'; });
 
-    renderPopModels();
-
     renderPopHours();
-    setText('#popPeak', D.peakPoints ? `峰值 ${F.pad(D.peakHour)}:00 · ${F.credit(D.peakPoints)} 分` : '—');
-
   }
 
   function renderComposition(items, totalAll) {
@@ -735,30 +705,99 @@
       nowIndex: D.meta.nowHour, xEvery: 3, showValues: prefs.labels, maxBarW: 22
     });
 
-    renderComposition(D.models, today.consumed);
-    setText('#compCount', D.models.length ? `${D.models.length} 个模型` : '—');
+    // 构成图只统计"真的花了分"的模型：D.models 里可能包含被调用但 0 分的模型，
+    // 之前用 D.models.length 当标题会出现"写着 4 个模型、环图却只有一段"的割裂感。
+    const compRows = (D.models || []).filter(m => m.points > 0);
+    renderComposition(compRows, today.consumed);
+    setText('#compCount', compRows.length ? `${compRows.length} 个模型` : '—');
 
     // 单一模型时补一行真实统计，避免 100% 环图信息量过低
     const note = $('#compNote');
     if (note) {
       const common = `<span>平均 <b>${(today.avgPerRequest || 0).toFixed(2)}</b> 分/次</span>`
         + `<span title="每次调用的 totalTokens 含整段上下文，逐次相加会重复计入">上下文累计 <b>${F.fmtWan(today.tokens || 0)}</b>（按次）</span>`;
-      note.innerHTML = D.models.length <= 1
-        ? `<span><b>${F.fmt(today.requests)}</b> 次调用</span>${common}`
-        : `<span>共 <b>${D.models.length}</b> 个模型</span>${common}`;
+      const idle = (D.models || []).filter(m => !(m.points > 0));
+      const idleTip = idle.length ? `未计费（消耗 0 分）：${idle.map(m => m.name).join('、')}` : '';
+      const idleTag = idle.length
+        ? `<span title="${idleTip}">另 <b>${idle.length}</b> 个未计费</span>`
+        : '';
+      note.innerHTML = compRows.length <= 1
+        ? `<span><b>${F.fmt(today.requests)}</b> 次调用</span>${idleTag}${common}`
+        : `<span>共 <b>${compRows.length}</b> 个模型</span>${idleTag}${common}`;
     }
 
     renderTrend();
 
-    C.gauge($('[data-chart="gauge"]'), {
-      value: configured ? acc.usedPct : 0,
-      label: configured ? '本周期已用' : '未连接云端',
-      sub: configured ? `周期剩余 ${cycleDaysLeft()} 天` : '点头像连接账号'
+    renderQuotaCard(acc, configured);
+  }
+
+  /* ---------------- 额度与消耗：今日 / 本周 / 本月 三个口径 ---------------- */
+
+  const QUOTA_LABEL = { day: '今日', week: '本周', month: '本月' };
+
+  /** 区间内已消耗多少分：D.daily 只带 MM-DD，按当年补齐成日期再比较 */
+  function quotaWindow(kind) {
+    const now = new Date();
+    const mk = s => {
+      const m = /^(\d{1,2})-(\d{1,2})$/.exec(String(s || ''));
+      return m ? new Date(now.getFullYear(), +m[1] - 1, +m[2]) : null;
+    };
+    let from, count;
+    if (kind === 'day') {
+      from = startOfDay(now); count = 1;
+    } else if (kind === 'month') {
+      from = new Date(now.getFullYear(), now.getMonth(), 1); count = now.getDate();
+    } else {
+      const wd = (now.getDay() + 6) % 7;          // 周一为 0
+      from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - wd);
+      count = wd + 1;
+    }
+    let sum = 0;
+    (D.daily || []).forEach(d => {
+      const t = mk(d.date);
+      if (t && t >= from && t <= now) sum += d.consumed;
     });
+    if (kind === 'day' && !sum) sum = (D.today && D.today.consumed) || 0;
+    return { sum, count, from };
+  }
+
+  /** 环图的"额度"跟着区间走：今日=每日可用，本周=本周可用，本月=每日可用×当月天数
+   *  底部三项统计保持固定口径（本周可用 / 周期剩余 / 每日可用），不随切换变化。 */
+  function renderQuotaCard(acc, configured) {
+    const kind = state.quotaRange || 'week';
+    const lb = QUOTA_LABEL[kind] || '本周';
+    const win = quotaWindow(kind);
     const al = allowance(acc);
+    const now = new Date();
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const budget = !configured ? 0
+      : kind === 'day' ? al.perDay
+      : kind === 'week' ? al.perWeek
+      : al.perDay * daysInMonth;
+    const used = win.sum;
+    const pct = budget > 0 ? Math.min(1, used / budget) : 0;
+    const over = Math.max(0, used - budget);
+
+    C.gauge($('[data-chart="gauge"]'), {
+      value: configured ? pct : 0,
+      label: configured ? `${lb}已用` : '未连接云端',
+      sub: configured
+        ? (budget > 0
+          ? `额度 ${F.credit(budget)} · ${over > 0 ? '超 ' + F.credit(over) : '剩 ' + F.credit(budget - used)}`
+          : '额度为 0')
+        : '点头像连接账号'
+    });
+
+    // 三项统计固定不变，只有环图随区间切换
+    setText('#quotaK1', '本周可用');
+    setText('#quotaK2', '周期剩余');
+    setText('#quotaK3', '每日可用');
     setText('#quotaWeek', configured ? F.credit(al.perWeek) : '—');
     setText('#quotaLeft', configured ? F.credit(al.available) : '—');
     setText('#quotaDay', configured ? F.credit(al.perDay) : '—');
+    const k3 = $('#quotaDay');
+    if (k3) k3.classList.toggle('warn', configured && pct > .9);
+
     const qh = $('#quotaHint');
     if (qh) {
       qh.textContent = configured
@@ -890,9 +929,26 @@
         : '云端未连接：按本机会话记录统计，可能不完整';
       srcChip.dataset.state = useCloud ? 'cloud' : 'local';
     }
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      C.calendar($('[data-chart="calendar"]'), { days: calDays, tone: 'c1' });
-    }));
+    const calBox = $('[data-chart="calendar"]');
+    // 日历重绘很贵（210+ 个格子），而本地刷新每 30 秒就会走一次 renderActive。
+    // 这里用「主题 + 宽度 + 偏好 + 数据」做签名：没变就不重绘，悬停光圈也不会被定时刷新打断。
+    const calSig = [
+      document.documentElement.getAttribute('data-theme'),
+      calBox ? calBox.clientWidth : 0,
+      prefs.calGlow !== false ? 1 : 0,
+      prefs.calIntro !== false ? 1 : 0,
+      calDays.map(d => `${d.date}:${d.points}:${d.calls}:${d.tokens}`).join(',')
+    ].join('|');
+    if (calBox && calSig !== lastCalSig) {
+      lastCalSig = calSig;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        C.calendar(calBox, {
+          days: calDays, tone: 'c1',
+          glow: prefs.calGlow !== false,        // 悬停光圈 + 邻格联动
+          animate: prefs.calIntro !== false     // 入场对角波
+        });
+      }));
+    }
 
     /* ---------- 模型使用量：云端 30 天逐笔优先 ---------- */
     const connected = !!(ACCOUNT && ACCOUNT.status === 'connected');
@@ -1036,7 +1092,8 @@
     if (!body) return;
 
     const today = D.today;
-    const maxPts = Math.max(...all.map(e => e.points), 0.01);
+    // 占比与条形只按「消耗」行归一：赠送/退回不参与，否则会出现百分比超过 100%
+    const maxPts = Math.max(...all.filter(e => e.type !== 'earn').map(e => e.points), 0.01);
 
     // 云端流水：今日合计取自云端行本身，保证"行加起来 = 顶上的数"
     let cloudToday = null;
@@ -1058,10 +1115,15 @@
     const sum = $('#ledgerSummary');
     if (sum) {
       const cloudSrc = ledgerSource === 'cloud';
+      // 今日 Token 只可能来自本机：云端 billing 逐笔不返回 token。
+      // 之前云端模式下这里直接显示 "—"，与总览的今日 Token 对不上，现统一取本机同日累计并标注来源。
+      const tk = today.tokens || 0;
+      const tkText = tk > 0 ? F.fmtWan(tk) : '—';
+      const tkTip = '本机会话累计：每次调用的 totalTokens 含整段上下文，逐次相加会重复计入；云端逐笔不返回 Token，所以这一列固定取本机记录';
       sum.innerHTML = `
         <div><span>今日消耗${cloudSrc ? '（云端）' : ''}</span><b>${F.credit(cloudSrc ? cloudToday.sum : today.consumed)} <small style="font-size:10px;color:var(--text-3)">分</small></b></div>
         <div><span>今日调用${cloudSrc ? '（云端）' : ''}</span><b>${F.fmt(cloudSrc ? cloudToday.calls : today.requests)} <small style="font-size:10px;color:var(--text-3)">次</small></b></div>
-        <div><span>今日 Token</span><b>${cloudSrc ? '—' : F.fmtWan(today.tokens || 0)}</b></div>
+        <div title="${tkTip}"><span>今日 Token${cloudSrc && tk > 0 ? '<i class="src-tag">本机</i>' : ''}</span><b>${tkText}</b></div>
         <div><span>筛选结果</span><b>${all.length} <small style="font-size:10px;color:var(--text-3)">条</small></b></div>`;
     }
 
@@ -1069,10 +1131,16 @@
       body.innerHTML = '<div class="pop-empty" style="padding:26px 0">当前筛选条件下没有记录</div>';
     } else {
       // 同一分钟的记录合并展示：首条显示时间与条数，其余用左侧导轨承接
+      // 设置里可关掉「同分钟合并」，关掉后逐条独立显示
+      const merge = prefs.groupMinute !== false;
+      const gkeyOf = (t, i) => {
+        const k = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())} ${F.clock(t)}`;
+        return merge ? k : k + '#' + i;
+      };
       const groups = {};
-      rows.forEach(e => {
+      rows.forEach((e, i) => {
         const t = e.time instanceof Date ? e.time : new Date(e.time);
-        const key = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())} ${F.clock(t)}`;
+        const key = gkeyOf(t, i);
         const g = (groups[key] = groups[key] || { list: [], sum: 0 });
         g.list.push(e);
         g.sum += e.points;
@@ -1081,7 +1149,7 @@
       body.innerHTML = rows.map((e, i) => {
         const t = e.time instanceof Date ? e.time : new Date(e.time);
         const wd = '日一二三四五六'[t.getDay()];
-        const key = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())} ${F.clock(t)}`;
+        const key = gkeyOf(t, i);
         const group = groups[key] || { list: [], sum: 0 };
         const isFirst = !seen[key];
         seen[key] = true;
@@ -1093,18 +1161,23 @@
           ? `<span class="t">${F.dateKey(t)} ${F.clock(t)}${grouped ? `<i class="minute-badge">×${group.list.length}</i>` : ''}<small>周${wd}</small></span>`
           : `<span class="t t--cont"><i class="rail"></i></span>`;
         // 同一分钟的积分合计放到「积分」列；时间徽标只留 ×N
-        const fmtPt = v => (v > 0 ? '-' + F.credit(v) : '0');
+        // 赠送 / 退回类记录（type=earn）不参与消耗占比，正号显示，避免出现 "-1,000 / 657%" 这种怪组合
+        const isEarn = e.type === 'earn';
+        const fmtPt = v => (isEarn ? '+' + F.credit(v) : (v > 0 ? '-' + F.credit(v) : '0'));
         const ptCell = (isFirst && grouped)
           ? `<span class="pt pt-group">${fmtPt(group.sum)}<small>×${group.list.length} 合计</small></span>`
           : `<span class="pt${isFirst ? '' : ' is-sub'}">${fmtPt(e.points)}</span>`;
+        const shareCell = isEarn
+          ? '<span class="share-cell"><span style="width:auto">—</span></span>'
+          : `<span class="share-cell"><i class="share-bar"><i style="width:${Math.max(4, (shownPts / maxPts) * 100).toFixed(1)}%"></i></i><span>${(share * 100) < 1 ? (share * 100).toFixed(2) : (share * 100).toFixed(1)}%</span></span>`;
         return `<div class="table-row${isFirst ? '' : ' is-cont'}" style="animation-delay:${Math.min(i, 12) * 18}ms">
           ${timeCell}
-          <span><i class="badge-type badge-consume">消耗</i></span>
+          <span><i class="badge-type ${isEarn ? 'badge-earn' : 'badge-consume'}">${isEarn ? '赠送' : '消耗'}</i></span>
           <span class="nm"><i class="legend-dot" style="display:inline-block;vertical-align:middle;margin-right:5px;background:${C.toneColor(e.tone)}"></i>${e.model}${e.tokens == null ? '' : `<small>${F.fmtWan(e.tokens)} Token</small>`}</span>
           <span class="dim">${e.task}</span>
           <span class="dim col-project">${e.project}</span>
           ${ptCell}
-          <span class="share-cell"><i class="share-bar"><i style="width:${Math.max(4, (shownPts / maxPts) * 100).toFixed(1)}%"></i></i><span>${(share * 100) < 1 ? (share * 100).toFixed(2) : (share * 100).toFixed(1)}%</span></span>
+          ${shareCell}
         </div>`;
       }).join('');
     }
@@ -1230,8 +1303,9 @@
     setText('#srcCloud', ACCOUNT.status === 'connected'
       ? `已连接 · ${(ACCOUNT.user && ACCOUNT.user.plan) || '标准版'}`
       : '未连接');
-    setText('#srcRecords', F.fmt(D.meta.records || 0) + ' 条');
-    setText('#srcDays', `${D.meta.days || 0} 天`);
+    setText('#srcRecords', F.fmt(D.meta.records || 0) + ' 条'
+      + (D.meta.coverDays ? ` / 共 ${F.fmt(D.meta.recordsTotal || 0)}` : ''));
+    setText('#srcDays', `${D.meta.days || 0} 天有消耗`);
     setText('#srcInterval', (+ACCOUNT.interval === 0 ? '仅手动' : (ACCOUNT.interval || 60) + ' 分钟'));
     setText('#aboutVersion', appVersion);
     setText('#appVersion', appVersion);
@@ -1263,10 +1337,20 @@
 
     $('#optLabels').checked = !!prefs.labels;
     $('#optTray').checked = !!prefs.tray;
+    if ($('#optCalGlow')) $('#optCalGlow').checked = prefs.calGlow !== false;
+    if ($('#optCalIntro')) $('#optCalIntro').checked = prefs.calIntro !== false;
+    if ($('#optGroupMinute')) $('#optGroupMinute').checked = prefs.groupMinute !== false;
+    if ($('#optNotice')) $('#optNotice').checked = prefs.notice !== false;
     if ($('#optHoliday')) $('#optHoliday').checked = prefs.holiday !== false;
     if ($('#optSignin')) $('#optSignin').checked = prefs.signin !== false;
     const lrSel = $('#optLocalRefresh');
     if (lrSel && document.activeElement !== lrSel) lrSel.value = String(prefs.localRefresh ?? 60);
+    // 覆盖天数以服务端配置为准（meta 里带回），避免本地偏好与服务端配置打架
+    const cdSel = $('#optCoverDays');
+    if (cdSel && document.activeElement !== cdSel) {
+      const cv = (D.meta && D.meta.coverDays != null) ? D.meta.coverDays : (prefs.coverDays || 0);
+      cdSel.value = String(cv);
+    }
 
     $$('#themeCards .theme-card').forEach(card => {
       card.classList.toggle('is-active', card.dataset.themeChoice === prefs.theme);
@@ -1292,6 +1376,7 @@
     if (view === 'analytics') {
       const cal = $('[data-chart="calendar"]');
       if (cal) delete cal.dataset.played;
+      lastCalSig = '';                       // 强制重绘一次，入场波才会重播
     }
     const dr = $('.stack-legend');
     if (dr && view !== 'analytics') dr.remove();
@@ -1404,6 +1489,10 @@
       });
     };
     bindToggle('#optLabels', 'labels');
+    bindToggle('#optCalGlow', 'calGlow', () => { if (state.view === 'analytics') renderAnalytics(); });
+    bindToggle('#optCalIntro', 'calIntro', () => { if (state.view === 'analytics') renderAnalytics(); });
+    bindToggle('#optGroupMinute', 'groupMinute', () => { if (state.view === 'ledger') renderLedger(true); });
+    bindToggle('#optNotice', 'notice', () => { if (state.view === 'overview') renderOverview(); });
     bindToggle('#optHoliday', 'holiday', () => renderActive(true));
     bindToggle('#optSignin', 'signin', () => renderActive(true));
     bindToggle('#optTray', 'tray', () => bridge.call('set_close_to_tray', prefs.tray));
@@ -1418,11 +1507,44 @@
       toast(v === 0 ? '本地数据改为手动刷新' : `本地记录每 ${v} 秒刷新一次`);
     });
 
+    // 覆盖天数：写进 points_config.json，后端按窗口重新聚合（额度周期不受影响）
+    const cd = $('#optCoverDays');
+    if (cd) cd.addEventListener('change', async () => {
+      const v = +cd.value;
+      prefs.coverDays = v;
+      savePrefs();
+      if (!bridge.has()) { toast('浏览器预览用的是演示数据，窗口设置不生效', 'i-info'); return; }
+      const api = bridge.api();
+      if (!api || typeof api.set_cover_days !== 'function') {
+        toast('这个设置由主程序写入配置，重启程序后即可生效', 'i-info');
+        return;
+      }
+      const r = await bridge.call('set_cover_days', v);
+      if (r && r.data) {
+        applyUsage(r.data, true);
+        renderActive(true);
+        toast(v === 0 ? '已恢复统计全部本机记录' : `只统计最近 ${v} 天的本机记录`);
+      } else {
+        toast('设置失败：' + ((r && r.error) || '未知错误'), 'i-info');
+      }
+    });
+
     $$('#rangeSeg button').forEach(b => {
       b.addEventListener('click', () => {
         state.range = +b.dataset.range;
         $$('#rangeSeg button').forEach(x => x.classList.toggle('is-active', x === b));
         renderTrend();
+      });
+    });
+
+    // 额度与消耗：今日 / 本周 / 本月，只重绘这张卡的环图与三项统计
+    $$('#quotaSeg button').forEach(b => {
+      b.addEventListener('click', () => {
+        const v = b.dataset.quota;
+        if (state.quotaRange === v) return;
+        state.quotaRange = v;
+        $$('#quotaSeg button').forEach(x => x.classList.toggle('is-active', x === b));
+        renderQuotaCard(effAccount(), hasQuota());
       });
     });
 

@@ -808,8 +808,8 @@
       const today = day0(new Date());
       const thisMonday = mondayOf(today);
 
-      // 目标列数：让格子接近正方（宽度略大）
-      const target = Math.max(6, Math.round((availW + gap) / (cellH * 1.26 + gap)));
+      // 目标列数：按"方格"尺寸算，尽量多排几周把宽度用满（格子接近正方形）
+      const target = Math.max(6, Math.round((availW + gap) / (cellH + gap)));
 
       // 起点必须是「某月 1 号所在周的周一」：取列数最接近目标的那个月
       let best = null;
@@ -827,8 +827,11 @@
       const weeks = Math.max(4, best.weeks);
       const monthFirst = new Date(start.getFullYear(), start.getMonth(), 1);
 
-      // 列宽吃掉剩余宽度：保证左右都贴边，不留空白
-      const cellW = Math.max(8, (availW - gap * (weeks - 1)) / weeks);
+      // 列宽：优先正方（最多宽 6%），剩余宽度整体居中，避免把方格拉成长条
+      const fillW = (availW - gap * (weeks - 1)) / weeks;
+      const cellW = Math.max(8, Math.min(cellH * 1.06, fillW));
+      const gridW = weeks * (cellW + gap) - gap;
+      const left = padL + Math.max(0, (availW - gridW) / 2);
       const gridH = rows * (cellH + gap) - gap;
 
       const svg = el('svg', {
@@ -848,12 +851,15 @@
         return 5;
       };
       const base = toneColor(cfg.tone || 'c1');
-      const colors = [hexToRgba(base, .075),   // 无消耗：只留极淡底色，避免"一片灰墙"
-        hexToRgba(base, .18), hexToRgba(base, .38), hexToRgba(base, .58),
-        hexToRgba(base, .78), base];
+      const alpha = [.075, .18, .38, .58, .78, 1];   // 0~5 级的底色浓度
+      const colors = alpha.map(a => (a >= 1 ? base : hexToRgba(base, a)));   // 无消耗：极淡底色，避免"一片灰墙"
+      // 悬停联动：本体更亮一档，四周邻格轻微提亮（"被照亮"）
+      const hotColors = alpha.map((a, i) => hexToRgba(base, Math.min(1, i === 0 ? .30 : a * 1.35 + .16)));
+      const nearColors = alpha.map((a, i) => hexToRgba(base, Math.min(1, a + (i === 0 ? .07 : .13))));
 
       const fmtTokens = v => (v == null ? '—' : shortNum(v) + ' Token');
       const fmtCalls = v => (v == null ? '—' : fmt(v) + ' 次');
+      const glowOn = cfg.glow !== false && motionLevel() !== 'off';
 
       // 入场动效：从左上角起，一列推一列（每列延迟 14ms）。
       // container.dataset.played 保证同一次进入页面只播一次，resize/切主题不重播。
@@ -862,13 +868,64 @@
       if (play) container.dataset.played = '1';
       const cells = [];
 
+      /* ---- 悬停：光圈 + 邻格联动提亮 ---- */
+      let halo = null, ring = null, hot = null, touched = [];
+      const glowR = Math.max(28, cellH * 2.8);
+
+      function unfocus() {
+        if (hot) hot.node.classList.remove('is-hot');
+        for (let i = 0; i < touched.length; i++) touched[i].node.style.fill = '';
+        touched = [];
+        hot = null;
+        if (halo) halo.setAttribute('opacity', '0');
+        if (ring) { ring.__stop && ring.__stop(); ring.setAttribute('opacity', '0'); }
+      }
+
+      function focus(c) {
+        if (!c || hot === c) return;
+        unfocus();
+        hot = c;
+        const cx0 = c.x + c.w / 2, cy0 = c.y + c.h / 2;
+        // 邻格按曼哈顿/对角距离逐级提亮，形成"被照亮一圈"的观感
+        for (let i = 0; i < cells.length; i++) {
+          const o = cells[i];
+          if (o === c) continue;
+          const dx = Math.abs(o.col - c.col), dy = Math.abs(o.row - c.row);
+          if (dx > 1 || dy > 1) continue;
+          if (Math.hypot(dx, dy) > 1.45) continue;
+          o.node.style.fill = nearColors[o.lv];
+          touched.push(o);
+        }
+        c.node.style.fill = hotColors[c.lv];
+        touched.push(c);
+        c.node.classList.add('is-hot');
+
+        halo.setAttribute('cx', cx0);
+        halo.setAttribute('cy', cy0);
+        halo.setAttribute('r', glowR);
+        halo.setAttribute('opacity', '1');
+
+        // 一圈向外扩散的涟漪：transform + opacity 由合成层执行，最稳
+        ring.setAttribute('cx', cx0);
+        ring.setAttribute('cy', cy0);
+        ring.setAttribute('r', glowR * 0.82);
+        ring.setAttribute('opacity', '0');
+        if (ring.animate && motionLevel() !== 'off') {
+          const anim = ring.animate(
+            [{ transform: 'scale(.42)', opacity: .85 }, { transform: 'scale(1)', opacity: 0 }],
+            { duration: 620, easing: 'cubic-bezier(.22,1,.36,1)' }
+          );
+          ring.__stop = () => { try { anim.cancel(); } catch (e) { /* ignore */ } };
+        }
+      }
+
       let prevMonth = -1;
       for (let col = 0; col < weeks; col++) {
         const colStart = new Date(start);
         colStart.setDate(colStart.getDate() + col * 7);
         if (colStart.getMonth() !== prevMonth) {
           prevMonth = colStart.getMonth();
-          const x = padL + col * (cellW + gap);
+          const x = left + col * (cellW + gap);
           const sameYear = colStart.getFullYear() === today.getFullYear();
           const label = (sameYear ? '' : String(colStart.getFullYear()).slice(2) + '年') + (colStart.getMonth() + 1) + '月';
           const t = txt(svg, x, padT - 7, label, 'ax-label');
@@ -886,45 +943,85 @@
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
         const rec = map[key];
         const v = rec ? rec.points : 0;
-        const x = padL + col * (cellW + gap);
+        const lv = level(v);
+        const x = left + col * (cellW + gap);
         const y = padT + row * (cellH + gap);
         const future = d > today;
         const rect = el('rect', {
           x, y, width: cellW, height: cellH, rx: Math.min(3.4, cellH * .16),
-          fill: colors[level(v)],
-          opacity: future ? '.32' : '1'
+          fill: colors[lv],
+          opacity: future ? '.32' : '1',
+          class: 'cal-cell'
         }, svg);
-        if (play) {
-          rect.style.opacity = '0';
-          rect.style.transformBox = 'fill-box';
-          rect.style.transformOrigin = 'center';
-          rect.style.transform = 'scale(.82)';
-        }
-        cells.push({ node: rect, col, row, op: future ? 0.32 : 1 });
+        cells.push({ node: rect, col, row, x, y, w: cellW, h: cellH, lv, op: future ? 0.32 : 1 });
 
         const wd = '日一二三四五六'[d.getDay()];
         const rowsTip = [
-          { color: colors[level(v)], name: '消耗积分', value: fmt(v) + ' 分' },
+          { color: colors[lv], name: '消耗积分', value: fmt(v) + ' 分' },
           { name: '消耗 Token', value: fmtTokens(rec ? rec.tokens : null) },
           { name: '调用次数', value: fmtCalls(rec ? rec.calls : null) }
         ];
         const title = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} 周${wd}${future ? ' · 未到' : ''}${rec && rec.src === 'local' ? ' · 本机记录' : ''}`;
-        rect.addEventListener('mouseenter', ev => showTip(`<div class="tt-title">${title}</div>${tipRows(rowsTip)}`, ev.clientX, ev.clientY));
+        rect.addEventListener('mouseenter', ev => {
+          showTip(`<div class="tt-title">${title}</div>${tipRows(rowsTip)}`, ev.clientX, ev.clientY);
+          if (glowOn) focus(rect.__cell);
+        });
         rect.addEventListener('mousemove', ev => showTip(`<div class="tt-title">${title}</div>${tipRows(rowsTip)}`, ev.clientX, ev.clientY));
-        rect.addEventListener('mouseleave', hideTip);
+        rect.addEventListener('mouseleave', () => { hideTip(); if (glowOn) unfocus(); });
+        rect.__cell = cells[cells.length - 1];
       }
+
+      // 悬停层放在最上层：光圈要盖在格子上才能"照亮"周围
+      const dark = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark';
+      const defs = el('defs', null, svg);
+      const haloId = 'gh' + (++uid);
+      const haloGrad = el('radialGradient', { id: haloId }, defs);
+      el('stop', { offset: '0%', 'stop-color': base, 'stop-opacity': dark ? .46 : .28 }, haloGrad);
+      el('stop', { offset: '46%', 'stop-color': base, 'stop-opacity': dark ? .20 : .12 }, haloGrad);
+      el('stop', { offset: '100%', 'stop-color': base, 'stop-opacity': 0 }, haloGrad);
+      const layer = el('g', { 'pointer-events': 'none' }, svg);
+      halo = el('circle', {
+        cx: -999, cy: -999, r: 0, fill: `url(#${haloId})`, opacity: 0, class: 'cal-halo'
+      }, layer);
+      ring = el('circle', {
+        cx: -999, cy: -999, r: 0, fill: 'none', stroke: base, 'stroke-width': 1.2,
+        opacity: 0, class: 'cal-ring',
+        style: 'transform-box:fill-box;transform-origin:center'
+      }, layer);
+      svg.addEventListener('mouseleave', () => { hideTip(); unfocus(); });
 
       if (play && cells.length) {
         requestAnimationFrame(() => {
           cells.forEach(c => {
-            // 从左上角起按"曼哈顿距离"传波：一个格子推它右边和下边的格子，
-            // 因此对角线上的格子同时被点亮，看起来是一圈一圈向右下推开，而不是整列跳变。
-            const delay = (c.col + c.row) * 9;
-            c.node.style.transition = `opacity 260ms ease-out ${delay}ms, transform 340ms cubic-bezier(.16,1,.3,1) ${delay}ms`;
-            c.node.style.opacity = String(c.op);
-            c.node.style.transform = 'scale(1)';
+            // 对角波：从左上角（最早一天）逐格推向右下角（今天）。
+            // 延迟用 0.88 次幂压平，靠前的格子间距更匀，波前不会被"拉成台阶"。
+            const dist = Math.pow(c.col * 0.94 + c.row * 0.8, 0.88);
+            const delay = Math.min(680, dist * 13);
+            const frames = [
+              { transform: 'scale(.55)', opacity: 0, easing: 'cubic-bezier(.2,.9,.3,1)' },
+              { transform: 'scale(1.035)', opacity: c.op, offset: .74, easing: 'cubic-bezier(.33,0,.2,1)' },
+              { transform: 'scale(1)', opacity: c.op }
+            ];
+            const timing = { duration: 640, delay, easing: 'linear', fill: 'backwards' };
+            if (c.node.animate) { c.node.animate(frames, timing); return; }
+            // 兜底（极老内核）：退回 CSS 过渡
+            c.node.style.transformBox = 'fill-box';
+            c.node.style.transformOrigin = 'center';
+            c.node.style.opacity = '0';
+            c.node.style.transform = 'scale(.55)';
+            setTimeout(() => {
+              c.node.style.transition = 'opacity 340ms ease-out, transform 520ms cubic-bezier(.16,1,.3,1)';
+              c.node.style.opacity = String(c.op);
+              c.node.style.transform = 'scale(1)';
+            }, delay);
           });
         });
+        // 看门狗：窗口被遮挡时动画可能整段不推进，到点强制落到终态，绝不停在 scale(.55)
+        setTimeout(() => {
+          cells.forEach(c => {
+            if (c.node.getAnimations) c.node.getAnimations().forEach(a => a.cancel());
+          });
+        }, 900 + 700);
       }
 
       // 星期标签（一、三、五）
@@ -937,7 +1034,7 @@
 
       // 底部说明由卡片副标题承担，这里只画一条基线
       el('line', {
-        x1: padL, x2: W - padR, y1: padT + gridH + 4, y2: padT + gridH + 4,
+        x1: left, x2: W - padR, y1: padT + gridH + 4, y2: padT + gridH + 4,
         stroke: 'var(--grid)', 'stroke-width': 1
       }, svg);
     });

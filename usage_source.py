@@ -64,16 +64,33 @@ def _load_config():
             "total": float(cfg.get("total") or 0),
             "cycle_start": cfg.get("cycle_start") or "",
             "cycle_end": cfg.get("cycle_end") or "",
+            "cover_days": int(cfg.get("cover_days") or 0),
         }
     except Exception:
-        return {"total": 0, "cycle_start": "", "cycle_end": ""}
+        return {"total": 0, "cycle_start": "", "cycle_end": "", "cover_days": 0}
 
 
 def save_config(total, cycle_start, cycle_end):
-    cfg = {"total": float(total or 0), "cycle_start": cycle_start or "", "cycle_end": cycle_end or ""}
+    keep = _load_config()
+    cfg = {"total": float(total or 0), "cycle_start": cycle_start or "",
+           "cycle_end": cycle_end or "", "cover_days": keep.get("cover_days") or 0}
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
     return cfg
+
+
+def save_cover_days(days):
+    """统计覆盖天数：0 = 全部记录；N = 只聚合最近 N 天（额度周期不受影响）。"""
+    cfg = _load_config()
+    try:
+        days = max(0, int(days or 0))
+    except (TypeError, ValueError):
+        days = 0
+    out = {"total": cfg["total"], "cycle_start": cfg["cycle_start"],
+           "cycle_end": cfg["cycle_end"], "cover_days": days}
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=2)
+    return out
 
 
 def _friendly_model(raw):
@@ -160,6 +177,7 @@ class UsageService:
             "meta": {"now": now.isoformat(), "updated": now.strftime("%H:%M"),
                      "updatedFull": now.strftime("%m-%d %H:%M"), "nowHour": now.hour,
                      "source": "local", "records": 0, "days": 0, "error": None,
+                     "coverDays": 0, "recordsTotal": 0, "daysTotal": 0,
                      "sourcePath": src.get("home") or "", "sourceKind": "none",
                      "sourceNote": src.get("note") or ""},
             "account": {"total": 0, "used": 0, "available": 0, "usedPct": 0,
@@ -281,6 +299,15 @@ class UsageService:
         def day_of(r):
             return dt.datetime.fromtimestamp(r["ts"] / 1000).date()
 
+        # 统计窗口（设置 → 数据源 → 覆盖天数）：只聚合最近 N 天，
+        # 但"周期已用额度"必须按全部记录算，否则窗口一变可用余额就失真。
+        all_records = records
+        cover_days = int(cfg.get("cover_days") or 0)
+        if cover_days > 0:
+            cutoff = today - dt.timedelta(days=cover_days - 1)
+            records = [r for r in records if day_of(r) >= cutoff]
+        all_days = {day_of(r) for r in all_records}
+
         by_day = defaultdict(float)
         by_day_req = defaultdict(int)
         by_day_tok = defaultdict(int)
@@ -379,11 +406,11 @@ class UsageService:
         if cycle_start:
             try:
                 sd = dt.datetime.strptime(cycle_start, "%Y-%m-%d").date()
-                used_in_cycle = sum(v for d, v in by_day.items() if sd <= d <= today)
+                used_in_cycle = sum(r["credit"] for r in all_records if sd <= day_of(r) <= today)
             except ValueError:
-                used_in_cycle = sum(v for d, v in by_day.items())
+                used_in_cycle = sum(r["credit"] for r in all_records)
         else:
-            used_in_cycle = sum(v for d, v in by_day.items())
+            used_in_cycle = sum(r["credit"] for r in all_records)
         available = max(0.0, cfg["total"] - used_in_cycle) if configured else 0.0
         used_pct = (used_in_cycle / cfg["total"]) if configured and cfg["total"] else 0.0
 
@@ -517,6 +544,9 @@ class UsageService:
                 "source": "local",
                 "records": len(records),
                 "days": len(by_day),
+                "coverDays": cover_days,
+                "recordsTotal": len(all_records),
+                "daysTotal": len(all_days),
                 "firstDay": data_start,
                 "error": None,
                 "sourcePath": getattr(self, "source", {}).get("home") or "",

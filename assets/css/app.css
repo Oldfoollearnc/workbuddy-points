@@ -162,6 +162,8 @@ img { display: block; }
 .segmented button.is-active { background: var(--surface); color: var(--text-1); font-weight: 600; box-shadow: var(--shadow-1); }
 .segmented-lg { padding: 3px; }
 .segmented-lg button { height: 30px; padding: 0 18px; font-size: 12.5px; }
+/* 卡片头里的小号分段：今日 / 本周 / 本月 */
+.segmented-sm button { height: 21px; padding: 0 8px; font-size: 10.5px; }
 
 .search {
   display: flex; align-items: center; gap: 7px;
@@ -314,8 +316,8 @@ body.is-desktop[data-mode="popup"] .popup-card {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 13px;
-  padding: 14px 16px 12px;
+  gap: 16px;
+  padding: 16px 16px 14px;
   overflow-x: hidden;
   overflow-y: auto;          /* 内容超高时滚动，而不是把「今日时段」裁掉 */
   scrollbar-width: thin;
@@ -354,6 +356,15 @@ body.is-desktop[data-mode="popup"] .popup-card {
 .pop-block-head span { font-size: 9.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 
 .pop-block--hours { flex: 1 1 auto; min-height: 140px; }
+/* 小窗里的时段柱状图：与总览同一套组件，高度吃满剩余空间（选择器加权，压过 .chart 的默认值） */
+.pop-block--hours .pop-chart { flex: 1 1 auto; min-height: 190px; margin-top: 4px; }
+.pop-stats {
+  flex: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding-top: 2px;
+  font-size: 9.5px; color: var(--text-3);
+}
+.pop-stats b { color: var(--text-1); font-weight: 600; font-variant-numeric: tabular-nums; }
 .pop-hours { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 2px; }
 .ph-plot { position: relative; flex: 1 1 auto; min-height: 0; }
 .ph-grid { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(24, 1fr); align-items: end; gap: 2px; }
@@ -461,7 +472,7 @@ body.is-desktop[data-mode="popup"] .popup-card {
 }
 .pop-foot-note {
   display: flex; align-items: center; justify-content: center; gap: 5px;
-  margin-top: 6px;
+  margin-top: 0;
   font-size: 9.5px; color: var(--text-3);
 }
 
@@ -641,15 +652,16 @@ body.is-dragging .topbar { cursor: default; }
 .sync-state #syncTime { font-variant-numeric: tabular-nums; }
 
 /* 自绘窗口按钮：颜色全部走主题变量，深浅色都跟随 */
-.win-controls { display: flex; align-self: stretch; flex: none; }
+.win-controls { display: flex; align-self: stretch; flex: none; align-items: center; gap: 2px; padding-right: 6px; }
 .win-btn {
-  width: 46px;
-  align-self: stretch;
+  width: 34px;
+  height: 28px;
+  align-self: center;
   display: grid;
   place-items: center;
   color: var(--text-2);
   background: transparent;
-  border-radius: 0;
+  border-radius: 7px;
   transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
 }
 .win-btn .i { width: 15px; height: 15px; stroke-width: 1.6; }
@@ -784,6 +796,22 @@ body.is-dragging .topbar { cursor: default; }
 .chart svg { display: block; overflow: visible; }
 .chart text { font-family: var(--font-sans); }
 
+/* 日历热力格：悬停时本体放大 + 外发光，邻格联动提亮，另有一圈向外扩散的光圈 */
+.cal-cell {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: fill 170ms var(--ease-out), transform 200ms var(--ease-out),
+              opacity 200ms linear, filter 200ms var(--ease-out);
+  cursor: default;
+}
+.cal-cell.is-hot {
+  transform: scale(1.16);
+  filter: drop-shadow(0 0 3px var(--brand)) drop-shadow(0 0 9px var(--brand));
+}
+.cal-halo { transition: opacity 190ms var(--ease-out); }
+html[data-motion="off"] .cal-cell { transition: none; }
+html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
+
 /* 轴 / 标注 */
 .ax-label { font-size: 10px; fill: var(--text-3); font-variant-numeric: tabular-nums; }
 .ax-label.is-strong { fill: var(--text-2); font-weight: 600; }
@@ -896,13 +924,17 @@ body.is-dragging .topbar { cursor: default; }
   background: var(--surface-2);
   border: 1px solid var(--border);
 }
-.ledger-summary > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-/* 四项等宽分布：首项贴左、末项贴右，中间两列均分（不再出现右侧大段空白） */
-.ledger-summary > div:last-child { text-align: right; align-items: flex-end; }
-.ledger-summary > div:nth-child(2), .ledger-summary > div:nth-child(3) { padding-left: 8px; }
-.ledger-summary span { font-size: 10.5px; color: var(--text-3); }
+.ledger-summary > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-left: 16px; border-left: 1px solid var(--border); }
+/* 四列严格等宽：每列左对齐 + 左侧细分隔线，列间视觉间距一致，不再出现右侧大段空白 */
+.ledger-summary > div:first-child { padding-left: 0; border-left: 0; }
+.ledger-summary span { font-size: 10.5px; color: var(--text-3); display: flex; align-items: center; gap: 4px; }
 .ledger-summary b { font-size: 17px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .ledger-summary b.is-good { color: var(--good); }
+/* 数据来自本机而非当前流水源的角标 */
+.ledger-summary .src-tag {
+  font-size: 9px; font-style: normal; line-height: 1; padding: 1px 4px; border-radius: 4px;
+  color: var(--text-3); background: var(--surface-3); border: 1px solid var(--border);
+}
 
 .table { margin-top: 8px; }
 .table-head, .table-row {
@@ -1619,6 +1651,7 @@ body.is-loading .boot-mask { display: flex; }
   color: var(--text-2);
   line-height: 1.55;
 }
+.notice[hidden] { display: none; }
 .notice-icon {
   width: 24px; height: 24px; flex: none;
   display: grid; place-items: center;
@@ -1670,6 +1703,7 @@ body.is-loading .boot-mask { display: flex; }
 .set-label b { font-size: 12.5px; font-weight: 550; color: var(--text-1); }
 .set-label em { font-style: normal; font-size: 10.5px; color: var(--text-3); line-height: 1.5; }
 .set-value { font-size: 12.5px; font-weight: 620; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.set-inline { display: flex; align-items: center; gap: 10px; flex: none; }
 .set-actions { display: flex; gap: 8px; flex: none; flex-wrap: wrap; justify-content: flex-end; }
 .set-note { margin: 0; padding: 10px 20px 13px; font-size: 10.5px; color: var(--text-3); line-height: 1.6; }
 .set-row .set-note { padding: 0; }

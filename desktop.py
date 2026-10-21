@@ -186,6 +186,19 @@ user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
 user32.GetCursorPos.restype = wintypes.BOOL
 
 
+def round_corners(hwnd):
+    """Win11：给无边框窗口加系统圆角（DWMWCP_ROUND）。Win10 会直接返回错误码，忽略即可。"""
+    try:
+        pref = ctypes.c_int(2)          # DWMWCP_ROUND
+        rc = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            wintypes.HWND(hwnd), 33,     # DWMWA_WINDOW_CORNER_PREFERENCE
+            ctypes.byref(pref), ctypes.sizeof(pref))
+        return rc == 0
+    except Exception as e:
+        log(f"round_corners error: {e}")
+        return False
+
+
 def strip_nonclient(hwnd):
     """确保窗口没有任何非客户区。
 
@@ -201,6 +214,9 @@ def strip_nonclient(hwnd):
             user32.SetWindowPos(hwnd, None, 0, 0, 0, 0,
                                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)
             log(f"strip_nonclient: style {hex(style)} -> {hex(want)}")
+        # 顺带补圆角：主窗去掉边框后是纯直角，Win11 下用 DWM 恢复系统圆角
+        if round_corners(hwnd):
+            log("round_corners: ok")
     except Exception as e:
         log(f"strip_nonclient error: {e}")
 
@@ -217,6 +233,7 @@ def set_window_icons():
         hwnd = user32.FindWindowW(None, title)
         if not hwnd:
             continue
+        round_corners(hwnd)
         for kind, size in ((1, 32), (0, 16)):     # ICON_BIG / ICON_SMALL
             hicon = user32.LoadImageW(None, ICON, IMAGE_ICON, size, size, LR_LOADFROMFILE)
             if hicon:
@@ -741,6 +758,17 @@ class Api:
             usage_source.save_config(total, cycle_start, cycle_end)
             return {"ok": True, "data": self._desk.usage.refresh()}
         except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def set_cover_days(self, days):
+        """设置统计覆盖天数（0 = 全部），保存后立即重扫，返回新的用量数据。"""
+        try:
+            cfg = usage_source.save_cover_days(days)
+            data = self._desk.usage.refresh()
+            log(f"set_cover_days: {cfg.get('cover_days')}")
+            return {"ok": True, "coverDays": cfg.get("cover_days", 0), "data": data}
+        except Exception as e:
+            log(f"set_cover_days error: {e}")
             return {"ok": False, "error": str(e)}
 
     def expand(self):
