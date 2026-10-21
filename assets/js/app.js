@@ -1561,16 +1561,8 @@
     window.addEventListener('resize', () => { if (acctPop && !acctPop.hidden) positionAccountPop(); });
     const ph = $('#popHide'); if (ph) ph.addEventListener('click', () => bridge.hide());
 
-    /* 小窗失焦即收起：点桌面 / 别的程序时 WebView 会 blur，比轮询前台更准。
-       延迟 180ms 再判断，避免与托盘单击（切换显示）抢同一个点击。 */
-    if (state.mode === 'popup') {
-      window.addEventListener('blur', () => {
-        if (!bridge.has()) return;
-        setTimeout(() => {
-          if (!document.hasFocus()) bridge.call('hide');
-        }, 180);
-      });
-    }
+    /* 点小窗外部收起：由 Python 端监听鼠标左键松开 + 光标是否落在小窗内，
+       不依赖焦点（托盘弹出时焦点常常不在小窗上，靠 blur 判断会误收）。 */
     const pv = $('#popPreviewBtn'); if (pv) pv.addEventListener('click', () => {
       if (bridge.has()) bridge.collapse();
       else toast('浏览器预览中，桌面版可直接收起为右下角小窗', 'i-info');

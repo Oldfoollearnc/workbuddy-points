@@ -180,6 +180,12 @@ def find_hwnd(title):
     return hwnd or None
 
 
+user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+user32.GetAsyncKeyState.restype = ctypes.c_short
+user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+user32.GetCursorPos.restype = wintypes.BOOL
+
+
 def strip_nonclient(hwnd):
     """确保窗口没有任何非客户区。
 
@@ -310,7 +316,7 @@ class Desktop:
         self.login_win.events.closing += self._on_login_closing
         self.account.attach(self.login_win)
         threading.Thread(target=self._watch_minimize, daemon=True).start()
-        threading.Thread(target=self._watch_popup_focus, daemon=True).start()
+        threading.Thread(target=self._watch_popup_click, daemon=True).start()
         log(f"windows created, scale={s}, popup={pw}x{ph}, main={main_w}x{main_h}")
 
     # ---------- 显隐 ----------
@@ -346,55 +352,49 @@ class Desktop:
             user32.SetForegroundWindow(hwnd)
             self._nudge(hwnd)
             self._popup_shown_at = time.time()
-            self._popup_focused = False
             self._fg_at_show = int(user32.GetForegroundWindow() or 0)
         threading.Timer(0.35, self._refresh_popup_layout).start()
         threading.Timer(0.15, set_window_icons).start()
 
-    # ---------- 点空白处收起小窗 ----------
+    # ---------- 点小窗外部收起 ----------
 
-    def _own_windows(self):
-        """本进程的窗口句柄集合：这些窗口拿到焦点时不应收起小窗。"""
-        out = set()
-        for title in (POPUP_TITLE, MAIN_TITLE, LOGIN_TITLE):
-            h = user32.FindWindowW(None, title)
-            if h:
-                out.add(int(h))
-        tray = getattr(self, "tray", None)
-        if tray is not None and getattr(tray, "hwnd", None):
-            out.add(int(tray.hwnd))
-        return out
+    def _watch_popup_click(self):
+        """鼠标左键"松开"时判断落点：不在小窗矩形内就收起。
 
-    def _watch_popup_focus(self):
-        """点小窗之外的任何地方就收起。
-
-        小窗是独立顶层窗口，点桌面/别的程序不会触发任何 JS 事件，只能轮询前台窗口。
-        判定规则（避免"抢不到焦点就自动消失"的误伤）：
-        1. 前台是本进程窗口（小窗/主窗/登录窗/托盘）→ 不动；
-        2. 前台 == 弹出瞬间的前台（说明我们没抢到焦点，用户还没操作）→ 不动；
-        3. 其余情况 = 用户把焦点给了别的窗口 → 收起。
+        为什么不用 GetForegroundWindow / window.blur：
+        从托盘单击弹出时，焦点常常闪一下又回到任务栏（Windows 的前台限制），
+        按焦点判断会出现"一点开就消失"。而鼠标落点与焦点无关，判定稳定。
+        用"松开"而不是"按下"：不影响用户在小窗内拖选，也不会打断外部拖拽。
         """
-        log("popup focus watcher started")
+        log("popup click watcher started")
+        # None = 还没采样过；第一次只做基线，避免把"弹出前那一下点击的松开"当成外部点击
+        prev_down = None
         while not getattr(self, "quitting", False):
-            time.sleep(0.3)
+            time.sleep(0.045)
             try:
                 hwnd = user32.FindWindowW(None, POPUP_TITLE)
                 if not hwnd or not user32.IsWindowVisible(hwnd):
+                    prev_down = None
                     continue
-                if time.time() - getattr(self, "_popup_shown_at", 0) < 0.85:
+                down = bool(user32.GetAsyncKeyState(0x01) & 0x8000)   # VK_LBUTTON
+                if prev_down is None:
+                    prev_down = down
                     continue
-                fg = int(user32.GetForegroundWindow() or 0)
-                if not fg:
+                released = prev_down and not down
+                prev_down = down
+                if not released:
                     continue
-                if fg in self._own_windows():
-                    self._popup_focused = True
+                pt = wintypes.POINT()
+                if not user32.GetCursorPos(ctypes.byref(pt)):
                     continue
-                if not getattr(self, "_popup_focused", False):
-                    continue   # 还没真正获得过焦点：不判断，交给前端 blur 兜底
-                log(f"popup lost focus (fg={fg}), hide")
-                self.hide_popup()
+                rc = RECT()
+                user32.GetWindowRect(hwnd, ctypes.byref(rc))
+                inside = rc.left <= pt.x < rc.right and rc.top <= pt.y < rc.bottom
+                if not inside:
+                    log(f"popup outside click ({pt.x},{pt.y}) -> hide")
+                    self.hide_popup()
             except Exception as e:
-                log(f"popup focus watcher error: {e}")
+                log(f"popup click watcher error: {e}")
 
     def hide_popup(self):
         try:
