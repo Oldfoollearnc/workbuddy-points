@@ -611,8 +611,8 @@
           legend: false,
           size: 232,
           hRatio: 0.84,
-          valueOutside: false,
-          centerLabel: '',                  // 中间不再写"今日合计/单一模型"
+          hideCenter: true,                  // 环内不留任何文字，靠图例说明
+          centerLabel: '',
           centerUnit: '次',
           centerFormat: v => F.fmt(Math.round(v))
         });
@@ -1425,6 +1425,16 @@
   async function refresh() {
     const btn = $('#refreshBtn');
     if (btn) { btn.classList.add('is-spinning'); setTimeout(() => btn.classList.remove('is-spinning'), 720); }
+    // 小窗：图标转一圈 + 顶部扫光 + 内容轻微淡出，刷新完再淡回来
+    const popBtn = $('#popRefresh');
+    if (popBtn) { popBtn.classList.add('is-spinning'); setTimeout(() => popBtn.classList.remove('is-spinning'), 820); }
+    const popCard = state.mode === 'popup' ? $('.popup-card') : null;
+    if (popCard) {
+      if (!popCard.querySelector('.refresh-bar')) {
+        popCard.appendChild(Object.assign(document.createElement('div'), { className: 'refresh-bar' }));
+      }
+      popCard.classList.add('is-refreshing');
+    }
     const cards = $$('.card');
     cards.forEach(c => {
       if (!c.querySelector('.refresh-bar')) c.appendChild(Object.assign(document.createElement('div'), { className: 'refresh-bar' }));
@@ -1442,6 +1452,7 @@
     }
     setTimeout(() => {
       cards.forEach(c => c.classList.remove('is-refreshing'));
+      if (popCard) popCard.classList.remove('is-refreshing');
       renderActive(true);
       const t = new Date();
       setText('#syncTime', `${F.pad(t.getHours())}:${F.pad(t.getMinutes())}`);

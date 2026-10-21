@@ -286,7 +286,16 @@ body.is-desktop[data-mode="popup"] .popup-card {
 .pop-btn:hover { color: var(--text-1); border-color: var(--border-2); background: var(--surface-3); }
 .pop-btn:active { transform: scale(.96); }
 .pop-btn .i { width: 12px; height: 12px; }
-.pop-btn.is-spinning .i { animation: spin .7s var(--ease-in-out); }
+.pop-btn.is-spinning .i { animation: spinSoft 780ms cubic-bezier(.34, .02, .2, 1); }
+/* 小窗刷新：内容短暂淡出 + 顶部一道扫光，配合图标慢起慢收转一圈 */
+.is-refreshing .pop-hero .big,
+.is-refreshing .pop-stats,
+.is-refreshing .quota-mini { opacity: .34; transition: opacity 170ms var(--ease-out); }
+@keyframes spinSoft {
+  0% { transform: rotate(0deg) scale(1); }
+  45% { transform: rotate(250deg) scale(.88); }
+  100% { transform: rotate(360deg) scale(1); }
+}
 .pop-link {
   font-size: 9.5px; color: var(--brand); font-weight: 600;
   padding: 1px 4px; border-radius: 5px;

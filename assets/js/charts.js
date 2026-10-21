@@ -530,6 +530,7 @@
       // 圆心文本：按字符数自适应字号，避免"1,234.56"这类长数字压到圆环上。
       // valueOutside=true 时数字整体移到环下方，环内只留一行固定短标签，彻底避免挤压。
       const outside = !!cfg.valueOutside;
+      const hideCenter = !!cfg.hideCenter;   // 环内环外都不写字，只留图形
       const inner = Math.max(28, (r - thick / 2) * 1.84);
       const fitText = (node, max) => {
         const len = (node.textContent || '').length;
@@ -538,18 +539,18 @@
         const s = Math.max(8, Math.min(max, sizeByLen));
         node.style.fontSize = s.toFixed(1) + 'px';
       };
-      const hasLabel = cfg.centerLabel !== '';
+      const hasLabel = !hideCenter && cfg.centerLabel !== '';
       const cLabel = hasLabel
         ? txt(svg, cx, outside ? cy + 3.5 : cy - (size > 140 ? 12 : 10), cfg.centerLabel || '今日合计', 'center-sub')
         : null;
-      const cVal = outside ? null : txt(svg, cx, cy + (hasLabel ? (size > 140 ? 12 : 8) : 5), '', 'center-main');
-      const cUnit = outside ? null : txt(svg, cx, cy + (hasLabel ? (size > 140 ? 28 : 22) : (size > 140 ? 24 : 18)), cfg.centerUnit || '分', 'center-unit');
+      const cVal = (outside || hideCenter) ? null : txt(svg, cx, cy + (hasLabel ? (size > 140 ? 12 : 8) : 5), '', 'center-main');
+      const cUnit = (outside || hideCenter) ? null : txt(svg, cx, cy + (hasLabel ? (size > 140 ? 28 : 22) : (size > 140 ? 24 : 18)), cfg.centerUnit || '分', 'center-unit');
       if (size < 120) {
         if (cLabel) cLabel.setAttribute('font-size', '9');
         if (cUnit) cUnit.setAttribute('font-size', '9');
       }
 
-      const valueEl = outside ? h('div', 'donut-value', '', wrap) : null;
+      const valueEl = (outside && !hideCenter) ? h('div', 'donut-value', '', wrap) : null;
 
       // 图例
       const showLegend = cfg.legend !== false;
