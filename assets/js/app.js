@@ -551,9 +551,10 @@
         C.donut(donut, {
           items: compRows.map(m => ({ name: m.name, value: m.points, tone: m.tone })),
           legend: false,
-          size: 104,
-          hRatio: 0.96,
-          centerLabel: '',
+          size: 84,
+          hRatio: 0.80,
+          valueOutside: true,
+          centerLabel: '今日',
           centerUnit: '分',
           // 四位数以上不再带小数，避免环内文字溢出压到圆环
           centerFormat: v => (v >= 1000 ? F.fmt(Math.round(v)) : F.credit(v))
@@ -619,8 +620,9 @@
           items: rows.map(m => ({ name: m.name, value: m.points, tone: m.tone })),
           layout: 'bottom',
           legend: false,
-          size: 260,
-          hRatio: 0.98,
+          size: 232,
+          hRatio: 0.84,
+          valueOutside: true,               // 数字放环外，避免长数字压到圆环
           centerLabel: rows.length > 1 ? '今日合计' : '单一模型',
           centerUnit: '分',
           centerFormat: v => F.credit(v)
@@ -748,57 +750,6 @@
       qh.textContent = configured
         ? `剩余 ${al.leftWorkdays} 个工作日 / ${al.leftDays} 天 · ${prefs.signin !== false ? '含每日签到 +' + F.credit(al.signin) + ' 分' : '不含签到'}`
         : '连接账号后可计算每日可用额度';
-    }
-    renderQuotaToday(configured, al, today);
-  }
-
-  /** 「今日还可消耗 X 分；再消耗 Y 分会超出当日均额 P%」 */
-  function renderQuotaToday(configured, al, today) {
-    const main = $('#quotaTodayMain'), sub = $('#quotaTodaySub');
-    const bar = $('#quotaTodayBar'), mark = $('#quotaTodayMark'), pctEl = $('#quotaTodayPct');
-    if (!main || !sub) return;
-
-    if (!configured || !(al.perDay > 0)) {
-      setText('#quotaTodayPct', '—');
-      main.innerHTML = '<span class="muted">连接账号后显示今日剩余额度</span>';
-      sub.textContent = '按剩余工作日折算的日均可用额 =（可用积分 + 签到补偿）÷ 剩余工作日';
-      if (bar) bar.style.width = '0%';
-      if (mark) mark.style.display = 'none';
-      return;
-    }
-
-    const perDay = al.perDay;
-    const used = today.consumed || 0;
-    const left = perDay - used;
-    // 再消耗的量取"日均额的 10%"，比"一次调用"更有参考意义（单次调用往往只有零点几分）
-    const step = Math.max(1, Math.round(perDay * 0.1));
-    const overNow = used > perDay;
-    const overAfter = ((used + step) / perDay - 1) * 100;
-    const pctNow = (used / perDay) * 100;
-
-    setText('#quotaTodayPct', `${pctNow.toFixed(1)}%`);
-
-    if (left >= 0) {
-      main.innerHTML = `今日还可消耗 <b>${F.credit(left)} 分</b>`;
-    } else {
-      main.innerHTML = `今日已超出日均 <b class="is-over">${F.credit(-left)} 分</b>`;
-    }
-
-    if (overAfter > 0) {
-      sub.innerHTML = `若再消耗 <b>${F.credit(step)} 分</b>（日均额的 10%）将超出当日均额 <b class="is-over">${overAfter.toFixed(1)}%</b>`;
-    } else {
-      sub.innerHTML = `再消耗 <b>${F.credit(step)} 分</b>（日均额的 10%）后仍占日均 <b>${((used + step) / perDay * 100).toFixed(1)}%</b>`;
-    }
-
-    // 进度条：以 135% 为满量程，刻度线标在 100% 日均额处
-    const scale = Math.max(1.35, (pctNow / 100) * 1.06);
-    if (bar) {
-      bar.classList.toggle('is-over', overNow);
-      bar.style.width = Math.min(100, (pctNow / 100 / scale) * 100).toFixed(2) + '%';
-    }
-    if (mark) {
-      mark.style.display = '';
-      mark.style.left = ((1 / scale) * 100).toFixed(2) + '%';
     }
   }
 
@@ -1166,6 +1117,14 @@
         : '';
     }
 
+    // 头像状态点：连接成功=绿，过期/异常=黄，未连接=灰
+    const dot = $('#avatarDot');
+    if (dot) {
+      dot.className = 'avatar-dot ' + (st === 'connected' ? 'is-on'
+        : (st === 'expired' || st === 'error') ? 'is-warn' : 'is-off');
+      dot.title = st === 'connected' ? '云端已连接' : st === 'expired' ? '登录已过期' : '未连接云端';
+    }
+
     // 上次同步 / 间隔（渲染只回填值，事件在 bind 里只绑一次）
     setText('#accLastSync', ACCOUNT.lastSync
       ? ACCOUNT.lastSync + (ACCOUNT.lastError ? ' · 异常：' + ACCOUNT.lastError : '')
@@ -1449,8 +1408,38 @@
     const pr = $('#popRefresh'); if (pr) pr.addEventListener('click', refresh);
 
     ['#popExpand', '#popExpandTop'].forEach(s => { const n = $(s); if (n) n.addEventListener('click', () => bridge.expand()); });
-    const av = $('#avatar');
-    if (av) av.addEventListener('click', () => go('settings'));
+    /* ---------------- 账号悬浮栏 ---------------- */
+
+    const acctPop = $('#acctPop');
+    const avatarBtn = $('#avatar');
+
+    const positionAccountPop = () => {
+      if (!acctPop || !avatarBtn) return;
+      const r = avatarBtn.getBoundingClientRect();
+      acctPop.style.top = Math.round(r.bottom + 8) + 'px';
+      acctPop.style.right = Math.max(10, Math.round(window.innerWidth - r.right)) + 'px';
+    };
+
+    const setAccountPop = open => {
+      if (!acctPop) return;
+      acctPop.hidden = !open;
+      if (avatarBtn) avatarBtn.setAttribute('aria-expanded', String(open));
+      if (open) {
+        renderAccountCard();          // 展开时用最新账号数据重绘
+        positionAccountPop();
+      }
+    };
+
+    if (avatarBtn) avatarBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      setAccountPop(acctPop ? acctPop.hidden : false);
+    });
+
+    if (acctPop) acctPop.addEventListener('click', e => e.stopPropagation());
+
+    document.addEventListener('click', () => { if (acctPop && !acctPop.hidden) setAccountPop(false); });
+
+    window.addEventListener('resize', () => { if (acctPop && !acctPop.hidden) positionAccountPop(); });
     const ph = $('#popHide'); if (ph) ph.addEventListener('click', () => bridge.hide());
     const pv = $('#popPreviewBtn'); if (pv) pv.addEventListener('click', () => {
       if (bridge.has()) bridge.collapse();
@@ -1586,7 +1575,10 @@
     });
 
     document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && state.mode === 'popup') bridge.hide();
+      if (e.key === 'Escape') {
+        if (acctPop && !acctPop.hidden) setAccountPop(false);
+        if (state.mode === 'popup') bridge.hide();
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') { e.preventDefault(); refresh(); }
       if (e.altKey && /^[1-4]$/.test(e.key) && state.mode === 'main') {
         go(['overview', 'analytics', 'ledger', 'settings'][+e.key - 1]);

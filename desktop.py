@@ -20,6 +20,7 @@ python desktop.py --show     # 启动即弹出小窗
 python desktop.py --main     # 启动即打开主界面
 """
 import ctypes
+import faulthandler
 import json
 import datetime as dt
 import os
@@ -782,8 +783,41 @@ class Api:
             return False
 
 
+def install_diagnostics():
+    """把崩溃信息落到 logs/crash.log：进程"闪退"时至少留下最后现场。
+
+    - faulthandler：段错误 / 访问违例（WebView2、ctypes 调用）这类 Python 层拦不到的崩溃
+    - excepthook：主线程未捕获异常
+    - threading.excepthook：后台线程异常（同步、轮询都在线程里）
+    """
+    try:
+        crash = os.path.join(LOG_DIR, "crash.log")
+        os.makedirs(LOG_DIR, exist_ok=True)
+        f = open(crash, "a", encoding="utf-8", buffering=1)
+        f.write("\n==== run %s ====\n" % dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        faulthandler.enable(file=f, all_threads=True)
+    except Exception as e:
+        log(f"faulthandler init error: {e}")
+
+    def _hook(exc_type, exc, tb):
+        log("UNCAUGHT\n" + "".join(traceback.format_exception(exc_type, exc, tb)))
+        sys.__excepthook__(exc_type, exc, tb)
+
+    def _thook(args):
+        log("THREAD UNCAUGHT (%s)\n%s" % (
+            getattr(args.thread, "name", "?"),
+            "".join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback))))
+
+    sys.excepthook = _hook
+    try:
+        threading.excepthook = _thook
+    except Exception:
+        pass
+
+
 def main():
     log("=== start ===")
+    install_diagnostics()
     set_app_id()
     handle, already = single_instance()
     if already:
@@ -855,10 +889,15 @@ def main():
     threading.Thread(target=_apply_icons, daemon=True).start()
 
     log("webview.start")
-    webview.start(debug="--debug" in sys.argv, private_mode=False,
-                  storage_path=app_paths.data_path(".webview-profile"),
-                  icon=ICON if os.path.exists(ICON) else None)
-    log("webview.exit")
+    try:
+        webview.start(debug="--debug" in sys.argv, private_mode=False,
+                      storage_path=app_paths.data_path(".webview-profile"),
+                      icon=ICON if os.path.exists(ICON) else None)
+    except Exception:
+        log("webview.start EXCEPTION\n" + traceback.format_exc())
+        raise
+    # 正常退出也会走到这里：记录退出原因，便于区分"用户退出"与"异常结束"
+    log("webview.exit windows=%s quitting=%s" % (len(webview.windows or []), getattr(app, "quitting", None)))
 
 
 if __name__ == "__main__":

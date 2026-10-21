@@ -299,12 +299,12 @@ body.is-desktop[data-mode="popup"] .popup-card {
 
 .pop-comp {
   display: grid;
-  grid-template-columns: 108px minmax(0, 1fr);
+  grid-template-columns: 106px minmax(0, 1fr);
   gap: 8px;
   align-items: center;
-  min-height: 132px;
+  min-height: 112px;
 }
-.pop-donut { width: 106px; height: 132px; }
+.pop-donut { width: 106px; height: 112px; }
 .pop-comp .comp-list { margin-top: 0; gap: 3px; }
 .pop-comp .comp-row--sm { grid-template-columns: 7px minmax(0, 1fr) auto 30px; }
 
@@ -350,8 +350,8 @@ body.is-desktop[data-mode="popup"] .popup-card {
 .pop-block-head h3 .i { width: 12px; height: 12px; color: var(--brand); }
 .pop-block-head span { font-size: 9.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 
-.pop-donut { height: 126px; }
-.pop-bars { height: 74px; }
+.pop-donut { height: 112px; }
+.pop-bars { height: 64px; }
 
 .pop-search {
   height: 30px;
@@ -1474,6 +1474,70 @@ body.is-loading .boot-mask { display: flex; }
 .about-line { display: flex; align-items: center; justify-content: space-between; padding: 12px 0 0; border-top: 1px dashed var(--border); font-size: 10.5px; color: var(--text-3); }
 .about-line b { color: var(--text-2); font-weight: 600; }
 
+
+/* 环形图：数值放在环下方（不再塞进圆心，长数字也不会压到圆环） */
+.donut-value {
+  text-align: center;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+  line-height: 1.2;
+  margin-top: 2px;
+}
+.donut-value em { font-style: normal; font-size: 10px; font-weight: 500; color: var(--text-3); margin-left: 2px; }
+.pop-donut .donut-value { font-size: 14px; margin-top: 0; }
+
+
+/* ===================== 账号悬浮栏（头像下方，点外部/Esc 关闭） ===================== */
+
+.dock-avatar { position: relative; }
+/* 状态点：绿=已连接，黄=过期/异常，灰=未连接（不占文字，顶栏保持干净） */
+.avatar-dot {
+  position: absolute;
+  right: -1px; bottom: -1px;
+  width: 9px; height: 9px;
+  border-radius: 50%;
+  background: var(--text-3);
+  border: 2px solid var(--surface);
+  pointer-events: none;
+}
+.avatar-dot.is-on { background: var(--good); }
+.avatar-dot.is-warn { background: var(--warn); }
+.avatar-dot.is-off { background: var(--text-3); }
+
+.acct-pop {
+  position: fixed;
+  z-index: 95;
+  width: 318px;
+  padding: 13px 14px 11px;
+  border-radius: 14px;
+  border: 1px solid var(--border-2);
+  background: var(--surface);
+  box-shadow: var(--shadow-3);
+  animation: popIn 150ms var(--ease-out) both;
+}
+.acct-pop[hidden] { display: none; }
+@keyframes popIn {
+  from { opacity: 0; transform: translateY(-6px) scale(.98); }
+  to { opacity: 1; transform: none; }
+}
+.acct-pop-head { display: flex; align-items: center; gap: 10px; }
+.acct-pop-head .acct-name { flex: 1 1 auto; min-width: 0; }
+.acct-pop-head .chip { flex: none; }
+.acct-pop .acct-metrics { margin-top: 10px; }
+.acct-pop .acct-sync { margin-top: 8px; padding: 8px 0; }
+.acct-pop .pkg-list { margin: 2px 0 0; padding: 0; gap: 5px; }
+.acct-pop .acct-actions {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 6px;
+}
+.acct-pop .acct-actions .btn { flex: 1 1 0; justify-content: center; padding-left: 6px; padding-right: 6px; }
+.acct-pop-note { margin: 8px 0 0; font-size: 9.5px; color: var(--text-3); line-height: 1.45; }
 
 /* ===================== 总览提示条 ===================== */
 

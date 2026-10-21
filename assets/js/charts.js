@@ -476,7 +476,7 @@
         acc += share;
 
         // 百分比：大扇区标在环内，小扇区用引线标到环外，保证每一项都有占比
-        if (size >= 130 && share > 0) {
+        if (size >= 130 && share > 0 && items.length > 1) {   // 单一项不标 100%，与图例重复
           const mid = (acc - share / 2) * Math.PI * 2 - Math.PI / 2;
           const cos = Math.cos(mid), sin = Math.sin(mid);
           const pctText = Math.round(share * 1000) / 10;
@@ -527,7 +527,9 @@
         });
       });
 
-      // 圆心文本：按字符数自适应字号，避免"1,234.56"这类长数字压到圆环上
+      // 圆心文本：按字符数自适应字号，避免"1,234.56"这类长数字压到圆环上。
+      // valueOutside=true 时数字整体移到环下方，环内只留一行固定短标签，彻底避免挤压。
+      const outside = !!cfg.valueOutside;
       const inner = Math.max(28, (r - thick / 2) * 1.84);
       const fitText = (node, max) => {
         const len = (node.textContent || '').length;
@@ -538,14 +540,16 @@
       };
       const hasLabel = cfg.centerLabel !== '';
       const cLabel = hasLabel
-        ? txt(svg, cx, cy - (size > 140 ? 12 : 10), cfg.centerLabel || '今日合计', 'center-sub')
+        ? txt(svg, cx, outside ? cy + 3.5 : cy - (size > 140 ? 12 : 10), cfg.centerLabel || '今日合计', 'center-sub')
         : null;
-      const cVal = txt(svg, cx, cy + (hasLabel ? (size > 140 ? 12 : 8) : 5), '', 'center-main');
-      const cUnit = txt(svg, cx, cy + (hasLabel ? (size > 140 ? 28 : 22) : (size > 140 ? 24 : 18)), cfg.centerUnit || '分', 'center-unit');
+      const cVal = outside ? null : txt(svg, cx, cy + (hasLabel ? (size > 140 ? 12 : 8) : 5), '', 'center-main');
+      const cUnit = outside ? null : txt(svg, cx, cy + (hasLabel ? (size > 140 ? 28 : 22) : (size > 140 ? 24 : 18)), cfg.centerUnit || '分', 'center-unit');
       if (size < 120) {
         if (cLabel) cLabel.setAttribute('font-size', '9');
-        cUnit.setAttribute('font-size', '9');
+        if (cUnit) cUnit.setAttribute('font-size', '9');
       }
+
+      const valueEl = outside ? h('div', 'donut-value', '', wrap) : null;
 
       // 图例
       const showLegend = cfg.legend !== false;
@@ -584,12 +588,16 @@
           if (s.pctNode) s.pctNode.setAttribute('opacity', op);
           if (s.pctLine) s.pctLine.setAttribute('opacity', (op * 0.75).toFixed(3));
         });
-        cVal.textContent = cfg.centerFormat ? cfg.centerFormat(total * e) : fmt(Math.round(total * e));
-        fitText(cVal, size * 0.30);
-        if (cfg.centerCenter !== false) {
-          cVal.setAttribute('x', cx);
-          cVal.setAttribute('text-anchor', 'middle');
+        const val = cfg.centerFormat ? cfg.centerFormat(total * e) : fmt(Math.round(total * e));
+        if (cVal) {
+          cVal.textContent = val;
+          fitText(cVal, size * 0.30);
+          if (cfg.centerCenter !== false) {
+            cVal.setAttribute('x', cx);
+            cVal.setAttribute('text-anchor', 'middle');
+          }
         }
+        if (valueEl) valueEl.innerHTML = `${val}<em>${cfg.centerUnit || '分'}</em>`;
       }, 40);
     });
   }
