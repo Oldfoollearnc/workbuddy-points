@@ -546,20 +546,31 @@
     const max = Math.max(...rows.map(r => r.points), 0.01);
     const total = rows.reduce((a, b) => a + b.points, 0) || 1;
     const nowHour = (D.meta && D.meta.nowHour != null) ? D.meta.nowHour : new Date().getHours();
+    // 三条参考线（0 / 中值 / 满量程）：数据稀疏时也能看出量级，不像"凭空一根柱子"
+    const g1 = max * 0.39, g2 = max * 0.78;
+    const lines = `
+      <div class="ph-lines">
+        <span style="bottom:39%"><em>${F.credit(g1)}</em></span>
+        <span style="bottom:78%"><em>${F.credit(g2)}</em></span>
+      </div>`;
     box.innerHTML = `
-      <div class="ph-grid">
+      <div class="ph-plot">
+        ${lines}
+        <div class="ph-grid">
         ${rows.map((r, i) => {
           // 最高柱只占 72%，留出顶部余量：柱体不会顶到标题，视觉上更像图表
-          const h = Math.max(1.5, (r.points / max) * 72);
+          const h = Math.max(1.5, (r.points / max) * 78);
           const cls = ['ph-col'];
           if (!r.points) cls.push('is-none');
           if (r.hour === nowHour) cls.push('is-now');
           const tip = `${F.pad(r.hour)}:00 · ${F.credit(r.points)} 分 · ${((r.points / total) * 100).toFixed(0)}%`;
-          return `<div class="${cls.join(' ')}" data-i="${i}">
-            <i class="ph-bar" style="--h:${h.toFixed(1)}%;animation-delay:${i * 9}ms"></i>
+          // --h 放在列上：柱高与气泡位置都用它（气泡是列的兄弟节点，读不到柱上的变量）
+          return `<div class="${cls.join(' ')}" data-i="${i}" style="--h:${h.toFixed(1)}%">
+            <i class="ph-bar" style="animation-delay:${i * 9}ms"></i>
             <span class="ph-tip">${tip}</span>
           </div>`;
         }).join('')}
+        </div>
       </div>
       <div class="ph-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>`;
   }
