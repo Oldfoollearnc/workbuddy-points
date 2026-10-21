@@ -509,6 +509,61 @@
     }, sec * 1000);
   }
 
+  /* ---------------- 小窗：消耗构成（排行条） ---------------- */
+
+  /** 小窗空间小，用"排行条"代替饼图：一行一个模型，条长即占比，右侧给积分与百分比。 */
+  function renderPopModels() {
+    const box = $('#popModels');
+    if (!box) return;
+    const rows = (D.models || []).filter(m => m.points > 0).sort((a, b) => b.points - a.points);
+    const sum = rows.reduce((a, b) => a + b.points, 0) || 1;
+    if (!rows.length) {
+      box.innerHTML = '<div class="comp-empty">今日暂无消耗</div>';
+      return;
+    }
+    const top = rows.slice(0, 3);
+    const rest = rows.slice(3);
+    const restPts = rest.reduce((a, b) => a + b.points, 0);
+    const row = (dot, name, pts, pct, cls) => `
+      <div class="pm-row ${cls || ''}">
+        <i class="pm-dot" style="background:${dot}"></i>
+        <span class="pm-name" title="${name}">${name}</span>
+        <span class="pm-bar"><i style="width:${Math.max(2.5, pct).toFixed(1)}%;background:${dot}"></i></span>
+        <b class="pm-val">${F.credit(pts)}</b>
+        <span class="pm-pct">${pct < 10 ? pct.toFixed(1) : pct.toFixed(0)}%</span>
+      </div>`;
+    box.innerHTML = top.map(m => row(C.toneColor(m.tone), m.name, m.points, (m.points / sum) * 100)).join('')
+      + (rest.length ? row('var(--text-3)', `其他 ${rest.length} 个`, restPts, (restPts / sum) * 100, 'pm-row--rest') : '');
+  }
+
+  /* ---------------- 小窗：今日时段（与主页不同的抬升动画） ---------------- */
+
+  /** 24 根柱：底部坐标 + 悬浮高亮与气泡 + 逐根"抬升"（主页是描线式生长，这里用弹性缩放区分）。 */
+  function renderPopHours() {
+    const box = $('#popHours');
+    if (!box) return;
+    const rows = D.hourly || [];
+    const max = Math.max(...rows.map(r => r.points), 0.01);
+    const total = rows.reduce((a, b) => a + b.points, 0) || 1;
+    const nowHour = (D.meta && D.meta.nowHour != null) ? D.meta.nowHour : new Date().getHours();
+    box.innerHTML = `
+      <div class="ph-grid">
+        ${rows.map((r, i) => {
+          // 最高柱只占 72%，留出顶部余量：柱体不会顶到标题，视觉上更像图表
+          const h = Math.max(1.5, (r.points / max) * 72);
+          const cls = ['ph-col'];
+          if (!r.points) cls.push('is-none');
+          if (r.hour === nowHour) cls.push('is-now');
+          const tip = `${F.pad(r.hour)}:00 · ${F.credit(r.points)} 分 · ${((r.points / total) * 100).toFixed(0)}%`;
+          return `<div class="${cls.join(' ')}" data-i="${i}">
+            <i class="ph-bar" style="--h:${h.toFixed(1)}%;animation-delay:${i * 9}ms"></i>
+            <span class="ph-tip">${tip}</span>
+          </div>`;
+        }).join('')}
+      </div>
+      <div class="ph-axis"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>`;
+  }
+
   function renderPopup() {
     const today = D.today, acc = effAccount();
     const configured = hasQuota();
@@ -547,35 +602,9 @@
     const prog = $('#popProgress');
     if (prog) requestAnimationFrame(() => { prog.style.width = ((configured ? acc.usedPct : 0) * 100).toFixed(2) + '%'; });
 
-    /* 今日消耗构成：只保留一种可视化（环形图），不再叠加横条与文字列表 */
-    const donut = $('#popDonut');
-    const compRows = (D.models || []).filter(m => m.points > 0);
-    if (donut) {
-      if (compRows.length) {
-        C.donut(donut, {
-          items: compRows.map(m => ({ name: m.name, value: m.points, tone: m.tone })),
-          legend: false,
-          size: 190,
-          hRatio: 0.72,
-          valueOutside: true,               // 数字放环下方，绝不与圆环重叠
-          centerLabel: compRows.length > 1 ? '模型' : '单一',
-          centerUnit: '分',
-          centerFormat: v => (v >= 1000 ? F.fmt(Math.round(v)) : F.credit(v))
-        });
-      } else {
-        donut.innerHTML = '<div class="comp-empty" style="font-size:10px;text-align:center">今日暂无消耗</div>';
-      }
-    }
+    renderPopModels();
 
-    // 今日时段（小窗内保持一份极简柱图，填满垂直空间）
-    const popBars = $('#popBars');
-    if (popBars) {
-      C.bar(popBars, {
-        data: (D.hourly || []).map(hr => ({ label: hr.label, short: F.pad(hr.hour), value: hr.points })),
-        tone: 'c1', minimal: true, showValues: false,
-        sum: today.consumed, maxBarW: 14
-      });
-    }
+    renderPopHours();
     setText('#popPeak', D.peakPoints ? `峰值 ${F.pad(D.peakHour)}:00 · ${F.credit(D.peakPoints)} 分` : '—');
 
   }
@@ -1062,13 +1091,15 @@
           <span><i class="badge-type badge-consume">消耗</i></span>
           <span class="nm"><i class="legend-dot" style="display:inline-block;vertical-align:middle;margin-right:5px;background:${C.toneColor(e.tone)}"></i>${e.model}${e.tokens == null ? '' : `<small>${F.fmtWan(e.tokens)} Token</small>`}</span>
           <span class="dim">${e.task}</span>
-          <span class="dim">${e.project}</span>
+          <span class="dim col-project">${e.project}</span>
           ${ptCell}
           <span class="share-cell"><i class="share-bar"><i style="width:${Math.max(4, (shownPts / maxPts) * 100).toFixed(1)}%"></i></i><span>${(share * 100) < 1 ? (share * 100).toFixed(2) : (share * 100).toFixed(1)}%</span></span>
         </div>`;
       }).join('');
     }
 
+    const table = $('#ledgerTable');
+    if (table) table.classList.toggle('is-cloud', ledgerSource === 'cloud');
     setHTML('#ledgerCount', `显示 ${rows.length} / ${all.length} 条`);
     const more = $('#ledgerMore');
     if (more) {
@@ -1282,6 +1313,30 @@
     setTimeout(() => { n.classList.add('is-out'); setTimeout(() => n.remove(), 240); }, 2200);
   }
 
+  /* ---------------- 加载遮罩 ---------------- */
+
+  let loadingShownAt = 0, loadingTimer = 0;
+
+  /** 慢操作才显示遮罩：<220ms 的操作一闪而过反而更卡顿。 */
+  function showLoading(text) {
+    const veil = $('#loadingVeil');
+    if (!veil) return;
+    setText('#loadingText', text || '正在读取数据…');
+    clearTimeout(loadingTimer);
+    loadingTimer = setTimeout(() => {
+      veil.hidden = false;
+      loadingShownAt = performance.now();
+    }, 220);
+  }
+
+  function hideLoading() {
+    clearTimeout(loadingTimer);
+    const veil = $('#loadingVeil');
+    if (!veil || veil.hidden) return;
+    const left = 320 - (performance.now() - loadingShownAt);
+    setTimeout(() => { veil.hidden = true; }, Math.max(0, left));
+  }
+
   async function refresh() {
     const btn = $('#refreshBtn');
     if (btn) { btn.classList.add('is-spinning'); setTimeout(() => btn.classList.remove('is-spinning'), 720); }
@@ -1292,11 +1347,13 @@
     });
 
     if (bridge.has()) {
+      showLoading('正在刷新本机记录…');
       try {
         const raw = await bridge.call('refresh_usage');
         if (raw && raw.meta) applyUsage(raw, true);
         // 刷新只读本地记录：云端同步走 60 分钟定时或「立即同步」，避免频繁触发风控
       } catch (e) { /* ignore */ }
+      hideLoading();
     }
     setTimeout(() => {
       cards.forEach(c => c.classList.remove('is-refreshing'));
@@ -1448,8 +1505,9 @@
     const sy = $('#syncState');
     if (sy) sy.addEventListener('click', async () => {
       if (!bridge.has()) { toast('浏览器预览无法同步账号', 'i-info'); return; }
+      showLoading('正在同步云端账号…');
       toast('正在同步云端账号…');
-      await bridge.call('account_sync');
+      try { await bridge.call('account_sync'); } finally { hideLoading(); }
       await loadAccount();
       renderAccountCard(); renderActive(true);
       toast(ACCOUNT.status === 'connected' ? '云端数据已同步' : '同步失败，请检查登录状态');
@@ -1616,8 +1674,9 @@
     const pcl = $('#popCloud');
     if (pcl) pcl.addEventListener('click', async () => {
       if (!bridge.has()) { toast('浏览器预览无法同步云端', 'i-info'); return; }
+      showLoading('正在同步云端账号…');
       toast('正在同步云端账号…');
-      await bridge.call('account_sync');
+      try { await bridge.call('account_sync'); } finally { hideLoading(); }
       await loadAccount();
       renderPopup();
       renderAccountCard();
@@ -1712,10 +1771,12 @@
 
     if (HASH_MODE || bridge.has()) {
       document.body.classList.add('is-loading');
+      showLoading('正在读取本机记录…');
       await whenBridgeReady();
       await loadUsage();
       await loadAccount();
       await loadVersion();
+      hideLoading();
       document.body.classList.remove('is-loading');
     }
 

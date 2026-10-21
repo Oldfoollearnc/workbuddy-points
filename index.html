@@ -42,14 +42,13 @@
 <div class="popup-shell" id="popupShell">
   <div class="popup-card">
     <header class="pop-head">
+      <button class="pop-btn" id="popRefresh" title="刷新本地记录（只读本机会话记录，不请求云端）" aria-label="刷新本地记录">
+        <svg class="i"><use href="#i-refresh"/></svg><span>刷新本地</span>
+      </button>
       <div class="pop-drag" id="popDrag" title="拖动小窗"></div>
       <div class="pop-tools">
-        <button class="pop-btn" id="popRefresh" title="刷新本地记录（只读本机会话记录，不请求云端）" aria-label="刷新本地记录">
-          <svg class="i"><use href="#i-refresh"/></svg><span>刷新本地</span>
-        </button>
-        <button class="icon-btn" id="popTheme" title="切换明暗主题" aria-label="切换明暗主题"><svg class="i"><use href="#i-moon"/></svg></button>
         <button class="icon-btn" id="popExpandTop" title="展开完整面板" aria-label="展开完整面板"><svg class="i"><use href="#i-expand"/></svg></button>
-        <button class="icon-btn" id="popHide" title="收起到系统托盘" aria-label="收起到系统托盘"><svg class="i"><use href="#i-close"/></svg></button>
+        <button class="icon-btn icon-btn--close" id="popHide" title="收起到系统托盘" aria-label="收起到系统托盘"><svg class="i"><use href="#i-close"/></svg></button>
       </div>
     </header>
 
@@ -76,16 +75,14 @@
         <span>本机记录实时；云端同步有延迟（<b id="popSyncAt">—</b>）</span>
       </p>
 
-      <section class="pop-block pop-block--grow">
+      <section class="pop-block">
         <div class="pop-block-head"><h3>今日消耗构成</h3><span id="popTotal">—</span></div>
-        <div class="pop-comp">
-          <div class="pop-donut" id="popDonut"></div>
-        </div>
+        <div class="pop-models" id="popModels"></div>
       </section>
 
-      <section class="pop-block">
+      <section class="pop-block pop-block--hours">
         <div class="pop-block-head"><h3><svg class="i"><use href="#i-bar"/></svg>今日时段</h3><span id="popPeak">—</span></div>
-        <div class="pop-bars" id="popBars"></div>
+        <div class="pop-hours" id="popHours"></div>
       </section>
 
     </div>
@@ -339,7 +336,7 @@
           </article>
         </div>
 
-        <div class="grid grid--lists">
+        <div class="grid grid--lists ana-row2">
           <article class="card list-card span-6" style="--i:1">
             <header class="card-head">
               <div><h2>模型使用量</h2><p>近 30 天按模型统计积分与调用次数</p></div>
@@ -360,14 +357,6 @@
           </article>
         </div>
 
-        <div class="grid">
-          <article class="card span-12 insight-card" style="--i:3">
-            <header class="card-head">
-              <div><h2>今日洞察</h2><p>基于当前用量自动生成的观察与建议</p></div>
-            </header>
-            <div class="insight-list" id="insightList"></div>
-          </article>
-        </div>
       </section>
 
       <!-- ---------- 积分流水 ---------- -->
@@ -395,7 +384,7 @@
 
           <div class="table" id="ledgerTable">
             <div class="table-head">
-              <span>时间</span><span>类型</span><span>模型 / 来源</span><span>动作</span><span>项目</span><span class="ta-r">积分</span><span class="ta-r">占比</span>
+              <span>时间</span><span>类型</span><span>模型 / 来源</span><span>动作</span><span class="col-project">项目</span><span class="ta-r">积分</span><span class="ta-r">占比</span>
             </div>
             <div class="table-body" id="ledgerBody"></div>
           </div>
@@ -555,6 +544,14 @@
 </div>
 
 <div class="tooltip" id="tooltip" role="tooltip"></div>
+
+<!-- 加载遮罩：首屏读取、手动同步、切数据目录时显示 -->
+<div class="loading-veil" id="loadingVeil" hidden>
+  <div class="loading-box">
+    <span class="loading-ring"><i></i><i></i><i></i></span>
+    <b id="loadingText">正在读取数据…</b>
+  </div>
+</div>
 <div class="toast-host" id="toastHost"></div>
 <div class="boot-mask"><div class="boot-spin"></div><span>正在读取本机 WorkBuddy 用量…</span></div>
 

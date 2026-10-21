@@ -76,7 +76,8 @@ SYNC_JS = r"""
       PackageCodes: codes });
     out.paid = await post('/billing/meter/get-user-resource-paid-packages', {
       PageNumber: 1, PageSize: 20, Status: [0, 3], PackageCodes: codes, NeedRenewInfo: true });
-    const from = ds(new Date(now.getTime() - 29 * 86400000));
+    // 增量扫描：起始日由 Python 根据缓存里最新一天推算（见 _usage_since）
+    const from = (window.__wbSince) || ds(new Date(now.getTime() - 29 * 86400000));
     // 逐页取全（此前只取第 1 页，导致日历只剩两天数据）
     let page = 1, all = [], total = 0;
     do {
@@ -409,7 +410,8 @@ class AccountService:
                     else:
                         time.sleep(2.0)
 
-                    self.win.evaluate_js("window.__wbBill=null;")
+                    since = self._usage_since()
+                    self.win.evaluate_js("window.__wbBill=null; window.__wbSince=%s;" % json.dumps(since))
                     self.win.evaluate_js(SYNC_JS)
                     raw = None
                     for _ in range(30):
@@ -433,7 +435,7 @@ class AccountService:
             if not bill or not bill.get("ok"):
                 raise RuntimeError(last_err or "接口未返回数据")
 
-            mapped = self._map(bill)
+            mapped = self._map(bill, self.state.get("usageRows") or [])
             with self.lock:
                 self.state.update({
                     "status": "connected",
@@ -463,7 +465,30 @@ class AccountService:
         finally:
             self._syncing = False
 
-    def _map(self, bill):
+    def _usage_since(self):
+        """增量扫描起点（保护账号，避免每次都全量拉 30 天）。
+
+        规则：
+        - 有缓存：从"缓存里最新一天 - 2 天"开始（覆盖跨天延迟入账），最多回看 30 天；
+        - 缓存断档超过 25 天：说明很久没同步，回退成完整 30 天；
+        - 无缓存：完整 30 天。
+        已经过去的日期账单不会变，重复拉只会增加请求量，没有信息增量。
+        """
+        today = dt.date.today()
+        full = (today - dt.timedelta(days=29)).isoformat()
+        days = [d.get("date") for d in (self.state.get("daily") or []) if d.get("date")]
+        if not days:
+            return full
+        try:
+            last = dt.date.fromisoformat(max(days))
+        except Exception:
+            return full
+        if (today - last).days > 25:
+            return full
+        start = last - dt.timedelta(days=2)
+        return max(full, start.isoformat())
+
+    def _map(self, bill, prev_rows=None):
         sm = ((bill.get("summary") or {}).get("json") or {}).get("data") or {}
         available = _num(sm.get("TotalCredits"))
         groups = sm.get("CreditGroups") or []
@@ -496,7 +521,33 @@ class AccountService:
         expire_at = min(expiries) if expiries else ""
         cycle_start = min(starts)[:10] if starts else ""
 
-        rows = ((((bill.get("usage") or {}).get("json") or {}).get("data") or {}).get("data")) or []
+        # ---- 逐笔：归一化 + 与缓存合并 ----
+        # 增量扫描只拉"上次之后"的窗口，因此必须把新数据并进缓存，否则视图会缺历史。
+        # 去重键优先用 requestId，缺失时退化为「时间|模型|积分」。
+        raw_rows = ((((bill.get("usage") or {}).get("json") or {}).get("data") or {}).get("data")) or []
+        merged = {}
+        for r in (prev_rows or []):
+            t = str(r.get("t") or r.get("requestTime") or "")[:19]
+            if not t:
+                continue
+            rid = r.get("id") or r.get("requestId") or "%s|%s|%s" % (t, r.get("model"), r.get("credit"))
+            merged[rid] = {"requestTime": t, "credit": _num(r.get("credit")),
+                           "model": str(r.get("model") or ""),
+                           "agentPurpose": str(r.get("purpose") or r.get("agentPurpose") or "")}
+        for r in raw_rows:
+            t = str(r.get("requestTime") or "")[:19]
+            if not t:
+                continue
+            rid = str(r.get("requestId") or "%s|%s|%s" % (t, r.get("model"), r.get("credit")))
+            merged[rid] = {"requestTime": t, "credit": _num(r.get("credit")),
+                           "model": str(r.get("model") or ""),
+                           "agentPurpose": str(r.get("agentPurpose") or "")}
+
+        cutoff = (dt.date.today() - dt.timedelta(days=29)).isoformat()
+        rows = [v for v in merged.values() if str(v.get("requestTime") or "")[:10] >= cutoff]
+        rows.sort(key=lambda x: x["requestTime"], reverse=True)
+        rows = rows[:1500]
+
         daily = {}
         for r in rows:
             t = str(r.get("requestTime") or "")[:10]
@@ -508,18 +559,14 @@ class AccountService:
 
         # 逐笔明细（云端口径）：换一台电脑登录同一账号，看到的也是这一份
         usage_rows = []
-        for r in rows:
-            t = str(r.get("requestTime") or "")[:19]
-            if not t:
+        for rid, v in merged.items():
+            t = v["requestTime"]
+            if t[:10] < cutoff:
                 continue
-            usage_rows.append({
-                "t": t,
-                "credit": round(_num(r.get("credit")), 4),
-                "model": str(r.get("model") or ""),
-                "purpose": str(r.get("agentPurpose") or ""),
-            })
+            usage_rows.append({"id": rid, "t": t, "credit": round(v["credit"], 4),
+                               "model": v["model"], "purpose": v["agentPurpose"]})
         usage_rows.sort(key=lambda x: x["t"], reverse=True)
-        usage_rows = usage_rows[:1500]     # 30 天足够，防止缓存无限增长
+        usage_rows = usage_rows[:1500]
 
         # 账号身份（昵称/头像/手机号）
         ident = {}

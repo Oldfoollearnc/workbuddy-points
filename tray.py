@@ -73,6 +73,11 @@ class WNDCLASSW(ctypes.Structure):
 
 WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
 
+# GetModuleHandleW 必须声明返回值：默认按 c_int 处理会在 64 位下截断模块句柄，
+# 传给 RegisterClassW 后 Windows 拿到一个非法 HINSTANCE，创建窗口时直接 access violation。
+kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
+kernel32.GetModuleHandleW.restype = wintypes.HMODULE
+
 user32.RegisterClassW.argtypes = [ctypes.POINTER(WNDCLASSW)]
 user32.RegisterClassW.restype = wintypes.ATOM
 user32.CreateWindowExW.argtypes = [
@@ -97,6 +102,12 @@ user32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
 user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 user32.DestroyMenu.argtypes = [wintypes.HMENU]
+user32.DestroyWindow.argtypes = [wintypes.HWND]
+user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
+user32.PostQuitMessage.argtypes = [ctypes.c_int]
+user32.SetMenuDefaultItem.argtypes = [wintypes.HMENU, wintypes.UINT, wintypes.UINT]
+user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
+user32.LoadIconW.argtypes = [wintypes.HINSTANCE, ctypes.c_void_p]
 shell32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]
 shell32.Shell_NotifyIconW.restype = wintypes.BOOL
 

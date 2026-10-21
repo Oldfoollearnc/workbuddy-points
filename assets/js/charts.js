@@ -900,7 +900,7 @@
           rect.style.transformOrigin = 'center';
           rect.style.transform = 'scale(.82)';
         }
-        cells.push({ node: rect, col, op: future ? 0.32 : 1 });
+        cells.push({ node: rect, col, row, op: future ? 0.32 : 1 });
 
         const wd = '日一二三四五六'[d.getDay()];
         const rowsTip = [
@@ -917,7 +917,9 @@
       if (play && cells.length) {
         requestAnimationFrame(() => {
           cells.forEach(c => {
-            const delay = c.col * 14;
+            // 从左上角起按"曼哈顿距离"传波：一个格子推它右边和下边的格子，
+            // 因此对角线上的格子同时被点亮，看起来是一圈一圈向右下推开，而不是整列跳变。
+            const delay = (c.col + c.row) * 9;
             c.node.style.transition = `opacity 260ms ease-out ${delay}ms, transform 340ms cubic-bezier(.16,1,.3,1) ${delay}ms`;
             c.node.style.opacity = String(c.op);
             c.node.style.transform = 'scale(1)';
