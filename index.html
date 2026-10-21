@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light" data-motion="full">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>WorkBuddy 积分观测台</title>
+<link rel="icon" href="assets/icon.png">
+<link rel="stylesheet" href="assets/css/tokens.css">
+<link rel="stylesheet" href="assets/css/app.css">
+</head>
+<body data-mode="main">
+
+<!-- ===================== 图标库 ===================== -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 20V4"/><path d="M4 20h16"/><rect x="7.5" y="12" width="3" height="5" rx="1"/><rect x="13" y="8" width="3" height="9" rx="1"/><rect x="18" y="14" width="2.6" height="3" rx="1"/></symbol>
+  <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.6" cy="6" r="1.2"/><circle cx="3.6" cy="12" r="1.2"/><circle cx="3.6" cy="18" r="1.2"/></symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><circle cx="4" cy="12" r="2"/><circle cx="12" cy="10" r="2"/><circle cx="20" cy="14" r="2"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.2v2M12 19.8v2M2.2 12h2M19.8 12h2M5 5l1.4 1.4M17.6 17.6L19 19M19 5l-1.4 1.4M6.4 17.6L5 19"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.5 15.3A8.6 8.6 0 0 1 8.7 3.5 8.8 8.8 0 1 0 20.5 15.3Z"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 3h7v7"/><path d="M21 3l-8.5 8.5"/><path d="M10 21H3v-7"/><path d="M3 21l8.5-8.5"/></symbol>
+  <symbol id="i-collapse" viewBox="0 0 24 24"><path d="M21 10h-7V3"/><path d="M21 3l-8 8"/><path d="M3 14h7v7"/><path d="M3 21l8-8"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-max" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2.2"/></symbol>
+  <symbol id="i-restore" viewBox="0 0 24 24"><rect x="4" y="8" width="12" height="12" rx="2.2"/><path d="M8 8V6.2A2.2 2.2 0 0 1 10.2 4H18a2.2 2.2 0 0 1 2.2 2.2V14a2.2 2.2 0 0 1-2.2 2.2h-1.8"/></symbol>
+  <symbol id="i-bar" viewBox="0 0 24 24"><rect x="4" y="12" width="4" height="8" rx="1.2"/><rect x="10" y="6" width="4" height="14" rx="1.2"/><rect x="16" y="9" width="4" height="11" rx="1.2"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2Z"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5.4l3.4 2"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.8"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M4.5 12.5l5 5 10-11"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M18 13l-6 6-6-6"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.2l1.9 4.9 4.9 1.9-4.9 1.9L12 16.8l-1.9-4.9L5.2 10l4.9-1.9L12 3.2Z"/><path d="M18.5 15.5l.9 2.2 2.2.9-2.2.9-.9 2.2-.9-2.2-2.2-.9 2.2-.9.9-2.2Z"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12M7.5 10.5L12 15l4.5-4.5"/><path d="M4 19.5h16"/></symbol>
+</svg>
+
+<!-- ===================== 小窗（快捷面板） ===================== -->
+<div class="popup-shell" id="popupShell">
+  <div class="popup-card">
+    <header class="pop-head">
+      <div class="pop-brand">
+        <img class="logo-img" src="assets/icon.png" alt="">
+        <div class="pop-brand-text"><b>WorkBuddy</b><em>积分观测台 · 今日用量</em></div>
+      </div>
+      <div class="pop-tools">
+        <button class="pop-btn" id="popRefresh" title="刷新本地记录（只读本机会话记录，不请求云端）" aria-label="刷新本地记录">
+          <svg class="i"><use href="#i-refresh"/></svg><span>刷新本地</span>
+        </button>
+        <button class="icon-btn" id="popTheme" title="切换明暗主题" aria-label="切换明暗主题"><svg class="i"><use href="#i-moon"/></svg></button>
+        <button class="icon-btn" id="popExpandTop" title="展开完整面板" aria-label="展开完整面板"><svg class="i"><use href="#i-expand"/></svg></button>
+        <button class="icon-btn" id="popHide" title="收起到系统托盘" aria-label="收起到系统托盘"><svg class="i"><use href="#i-close"/></svg></button>
+      </div>
+    </header>
+
+    <div class="pop-body">
+      <section class="pop-hero">
+        <div class="pop-hero-main">
+          <span class="eyebrow" id="popAvailLabel">今日使用积分</span>
+          <div class="big"><span id="popTodayUsed">0</span><em>分</em></div>
+          <div class="pop-hero-sub">
+            <span class="delta" id="popDelta">—</span>
+            <span class="muted">较昨日</span>
+            <span class="pop-sep">·</span>
+            <span class="muted">可用 <b id="popAvailable">0</b> 分</span>
+          </div>
+        </div>
+        <div class="quota-mini">
+          <div class="quota-mini-head"><span>额度已用</span><b id="popUsedPct">0%</b></div>
+          <div class="track"><i id="popProgress"></i></div>
+          <div class="quota-mini-foot" id="popCycle">—</div>
+        </div>
+      </section>
+      <p class="pop-latency" id="popLatency">
+        <svg class="i"><use href="#i-clock"/></svg>
+        <span>本机记录实时；云端同步有延迟（<b id="popSyncAt">—</b>）</span>
+      </p>
+
+      <section class="pop-block">
+        <div class="pop-block-head"><h3>今日消耗构成</h3><span id="popTotal">—</span></div>
+        <div class="pop-comp">
+          <div class="pop-donut" id="popDonut"></div>
+          <div class="comp-list comp-list--sm" id="popCompList"></div>
+        </div>
+        <div class="comp-bar comp-bar--sm" id="popCompBar"></div>
+      </section>
+
+      <section class="pop-block">
+        <div class="pop-block-head"><h3><svg class="i"><use href="#i-bar"/></svg>今日时段</h3><span id="popPeak">—</span></div>
+        <div class="pop-bars" id="popBars"></div>
+      </section>
+
+      <section class="pop-block pop-block--flex">
+        <div class="pop-block-head"><h3>最近消耗</h3><span id="popRecentCount">—</span></div>
+        <div class="pop-list" id="popList"></div>
+      </section>
+    </div>
+
+    <footer class="pop-foot">
+      <button class="btn btn-primary btn-block" id="popExpand">展开完整面板 <svg class="i"><use href="#i-expand"/></svg></button>
+      <div class="pop-foot-note">
+        <span class="dot-live"></span>
+        <span id="popUpdated">—</span>
+        <span class="pop-foot-dot">·</span>
+        <button class="pop-link" id="popCloud" title="立即同步云端账号（按需手动，不提高自动同步频率）">同步云端</button>
+      </div>
+    </footer>
+  </div>
+</div>
+
+<!-- ===================== 主界面 ===================== -->
+<div class="app-shell" id="appShell">
+  <!-- 顶栏：自绘标题栏。左侧放 logo，中间是数据延迟提示，右侧是 Dock 与窗口按钮 -->
+  <header class="topbar" id="topbar">
+    <div class="tb-brand" id="brand" title="拖动窗口 · 双击最大化">
+      <img class="tb-logo" src="assets/icon.png" alt="">
+      <div class="tb-text">
+        <b>WorkBuddy</b>
+        <em>积分观测台 · <span id="appVersion">v1.0.0</span></em>
+      </div>
+    </div>
+    <div class="topbar-title" id="topbarTitle">
+      <h1 id="pageTitle">总览</h1>
+      <p id="pageSub">WorkBuddy 账号的积分余额与今日使用情况</p>
+    </div>
+    <div class="dock">
+      <button class="dock-btn" id="refreshBtn" title="刷新本地记录（Ctrl+R，不请求云端）" aria-label="刷新本地记录">
+        <svg class="i"><use href="#i-refresh"/></svg>
+      </button>
+      <button class="dock-btn" id="themeBtn" title="切换明暗主题" aria-label="切换明暗主题">
+        <svg class="i"><use href="#i-moon"/></svg>
+      </button>
+      <button class="dock-avatar" id="avatar" title="账号与云端（点头像展开）" aria-haspopup="dialog" aria-expanded="false">
+        <img id="avatarImg" alt="" hidden><span id="avatarText">WB</span>
+        <i class="avatar-dot" id="avatarDot"></i>
+      </button>
+    </div>
+
+    <!-- 账号悬浮栏：贴着头像下方，只放账号相关内容，点外部/ Esc 关闭 -->
+    <div class="acct-pop" id="acctPop" role="dialog" aria-label="账号与云端" hidden>
+      <div class="acct-pop-head">
+        <div class="avatar avatar-lg" id="accAvatar">WB</div>
+        <div class="acct-name">
+          <b id="accName">未连接账号</b>
+          <span id="accPlan">扫码后可读取余额与有效期</span>
+          <span class="mono" id="accId">—</span>
+        </div>
+        <span class="chip" id="cloudChip">未连接</span>
+      </div>
+      <div class="acct-metrics">
+        <div><span>可用积分</span><b id="cloudAvail">—</b></div>
+        <div><span>本周期已用</span><b id="cloudUsed">—</b></div>
+        <div><span>当前周期</span><b id="cloudCycle">—</b></div>
+        <div><span>有效期至</span><b id="cloudExpire">—</b></div>
+      </div>
+      <div class="acct-sync"><span>上次同步</span><b id="accLastSync">—</b></div>
+      <div class="pkg-list" id="pkgList"></div>
+      <div class="acct-actions">
+        <button class="btn btn-primary btn-sm" id="cloudLogin">连接账号</button>
+        <button class="btn btn-ghost btn-sm" id="cloudSync">立即同步</button>
+        <button class="btn btn-ghost btn-sm" id="cloudLogout">断开</button>
+      </div>
+      <p class="acct-pop-note" id="cloudHint">登录态经 DPAPI 加密保存在本机，不上传</p>
+    </div>
+    <div class="win-controls" id="winControls">
+      <button class="win-btn" id="winMin" title="最小化到右下角小窗" aria-label="最小化">
+        <svg class="i"><use href="#i-minus"/></svg>
+      </button>
+      <button class="win-btn" id="winMax" title="最大化" aria-label="最大化">
+        <svg class="i"><use href="#i-max"/></svg>
+      </button>
+      <button class="win-btn win-btn--close" id="winClose" title="收起到系统托盘" aria-label="关闭">
+        <svg class="i"><use href="#i-close"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <div class="main-shell" id="mainShell">
+  <aside class="sidebar">
+    <nav class="nav" id="nav" aria-label="主导航">
+      <span class="nav-indicator" id="navIndicator"></span>
+      <button class="nav-item is-active" data-view="overview"><svg class="i"><use href="#i-grid"/></svg><span>总览</span></button>
+      <button class="nav-item" data-view="analytics"><svg class="i"><use href="#i-chart"/></svg><span>用量分析</span></button>
+      <button class="nav-item" data-view="ledger"><svg class="i"><use href="#i-list"/></svg><span>积分流水</span></button>
+      <button class="nav-item" data-view="settings"><svg class="i"><use href="#i-sliders"/></svg><span>设置</span></button>
+    </nav>
+
+    <div class="side-quota">
+      <div class="side-quota-head"><span>本周期额度</span><span class="chip chip-brand" id="sidePlan">专业版</span></div>
+      <div class="side-quota-num"><b id="sideLeft">0</b><span>/ 200,000 分</span></div>
+      <div class="track track-sm"><i id="sideProgress"></i></div>
+      <div class="side-quota-foot"><span>已用 <b id="sideUsedPct">0%</b></span><span id="sideCycle">—</span></div>
+    </div>
+
+    <div class="side-foot">
+      <div class="side-version"><span id="sideVersion">v1.0.0</span> · WorkBuddy 积分</div>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <div class="views" id="views">
+
+      <!-- ---------- 总览 ---------- -->
+      <section class="view is-active" data-view="overview">
+        <!-- 数据来源与延迟说明：放在数字旁边，不放顶栏 -->
+        <div class="notice" id="dataNotice">
+          <span class="notice-icon"><svg class="i"><use href="#i-info"/></svg></span>
+          <p class="notice-text" id="noticeText">正在读取数据…</p>
+          <button class="notice-link" id="noticeSource">数据源</button>
+        </div>
+
+        <div class="kpi-grid">
+          <article class="card kpi" style="--i:0">
+            <div class="kpi-top">
+              <span class="kpi-label" id="kpi1Label">可用积分</span>
+              <span class="kpi-icon tint-brand"><svg class="i"><use href="#i-bolt"/></svg></span>
+            </div>
+            <div class="kpi-value"><span data-count="available">0</span><em>分</em></div>
+            <div class="kpi-foot"><span class="chip chip-brand" id="kpiAvailSub">—</span><span class="muted" id="kpiAvailNote">—</span></div>
+            <div class="kpi-spark" data-spark="available"></div>
+          </article>
+
+          <article class="card kpi" style="--i:1">
+            <div class="kpi-top">
+              <span class="kpi-label">今日消耗</span>
+              <span class="kpi-icon tint-cyan"><svg class="i"><use href="#i-chart"/></svg></span>
+            </div>
+            <div class="kpi-value"><span data-count="todayUsed">0</span><em>分</em></div>
+            <div class="kpi-foot"><span class="delta" id="kpiTodayDelta">—</span><span class="muted">较昨日</span></div>
+            <div class="kpi-spark" data-spark="todayUsed"></div>
+          </article>
+
+          <article class="card kpi" style="--i:2">
+            <div class="kpi-top">
+              <span class="kpi-label" id="kpi3Label">今日调用</span>
+              <span class="kpi-icon tint-green"><svg class="i"><use href="#i-refresh"/></svg></span>
+            </div>
+            <div class="kpi-value"><span data-count="todayReq">0</span><em>次</em></div>
+            <div class="kpi-foot"><span class="chip chip-good" id="kpiEarnedSub">平均每次</span><span class="muted"><b id="kpiNet">—</b> 分 / 次</span></div>
+            <div class="kpi-spark" data-spark="todayEarned"></div>
+          </article>
+
+          <article class="card kpi" style="--i:3">
+            <div class="kpi-top">
+              <span class="kpi-label" id="kpi4Label">今日 Token</span>
+              <span class="kpi-icon tint-violet"><svg class="i"><use href="#i-chart"/></svg></span>
+            </div>
+            <div class="kpi-value"><span data-count="todayToken" data-decimals="0">0</span><em>万</em></div>
+            <div class="kpi-foot"><span class="chip" id="kpiDaysSub">累计上下文</span><span class="muted" id="kpiAvg">—</span></div>
+            <div class="kpi-spark" data-spark="daysLeft"></div>
+          </article>
+        </div>
+
+        <div class="insight-strip" id="insightStrip"></div>
+
+        <div class="grid">
+          <article class="card chart-card span-8" style="--i:4">
+            <header class="card-head">
+              <div>
+                <h2>今日消耗时段分布</h2>
+                <p>按小时统计积分消耗，虚线标记当前时段 · 单位：分</p>
+              </div>
+              <div class="card-tools"><span class="chip chip-brand" id="hourlyPeak">—</span></div>
+            </header>
+            <div class="chart chart-hourly" data-chart="hourly"></div>
+            <footer class="card-foot">
+              <div class="foot-stats">
+                <span>今日请求 <b id="footReq">—</b> 次</span>
+                <span>平均 <b id="footAvg">—</b> 分/次</span>
+                <span>Token <b id="footToken">—</b></span>
+              </div>
+              <span class="muted">数据截至 <b id="footNow">18:27</b></span>
+            </footer>
+          </article>
+
+          <article class="card quota-card span-4" style="--i:5">
+            <header class="card-head">
+              <div>
+                <h2>额度与消耗</h2>
+                <p>本周期额度进度与可用天数</p>
+              </div>
+            </header>
+            <div class="chart chart-gauge" data-chart="gauge"></div>
+            <div class="quota-stats">
+              <div><span>本周可用</span><b id="quotaWeek">—</b></div>
+              <div><span>周期剩余</span><b id="quotaLeft">—</b></div>
+              <div><span>每日可用</span><b id="quotaDay" class="warn">—</b></div>
+            </div>
+            <div class="quota-today" id="quotaToday">
+              <div class="qt-head"><span>今日用量 / 日均额</span><b id="quotaTodayPct">—</b></div>
+              <div class="qt-track"><i id="quotaTodayBar"></i><em id="quotaTodayMark"></em></div>
+              <p class="qt-main" id="quotaTodayMain">—</p>
+              <p class="qt-sub" id="quotaTodaySub">—</p>
+            </div>
+            <p class="quota-hint" id="quotaHint">按剩余工作日折算，可用积分取自云端</p>
+          </article>
+        </div>
+
+        <div class="grid">
+          <article class="card chart-card span-8" style="--i:6">
+            <header class="card-head">
+              <div>
+                <h2>近 30 天消耗趋势</h2>
+                <p>柱：每日消耗 · 线：区间累计（右轴）</p>
+              </div>
+              <div class="card-tools">
+                <div class="segmented" id="rangeSeg" role="tablist">
+                  <button class="is-active" data-range="30">30 天</button>
+                  <button data-range="14">14 天</button>
+                  <button data-range="7">7 天</button>
+                </div>
+              </div>
+            </header>
+            <div class="chart chart-trend" data-chart="trend"></div>
+          </article>
+
+          <article class="card chart-card span-4 comp-card" style="--i:7">
+            <header class="card-head">
+              <div>
+                <h2>今日消耗构成</h2>
+                <p>按模型拆分，环图 + 堆叠条 + 明细</p>
+              </div>
+              <div class="card-tools"><span class="chip" id="compCount">—</span></div>
+            </header>
+            <div class="comp-wrap">
+              <div class="comp-donut" id="compDonut"></div>
+              <div class="comp-bar" id="compBar"></div>
+              <div class="comp-list" id="compList"></div>
+            </div>
+            <div class="chart-note" id="compNote"></div>
+          </article>
+        </div>
+      </section>
+
+      <!-- ---------- 用量分析 ---------- -->
+      <section class="view" data-view="analytics">
+        <div class="grid">
+          <article class="card chart-card span-12 cal-card" style="--i:0">
+            <header class="card-head">
+              <div>
+                <h2>消耗日历</h2>
+                <p id="calSub">每格一天，从当月起按整月对齐 · 颜色越深消耗越多 · 悬停查看当天用量</p>
+              </div>
+              <div class="card-tools">
+                <span class="cal-legend" id="calLegend"><em>少</em><i></i><i></i><i></i><i></i><i></i><em>多</em></span>
+                <span class="chip" id="calSource">—</span><span class="chip" id="weekSum">—</span>
+              </div>
+            </header>
+            <div class="chart chart-cal" data-chart="calendar"></div>
+          </article>
+        </div>
+
+        <div class="grid grid--lists">
+          <article class="card list-card span-6" style="--i:1">
+            <header class="card-head">
+              <div><h2>模型使用量</h2><p>近 30 天按模型统计积分与调用次数</p></div>
+              <div class="card-tools"><span class="chip" id="modelTotal">—</span></div>
+            </header>
+            <div class="rows-head"><span></span><span>模型</span><span></span><span class="ta-r">积分</span><span class="ta-r">占比</span></div>
+            <div class="rows" id="modelList"></div>
+            <div class="model-single" id="modelSingle" hidden></div>
+          </article>
+
+          <article class="card list-card span-6" style="--i:2">
+            <header class="card-head">
+              <div><h2>项目消耗排行</h2><p>近 7 天 Top 6 项目，条形长度按消耗占比</p></div>
+              <div class="card-tools"><span class="chip" id="projTotal">—</span></div>
+            </header>
+            <div class="rows-head"><span></span><span>项目</span><span></span><span class="ta-r">积分</span><span class="ta-r">占比</span></div>
+            <div class="rows" id="projectRank"></div>
+          </article>
+        </div>
+
+        <div class="grid">
+          <article class="card span-12 insight-card" style="--i:3">
+            <header class="card-head">
+              <div><h2>今日洞察</h2><p>基于当前用量自动生成的观察与建议</p></div>
+            </header>
+            <div class="insight-list" id="insightList"></div>
+          </article>
+        </div>
+      </section>
+
+      <!-- ---------- 积分流水 ---------- -->
+      <section class="view" data-view="ledger">
+        <article class="card ledger-card">
+          <header class="card-head ledger-head">
+            <div>
+              <h2>积分流水</h2>
+              <p id="ledgerSub">本机调用记录</p>
+            </div>
+            <div class="ledger-tools">
+              <div class="segmented" id="ledgerType">
+                <button class="is-active" data-type="all">全部</button>
+                <button data-type="today">今日</button>
+                <button data-type="week">近 7 天</button>
+              </div>
+              <label class="search" for="ledgerSearch">
+                <svg class="i"><use href="#i-search"/></svg>
+                <input id="ledgerSearch" type="text" placeholder="搜索模型 / 项目 / 任务" autocomplete="off">
+              </label>
+            </div>
+          </header>
+
+          <div class="ledger-summary" id="ledgerSummary"></div>
+
+          <div class="table" id="ledgerTable">
+            <div class="table-head">
+              <span>时间</span><span>类型</span><span>模型 / 来源</span><span>动作</span><span>项目</span><span class="ta-r">积分</span><span class="ta-r">占比</span>
+            </div>
+            <div class="table-body" id="ledgerBody"></div>
+          </div>
+
+          <footer class="table-foot">
+            <span id="ledgerCount" class="muted">—</span>
+            <button class="btn btn-ghost" id="ledgerMore">加载更多</button>
+          </footer>
+        </article>
+      </section>
+
+      <!-- ---------- 设置 ---------- -->
+      <section class="view" data-view="settings">
+        <div class="set-page">
+
+          <!-- 外观 -->
+          <section class="set-group">
+            <header class="set-group-head">
+              <div><h2>外观</h2><p>主题与动效，点击后立即生效</p></div>
+            </header>
+            <div class="set-rows">
+              <div class="set-row set-row--stack">
+                <div class="set-label"><b>主题模式</b><em>切换时 260ms 交叉淡入，图表同步重绘</em></div>
+                <div class="theme-grid" id="themeCards">
+                  <button class="theme-card" data-theme-choice="light">
+                    <span class="theme-preview theme-preview--light"><i></i><i></i><i></i><i></i></span>
+                    <span class="theme-name">浅色 · 蓝白</span>
+                  </button>
+                  <button class="theme-card" data-theme-choice="dark">
+                    <span class="theme-preview theme-preview--dark"><i></i><i></i><i></i><i></i></span>
+                    <span class="theme-name">深色 · 曜蓝</span>
+                  </button>
+                  <button class="theme-card" data-theme-choice="system">
+                    <span class="theme-preview theme-preview--system"><i></i><i></i><i></i><i></i></span>
+                    <span class="theme-name">跟随系统</span>
+                  </button>
+                </div>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>动效强度</b><em>卡片入场与图表绘制的动画幅度</em></div>
+                <div class="segmented segmented-lg" id="motionSeg">
+                  <button data-motion-choice="full">完整</button>
+                  <button data-motion-choice="reduced">精简</button>
+                  <button data-motion-choice="off">关闭</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 显示与行为 -->
+          <section class="set-group">
+            <header class="set-group-head">
+              <div><h2>显示与行为</h2><p>偏好保存在本机，立即生效</p></div>
+            </header>
+            <div class="set-rows">
+              <div class="set-row">
+                <div class="set-label"><b>图表数值标注</b><em>在柱体与扇区上显示数值</em></div>
+                <label class="switch-wrap"><input type="checkbox" id="optLabels" checked><i class="switch"></i></label>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>关闭时收起到托盘</b><em>关闭窗口不退出程序，可从托盘重新唤起</em></div>
+                <label class="switch-wrap"><input type="checkbox" id="optTray" checked><i class="switch"></i></label>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>工作日折算</b><em>剔除周末与法定节假日，计算每日可用积分</em></div>
+                <label class="switch-wrap"><input type="checkbox" id="optHoliday" checked><i class="switch"></i></label>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>计入每日签到</b><em>把签到赠送的 100 分/天计入可用额度</em></div>
+                <label class="switch-wrap"><input type="checkbox" id="optSignin" checked><i class="switch"></i></label>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>本地刷新间隔</b><em>只重读本机记录，不产生任何网络请求</em></div>
+                <select id="optLocalRefresh" class="mini-select">
+                  <option value="30">30 秒</option>
+                  <option value="60">1 分钟</option>
+                  <option value="300">5 分钟</option>
+                  <option value="0">手动</option>
+                </select>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>云端同步间隔</b><em>默认 60 分钟；「仅手动」时不发任何定时请求</em></div>
+                <select id="cloudInterval" class="mini-select">
+                  <option value="15">15 分钟</option>
+                  <option value="30">30 分钟</option>
+                  <option value="60">1 小时</option>
+                  <option value="180">3 小时</option>
+                  <option value="0">仅手动</option>
+                </select>
+              </div>
+            </div>
+          </section>
+
+          <!-- 数据源 -->
+          <section class="set-group">
+            <header class="set-group-head">
+              <div><h2>数据源</h2><p>本地记录只读解析；公司电脑可手动指定数据目录</p></div>
+            </header>
+            <div class="set-rows">
+              <div class="set-row set-row--stack">
+                <div class="set-label"><b>数据目录</b><em id="srcKind">—</em></div>
+                <div class="path-box">
+                  <code id="srcPath">—</code>
+                  <button class="btn btn-soft btn-sm" id="dbPick">选择目录</button>
+                  <button class="btn btn-ghost btn-sm" id="dbReset">重新检测</button>
+                </div>
+                <p class="set-note" id="dbNote">—</p>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>云端账号</b></div>
+                <b class="set-value" id="srcCloud">未连接</b>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>本地记录</b><em>JSONL 逐笔行数</em></div>
+                <b class="set-value" id="srcRecords">—</b>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>覆盖天数</b><em>有消耗记录的自然日</em></div>
+                <b class="set-value" id="srcDays">—</b>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>云端同步间隔</b></div>
+                <b class="set-value" id="srcInterval">—</b>
+              </div>
+            </div>
+          </section>
+
+          <!-- 关于 -->
+          <section class="set-group">
+            <header class="set-group-head">
+              <div><h2>关于</h2><p>WorkBuddy 积分观测台 · 本机只读 + 云端只读</p></div>
+            </header>
+            <div class="set-rows">
+              <div class="set-row">
+                <div class="set-label"><b>版本</b><em>每次提交自动递增，格式 v主.次.修订</em></div>
+                <b class="set-value mono" id="aboutVersion">v1.0.0</b>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>快捷面板</b><em>独立常驻面板，与窗口最小化不同</em></div>
+                <button class="btn btn-soft btn-sm" id="popPreviewBtn"><svg class="i"><use href="#i-expand"/></svg>预览小窗</button>
+              </div>
+            </div>
+          </section>
+
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<!-- 自绘缩放手柄：窗口已去掉系统边框（避免顶部黑边），边缘 4px 热区负责缩放 -->
+<div class="rz" id="rz" aria-hidden="true">
+  <i class="rz-n" data-rz="n"></i><i class="rz-s" data-rz="s"></i>
+  <i class="rz-w" data-rz="w"></i><i class="rz-e" data-rz="e"></i>
+  <i class="rz-nw" data-rz="nw"></i><i class="rz-ne" data-rz="ne"></i>
+  <i class="rz-sw" data-rz="sw"></i><i class="rz-se" data-rz="se"></i>
+</div>
+
+<div class="tooltip" id="tooltip" role="tooltip"></div>
+<div class="toast-host" id="toastHost"></div>
+<div class="boot-mask"><div class="boot-spin"></div><span>正在读取本机 WorkBuddy 用量…</span></div>
+
+<script src="assets/js/data.js"></script>
+<script src="assets/js/holidays.js"></script>
+<script src="assets/js/charts.js"></script>
+<script src="assets/js/app.js"></script>
+</body>
+</html>
