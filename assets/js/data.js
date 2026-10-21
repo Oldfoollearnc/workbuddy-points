@@ -139,6 +139,7 @@
     tone: m.tone,
     points: modelPoints[i],
     requests: modelRequests[i],
+    calls: modelRequests[i],          // 构成环图按调用次数拆分
     tokens: modelTokens[i],
     share: modelPoints[i] / (todayConsumed || 1),
     avg: modelRequests[i] ? modelPoints[i] / modelRequests[i] : 0

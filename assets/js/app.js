@@ -596,46 +596,41 @@
     renderPopHours();
   }
 
-  function renderComposition(items, totalAll) {
-    const bar = $('#compBar'), list = $('#compList'), donutBox = $('#compDonut');
-    const rows = (items || []).filter(m => m.points > 0);
-    const sum = rows.reduce((a, b) => a + b.points, 0) || totalAll || 1;
+  /** 今日消耗构成：按「调用次数」拆分（不再用积分占比），只留环图 + 颜色图例 */
+  function renderComposition(items) {
+    const list = $('#compList'), donutBox = $('#compDonut');
+    const rows = (items || []).filter(m => (m.calls || 0) > 0)
+      .sort((a, b) => b.calls - a.calls);
+    const total = rows.reduce((a, b) => a + b.calls, 0) || 1;
 
     if (donutBox) {
       if (rows.length) {
         C.donut(donutBox, {
-          items: rows.map(m => ({ name: m.name, value: m.points, tone: m.tone })),
+          items: rows.map(m => ({ name: m.name, value: m.calls, tone: m.tone })),
           layout: 'bottom',
           legend: false,
           size: 232,
           hRatio: 0.84,
-          valueOutside: true,               // 数字放环外，避免长数字压到圆环
-          centerLabel: rows.length > 1 ? '今日合计' : '单一模型',
-          centerUnit: '分',
-          centerFormat: v => F.credit(v)
+          valueOutside: false,
+          centerLabel: '',                  // 中间不再写"今日合计/单一模型"
+          centerUnit: '次',
+          centerFormat: v => F.fmt(Math.round(v))
         });
       } else {
-        donutBox.innerHTML = '<div class="comp-empty">今日暂无消耗</div>';
+        donutBox.innerHTML = '<div class="comp-empty">今日暂无调用</div>';
       }
-    }
-
-    if (bar) {
-      bar.innerHTML = rows.map(m => {
-        const pct = (m.points / sum) * 100;
-        return `<i style="width:${pct.toFixed(2)}%;background:${C.toneColor(m.tone)}" title="${m.name} ${F.credit(m.points)} 分"></i>`;
-      }).join('');
     }
 
     if (list) {
       list.innerHTML = rows.map(m => {
-        const pct = (m.points / sum) * 100;
+        const pct = (m.calls / total) * 100;
         return `<div class="comp-row">
           <i class="dot" style="background:${C.toneColor(m.tone)}"></i>
           <span class="nm" title="${m.name}">${m.name}</span>
-          <span class="val">${F.credit(m.points)}</span>
+          <span class="val">${F.fmt(m.calls)} 次</span>
           <span class="pct">${pct.toFixed(1)}%</span>
         </div>`;
-      }).join('') || '<div class="comp-empty">今日暂无消耗</div>';
+      }).join('') || '<div class="comp-empty">今日暂无调用</div>';
     }
   }
 
@@ -711,26 +706,10 @@
       nowIndex: D.meta.nowHour, xEvery: 3, showValues: prefs.labels, maxBarW: 22
     });
 
-    // 构成图只统计"真的花了分"的模型：D.models 里可能包含被调用但 0 分的模型，
-    // 之前用 D.models.length 当标题会出现"写着 4 个模型、环图却只有一段"的割裂感。
-    const compRows = (D.models || []).filter(m => m.points > 0);
-    renderComposition(compRows, today.consumed);
+    // 今日消耗构成：按调用次数拆分（免费模型也计入，只要今天被调用过）
+    const compRows = (D.models || []).filter(m => (m.calls || 0) > 0);
+    renderComposition(compRows);
     setText('#compCount', compRows.length ? `${compRows.length} 个模型` : '—');
-
-    // 单一模型时补一行真实统计，避免 100% 环图信息量过低
-    const note = $('#compNote');
-    if (note) {
-      const common = `<span>平均 <b>${(today.avgPerRequest || 0).toFixed(2)}</b> 分/次</span>`
-        + `<span title="每次调用的 totalTokens 含整段上下文，逐次相加会重复计入">上下文累计 <b>${F.fmtWan(today.tokens || 0)}</b>（按次）</span>`;
-      const idle = (D.models || []).filter(m => !(m.points > 0));
-      const idleTip = idle.length ? `未计费（消耗 0 分）：${idle.map(m => m.name).join('、')}` : '';
-      const idleTag = idle.length
-        ? `<span title="${idleTip}">另 <b>${idle.length}</b> 个未计费</span>`
-        : '';
-      note.innerHTML = compRows.length <= 1
-        ? `<span><b>${F.fmt(today.requests)}</b> 次调用</span>${idleTag}${common}`
-        : `<span>共 <b>${compRows.length}</b> 个模型</span>${idleTag}${common}`;
-    }
 
     renderTrend();
 

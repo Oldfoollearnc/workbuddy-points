@@ -32,6 +32,7 @@ HOME = os.path.expanduser("~")
 # 这样在公司电脑上把数据放在 D 盘或网络盘时也能读到，见 docs/本地数据源方案.md
 CONFIG_PATH = app_paths.data_path("points_config.json")
 CACHE_PATH = app_paths.data_path(".cache", "usage.json")
+CACHE_VER = 2          # 数据结构变更时 +1，强制重算（本轮：models 增加 calls 字段）
 
 MODEL_NAMES = {
     "deepseek-v4.1-flash": "DeepSeek-V4.1-Flash",
@@ -219,7 +220,8 @@ class UsageService:
             try:
                 with open(CACHE_PATH, encoding="utf-8") as f:
                     cached = json.load(f)
-                if cached.get("sig") == sig and cached.get("home") == self.source["home"]:
+                if (cached.get("ver") == CACHE_VER and cached.get("sig") == sig
+                        and cached.get("home") == self.source["home"]):
                     data = cached["data"]
                     data["meta"]["cached"] = True
                     self._refresh_clock(data)
@@ -237,7 +239,7 @@ class UsageService:
         try:
             os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
             with open(CACHE_PATH, "w", encoding="utf-8") as f:
-                json.dump({"sig": sig, "home": self.source["home"], "data": data},
+                json.dump({"ver": CACHE_VER, "sig": sig, "home": self.source["home"], "data": data},
                           f, ensure_ascii=False)
         except Exception:
             pass
@@ -341,9 +343,15 @@ class UsageService:
         peak = max(hourly, key=lambda x: x["points"]) if hourly else hourly[0]
 
         by_model = defaultdict(float)
+        by_model_calls = defaultdict(int)
         for r in today_recs:
-            by_model[_friendly_model(r["model"])] += r["credit"]
+            name = _friendly_model(r["model"])
+            by_model[name] += r["credit"]
+            by_model_calls[name] += 1
         models = _mix(by_model, today_credit)
+        # 调用次数：今日消耗构成按"次数"拆环图，积分占比只作参考
+        for m in models:
+            m["calls"] = by_model_calls.get(m["name"], 0)
 
         by_tool = defaultdict(float)
         for r in today_recs:

@@ -869,7 +869,7 @@
       const cells = [];
 
       /* ---- 悬停：光圈 + 邻格联动提亮 ---- */
-      let halo = null, ring = null, hot = null, touched = [];
+      let halo = null, hot = null, touched = [];
       const glowR = Math.max(28, cellH * 2.8);
 
       function unfocus() {
@@ -878,7 +878,6 @@
         touched = [];
         hot = null;
         if (halo) halo.setAttribute('opacity', '0');
-        if (ring) { ring.__stop && ring.__stop(); ring.setAttribute('opacity', '0'); }
       }
 
       function focus(c) {
@@ -904,19 +903,6 @@
         halo.setAttribute('cy', cy0);
         halo.setAttribute('r', glowR);
         halo.setAttribute('opacity', '1');
-
-        // 一圈向外扩散的涟漪：transform + opacity 由合成层执行，最稳
-        ring.setAttribute('cx', cx0);
-        ring.setAttribute('cy', cy0);
-        ring.setAttribute('r', glowR * 0.82);
-        ring.setAttribute('opacity', '0');
-        if (ring.animate && motionLevel() !== 'off') {
-          const anim = ring.animate(
-            [{ transform: 'scale(.42)', opacity: .85 }, { transform: 'scale(1)', opacity: 0 }],
-            { duration: 620, easing: 'cubic-bezier(.22,1,.36,1)' }
-          );
-          ring.__stop = () => { try { anim.cancel(); } catch (e) { /* ignore */ } };
-        }
       }
 
       let prevMonth = -1;
@@ -982,11 +968,6 @@
       const layer = el('g', { 'pointer-events': 'none' }, svg);
       halo = el('circle', {
         cx: -999, cy: -999, r: 0, fill: `url(#${haloId})`, opacity: 0, class: 'cal-halo'
-      }, layer);
-      ring = el('circle', {
-        cx: -999, cy: -999, r: 0, fill: 'none', stroke: base, 'stroke-width': 1.2,
-        opacity: 0, class: 'cal-ring',
-        style: 'transform-box:fill-box;transform-origin:center'
       }, layer);
       svg.addEventListener('mouseleave', () => { hideTip(); unfocus(); });
 
