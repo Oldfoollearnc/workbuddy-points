@@ -1721,3 +1721,42 @@ body[data-mode="popup"] .rz { display: none; }
   .table-head span:nth-child(5), .table-row > *:nth-child(5) { display: none; }
   .ledger-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ===================== 加载遮罩 ===================== */
+
+.loading-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--bg) 62%, transparent);
+  backdrop-filter: blur(3px);
+  animation: veilIn 160ms var(--ease-out) both;
+}
+.loading-veil[hidden] { display: none; }
+.loading-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-radius: 14px;
+  border: 1px solid var(--border-2);
+  background: var(--surface);
+  box-shadow: var(--shadow-3);
+  font-size: 12px;
+  color: var(--text-1);
+}
+.loading-ring { position: relative; width: 26px; height: 26px; flex: none; }
+.loading-ring i {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--brand);
+  animation: ringSpin 900ms linear infinite;
+}
+.loading-ring i:nth-child(2) { inset: 4px; border-top-color: var(--brand-2); animation-duration: 700ms; animation-direction: reverse; }
+.loading-ring i:nth-child(3) { inset: 8px; border-top-color: var(--good); animation-duration: 1100ms; }
+@keyframes ringSpin { to { transform: rotate(360deg); } }
+@keyframes veilIn { from { opacity: 0; } to { opacity: 1; } }
