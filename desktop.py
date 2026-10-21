@@ -310,6 +310,7 @@ class Desktop:
         self.login_win.events.closing += self._on_login_closing
         self.account.attach(self.login_win)
         threading.Thread(target=self._watch_minimize, daemon=True).start()
+        threading.Thread(target=self._watch_popup_focus, daemon=True).start()
         log(f"windows created, scale={s}, popup={pw}x{ph}, main={main_w}x{main_h}")
 
     # ---------- 显隐 ----------
@@ -344,8 +345,56 @@ class Desktop:
             user32.BringWindowToTop(hwnd)
             user32.SetForegroundWindow(hwnd)
             self._nudge(hwnd)
+            self._popup_shown_at = time.time()
+            self._popup_focused = False
+            self._fg_at_show = int(user32.GetForegroundWindow() or 0)
         threading.Timer(0.35, self._refresh_popup_layout).start()
         threading.Timer(0.15, set_window_icons).start()
+
+    # ---------- 点空白处收起小窗 ----------
+
+    def _own_windows(self):
+        """本进程的窗口句柄集合：这些窗口拿到焦点时不应收起小窗。"""
+        out = set()
+        for title in (POPUP_TITLE, MAIN_TITLE, LOGIN_TITLE):
+            h = user32.FindWindowW(None, title)
+            if h:
+                out.add(int(h))
+        tray = getattr(self, "tray", None)
+        if tray is not None and getattr(tray, "hwnd", None):
+            out.add(int(tray.hwnd))
+        return out
+
+    def _watch_popup_focus(self):
+        """点小窗之外的任何地方就收起。
+
+        小窗是独立顶层窗口，点桌面/别的程序不会触发任何 JS 事件，只能轮询前台窗口。
+        判定规则（避免"抢不到焦点就自动消失"的误伤）：
+        1. 前台是本进程窗口（小窗/主窗/登录窗/托盘）→ 不动；
+        2. 前台 == 弹出瞬间的前台（说明我们没抢到焦点，用户还没操作）→ 不动；
+        3. 其余情况 = 用户把焦点给了别的窗口 → 收起。
+        """
+        log("popup focus watcher started")
+        while not getattr(self, "quitting", False):
+            time.sleep(0.3)
+            try:
+                hwnd = user32.FindWindowW(None, POPUP_TITLE)
+                if not hwnd or not user32.IsWindowVisible(hwnd):
+                    continue
+                if time.time() - getattr(self, "_popup_shown_at", 0) < 0.85:
+                    continue
+                fg = int(user32.GetForegroundWindow() or 0)
+                if not fg:
+                    continue
+                if fg in self._own_windows():
+                    self._popup_focused = True
+                    continue
+                if not getattr(self, "_popup_focused", False):
+                    continue   # 还没真正获得过焦点：不判断，交给前端 blur 兜底
+                log(f"popup lost focus (fg={fg}), hide")
+                self.hide_popup()
+            except Exception as e:
+                log(f"popup focus watcher error: {e}")
 
     def hide_popup(self):
         try:
