@@ -85,6 +85,9 @@
 
   --tooltip-bg: rgba(13, 26, 46, .95);
   --tooltip-text: #f2f6ff;
+
+  /* 高光扫过（入场 / 刷新共用）：亮色主题用白，深色主题用极淡的蓝白 */
+  --sheen: rgba(255, 255, 255, .62);
 }
 
 [data-theme="dark"] {
@@ -141,4 +144,6 @@
 
   --tooltip-bg: rgba(4, 9, 17, .96);
   --tooltip-text: #eaf1ff;
+
+  --sheen: rgba(150, 190, 255, .16);
 }

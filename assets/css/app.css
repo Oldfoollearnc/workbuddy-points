@@ -244,6 +244,17 @@ body.is-desktop[data-mode="popup"] .popup-card {
     linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
 }
 
+/* 入场高光：一道斜向光带扫过卡片。
+   窗口底色不透明，整体缩放会露出白边（看起来像"闪"），所以用光带表达"刚弹出"。 */
+.enter-glow {
+  position: absolute; inset: 0; z-index: 8;
+  pointer-events: none;
+  background: linear-gradient(112deg, transparent 32%, var(--sheen) 50%, transparent 68%);
+  transform: translateX(-130%);
+  animation: enterSweep 720ms cubic-bezier(.22, .8, .3, 1) both;
+}
+@keyframes enterSweep { to { transform: translateX(130%); } }
+
 .pop-head {
   height: 42px;
   flex: none;
@@ -288,9 +299,33 @@ body.is-desktop[data-mode="popup"] .popup-card {
 .pop-btn .i { width: 12px; height: 12px; }
 .pop-btn.is-spinning .i { animation: spinSoft 780ms cubic-bezier(.34, .02, .2, 1); }
 /* 小窗刷新：内容短暂淡出 + 顶部一道扫光，配合图标慢起慢收转一圈 */
-.is-refreshing .pop-hero .big,
+/* 小窗刷新：内容淡出 + 顶部进度线一次充满 + 卡片斜向高光 + 大数字轻跳 */
 .is-refreshing .pop-stats,
 .is-refreshing .quota-mini { opacity: .34; transition: opacity 170ms var(--ease-out); }
+
+.popup-card.is-refreshing::after {
+  content: ""; position: absolute; inset: 0; z-index: 7;
+  pointer-events: none;
+  background: linear-gradient(104deg, transparent 34%, var(--sheen) 50%, transparent 66%);
+  transform: translateX(-130%);
+  animation: enterSweep 640ms cubic-bezier(.3, .8, .3, 1) both;
+}
+.popup-card .refresh-bar { height: 2px; }
+.popup-card .refresh-bar::after {
+  transform: scaleX(0);
+  transform-origin: left center;
+  animation: barFill 600ms cubic-bezier(.35, .9, .2, 1) both;
+}
+@keyframes barFill { to { transform: scaleX(1); } }
+.popup-card.is-refreshing .pop-hero .big span {
+  display: inline-block;
+  animation: numPulse 600ms var(--ease-out) both;
+}
+@keyframes numPulse {
+  0% { transform: none; opacity: 1; }
+  32% { transform: translateY(-2px) scale(1.035); opacity: .45; }
+  100% { transform: none; opacity: 1; }
+}
 @keyframes spinSoft {
   0% { transform: rotate(0deg) scale(1); }
   45% { transform: rotate(250deg) scale(.88); }

@@ -201,10 +201,15 @@
     if (!m) return null;
     return new Date(+m[1], +m[2] - 1, +m[3]);
   }
+  /** 折算日判定。
+   *  「工作日折算」开 = 只算工作日（剔除周末与法定节假日）；
+   *  关 = 按自然日算（每天都可花），这样才能看出开关的差别 ——
+   *  以前关掉只是"不剔除法定节假日"，遇到没有节假日的月份就跟开着完全一样。 */
   function isWorkday(d, useHoliday) {
+    if (!useHoliday) return true;
     const w = d.getDay();
     if (w === 0 || w === 6) return false;
-    if (useHoliday && window.HOLIDAYS && HOLIDAYS.has(d)) return false;
+    if (window.HOLIDAYS && HOLIDAYS.has(d)) return false;
     return true;
   }
   function countWorkdays(from, to, useHoliday) {
@@ -222,15 +227,25 @@
     const end = parseDate(acc.expireAt) || addDays(new Date(), 30);
     const today = startOfDay(new Date());
     const leftDays = Math.max(1, diffDays(today, end) + 1);
-    const useHoliday = prefs.holiday !== false;
-    const leftWorkdays = Math.max(1, countWorkdays(today, end, useHoliday));
+    const holidayOn = prefs.holiday !== false;
+    // 关闭折算时"可花天数"就是自然日数
+    const spendDays = Math.max(1, countWorkdays(today, end, holidayOn));
     const signinOn = prefs.signin !== false;
+    // 签到每天都有（含周末），所以按自然日累加
     const signin = signinOn ? Math.max(0, 100 * leftDays) : 0;
     const pool = available + signin;
-    const perDay = pool / leftWorkdays;
-    const perWeek = perDay * Math.min(5, leftWorkdays);
-    return { perDay, perWeek, leftWorkdays, leftDays, pool, signin, end, total, available };
+    const perDay = pool / spendDays;
+    const weekSpan = holidayOn ? 5 : 7;
+    const perWeek = perDay * Math.min(weekSpan, spendDays);
+    return {
+      perDay, perWeek, leftDays, spendDays, holidayOn,
+      leftWorkdays: spendDays,          // 兼容旧字段名（旧代码按"工作日"理解）
+      pool, signin, end, total, available
+    };
   }
+
+  /** "剩余 22 个工作日" / "剩余 31 天" 的统一说法 */
+  const leftDaysText = al => (al.holidayOn ? `${al.spendDays} 个工作日` : `${al.spendDays} 天`);
 
   /* ---------------- 今日口径：统一以云端流水为准 ---------------- */
 
@@ -481,6 +496,11 @@
       lastPainted = null;
       paintTheme(resolved(), true, true);
     }
+    // 上次"收成小窗"的退场动画会留下 opacity:0，必须在重新显示前撤销
+    if (exitAnim) {
+      try { exitAnim.cancel(); } catch (e) { /* ignore */ }
+      exitAnim = null;
+    }
     renderActive(true);
     return changed;
   }
@@ -517,31 +537,92 @@
    * 用 Web Animations API 而不是切 class：class 变化会牵动既有 CSS 动画重播，
    * 而 WAAPI 每次都是独立的一次播放，反复开关也不会残留状态。
    */
+  let exitAnim = null;          // 收起动画：下次显示前必须 cancel，否则元素停在 opacity:0
+
   function playEnter(mode) {
     if (prefs.motion === 'off') return;
     const m = mode || state.mode;
-    const groups = m === 'popup'
-      ? [['.pop-head', 0], ['.pop-hero', 40], ['.pop-latency', 70],
-         ['.pop-block--hours', 95], ['.pop-foot', 125]]
-      : [['.topbar', 0], ['.sidebar', 20], ['.view.is-active .notice', 30],
-         ['.view.is-active .card', 60], ['.view.is-active .insight-strip', 90]];
+    if (m === 'popup') { enterPopup(); return; }
+    const groups = [['.topbar', 0], ['.sidebar', 20], ['.view.is-active .notice', 30],
+                    ['.view.is-active .card', 60], ['.view.is-active .insight-strip', 90]];
     const dur = prefs.motion === 'reduced' ? 190 : 380;
     const jobs = [];
     groups.forEach(([sel, delay]) => {
       $$(sel).forEach((el, i) => {
         // 卡片按顺序错开，形成"从上往下铺开"的节奏
         const extra = sel === '.view.is-active .card' ? Math.min(i, 8) * 30 : 0;
-        jobs.push([el, delay + extra]);
+        jobs.push([el, delay + extra, 12]);
       });
     });
-    jobs.forEach(([el, delay]) => {
+    jobs.forEach(([el, delay, dy]) => {
       try {
         el.animate(
-          [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }],
+          [{ opacity: 0, transform: `translateY(${dy}px)` }, { opacity: 1, transform: 'none' }],
           { duration: dur, delay, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'backwards' }
         );
       } catch (e) { /* 老内核不支持 WAAPI：直接显示，不影响功能 */ }
     });
+  }
+
+  /**
+   * 小窗入场：内容分四拍浮起 + 一道斜向高光扫过。
+   * 不做整体缩放 —— 窗口底色不透明，卡片一缩就会露出白边，看起来像"闪"。
+   */
+  function enterPopup() {
+    const reduced = prefs.motion === 'reduced';
+    const jobs = [
+      ['.pop-head', 0, -7],
+      ['.pop-hero', 45, 12],
+      ['.pop-latency', 80, 8],
+      ['.pop-block--hours', 110, 10],
+      ['.pop-foot', 145, 8]
+    ];
+    const dur = reduced ? 200 : 440;
+    jobs.forEach(([sel, delay, dy]) => {
+      const el = $(sel);
+      if (!el) return;
+      try {
+        el.animate(
+          [{ opacity: 0, transform: `translateY(${dy}px)` }, { opacity: 1, transform: 'none' }],
+          { duration: dur, delay, easing: 'cubic-bezier(.22,1,.36,1)', fill: 'backwards' }
+        );
+      } catch (e) { /* ignore */ }
+    });
+    const card = $('.popup-card');
+    if (card && !reduced) {
+      const g = document.createElement('i');
+      g.className = 'enter-glow';
+      card.appendChild(g);
+      setTimeout(() => g.remove(), 900);
+    }
+  }
+
+  /** 主窗收成小窗时的退场：内容略微内收 + 淡出，配合 Python 端的窗口几何收拢 */
+  function playExit() {
+    if (prefs.motion === 'off') return;
+    const el = $('.app-shell');
+    if (!el) return;
+    try {
+      exitAnim = el.animate(
+        [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.985)' }],
+        { duration: 170, easing: 'cubic-bezier(.4,0,.7,.2)', fill: 'forwards' }
+      );
+    } catch (e) { /* ignore */ }
+  }
+
+  /** 连击反馈：短时间内反复开关托盘小窗时，内容轻轻抖一下（窗口本身不动） */
+  function burstShake() {
+    if (prefs.motion === 'off') return;
+    const el = $('.pop-body');
+    if (!el) return;
+    try {
+      el.animate(
+        [{ transform: 'translateX(0)' }, { transform: 'translateX(-2.5px)' },
+         { transform: 'translateX(2.5px)' }, { transform: 'translateX(-1.5px)' },
+         { transform: 'translateX(0)' }],
+        { duration: 210, easing: 'ease-in-out' }
+      );
+    } catch (e) { /* ignore */ }
   }
 
   /* ---------------- 通用 ---------------- */
@@ -565,7 +646,7 @@
 
     if (configured) {
       const al = allowance(acc);
-      setText('#sideCycle', `剩 ${al.leftWorkdays} 工作日 · 日约 ${F.credit(al.perDay)}`);
+      setText('#sideCycle', `剩 ${leftDaysText(al)} · 日约 ${F.credit(al.perDay)}`);
     } else {
       setText('#sideCycle', '未连接云端');
     }
@@ -783,7 +864,7 @@
 
     const al = allowance(acc);
     setText('#popCycle', configured
-      ? `剩 ${al.leftWorkdays} 个工作日 · 每日约 ${F.credit(al.perDay)}`
+      ? `剩 ${leftDaysText(al)} · 每日约 ${F.credit(al.perDay)}`
       : '连接账号后自动计算');
 
     setText('#popUpdated', `${source === 'real' ? '本机' : '演示'} ${D.meta.updated || '—'}`);
@@ -856,12 +937,13 @@
     const syncedAt = (ACCOUNT && ACCOUNT.lastSync) ? String(ACCOUNT.lastSync).slice(11, 16) : '';
     setText('#kpiAvailNote', configured
       ? (acc.pending > 0.005
-        ? `云端 ${F.credit(acc.cloudAvailable)} − 待入账 ${F.credit(acc.pending)}`
+        ? `云端 ${F.credit(acc.cloudAvailable)} − 同步后已花 ${F.credit(acc.pending)}`
         : (syncedAt ? `云端 ${syncedAt} 同步` : `总额度 ${F.credit(acc.total)}`))
       : '未设置额度上限');
     const availChip = $('#kpiAvailSub');
     if (availChip) availChip.title = (acc.source === 'cloud')
-      ? `可用积分 = 云端余额 ${F.credit(acc.cloudAvailable)} − 同步后本地新增消耗 ${F.credit(acc.pending)}`
+      ? `可用积分 = 云端余额 ${F.credit(acc.cloudAvailable)} − 上次同步（${syncedAt || '—'}）之后本机已消耗 ${F.credit(acc.pending)}。`
+        + '云端入账有延迟，先扣掉这段才是此刻真实可用。'
       : '可用积分来自本地记录（未连接云端）';
 
     countUp($('[data-count="todayUsed"]'), stat.consumed, { format: F.credit });
@@ -1017,8 +1099,11 @@
 
     const qh = $('#quotaHint');
     if (qh) {
+      const scope = al.holidayOn
+        ? `按 ${al.spendDays} 个工作日折算 / 共 ${al.leftDays} 天`
+        : `按 ${al.leftDays} 个自然日折算`;
       qh.textContent = configured
-        ? `剩余 ${al.leftWorkdays} 个工作日 / ${al.leftDays} 天 · ${prefs.signin !== false ? '含每日签到 +' + F.credit(al.signin) + ' 分' : '不含签到'}`
+        ? `${scope} · ${prefs.signin !== false ? '含每日签到 +' + F.credit(al.signin) + ' 分' : '不含签到'}`
         : '连接账号后可计算每日可用额度';
     }
   }
@@ -1233,7 +1318,7 @@
         items.push({
           icon: 'i-clock',
           title: '额度可用性',
-          text: `本周期剩余 <b>${F.credit(al.available)}</b> 分，按剩余 <b>${al.leftWorkdays}</b> 个工作日折算，`
+          text: `本周期剩余 <b>${F.credit(al.available)}</b> 分，按剩余 <b>${leftDaysText(al)}</b> 折算，`
               + `每日约 <b>${F.credit(al.perDay)}</b> 分；有效期至 <b>${(ACCOUNT.cloud && ACCOUNT.cloud.expireAtText) || '—'}</b>。`
         });
       }
@@ -1463,7 +1548,7 @@
     const availEl = $('#cloudAvail');
     if (availEl) {
       availEl.title = hasCloud
-        ? `云端余额 ${F.credit(acc.cloudAvailable)} − 同步后本地待入账 ${F.credit(acc.pending)} = ${F.credit(acc.available)}`
+        ? `云端余额 ${F.credit(acc.cloudAvailable)} − 上次同步后本机已花 ${F.credit(acc.pending)} = ${F.credit(acc.available)}`
         : '';
     }
     setText('#cloudUsed', credit(hasCloud ? acc.used : c.used));
@@ -1502,7 +1587,7 @@
     }
 
     // 上次同步 / 间隔（渲染只回填值，事件在 bind 里只绑一次）
-    const pendingTxt = (hasCloud && acc.pending > 0.005) ? ` · 待入账 ${F.credit(acc.pending)} 分` : '';
+    const pendingTxt = (hasCloud && acc.pending > 0.005) ? ` · 同步后已花 ${F.credit(acc.pending)} 分` : '';
     setText('#accLastSync', ACCOUNT.lastSync
       ? ACCOUNT.lastSync + pendingTxt + (ACCOUNT.lastError ? ' · 异常：' + ACCOUNT.lastError : '')
       : '尚未同步');
@@ -1653,7 +1738,7 @@
   async function refresh() {
     const btn = $('#refreshBtn');
     if (btn) { btn.classList.add('is-spinning'); setTimeout(() => btn.classList.remove('is-spinning'), 720); }
-    // 小窗：图标转一圈 + 顶部扫光 + 内容轻微淡出，刷新完再淡回来
+    // 小窗：图标慢起慢收 + 顶部进度线一次充满 + 斜向高光 + 大数字轻跳
     const popBtn = $('#popRefresh');
     if (popBtn) { popBtn.classList.add('is-spinning'); setTimeout(() => popBtn.classList.remove('is-spinning'), 820); }
     const popCard = state.mode === 'popup' ? $('.popup-card') : null;
@@ -1661,6 +1746,9 @@
       if (!popCard.querySelector('.refresh-bar')) {
         popCard.appendChild(Object.assign(document.createElement('div'), { className: 'refresh-bar' }));
       }
+      // 连点刷新时 CSS 动画不会自己重播：先摘类、强制重排、再挂回去
+      popCard.classList.remove('is-refreshing');
+      void popCard.offsetWidth;
       popCard.classList.add('is-refreshing');
     }
     const cards = $$('.card');
@@ -1685,7 +1773,7 @@
       const t = new Date();
       setText('#syncTime', `${F.pad(t.getHours())}:${F.pad(t.getMinutes())}`);
       toast(bridge.has() ? '已重新读取本机用量' : '浏览器预览无法读取本机数据', bridge.has() ? 'i-check' : 'i-info');
-    }, motionOff() ? 60 : 560);
+    }, motionOff() ? 60 : (popCard ? 660 : 560));
   }
 
   /* =========================================================
@@ -2178,6 +2266,10 @@
     refreshLayout: () => renderActive(),
     /** 由 Python 在窗口显示后调用：补一次入场过渡 */
     playEnter: mode => playEnter(mode),
+    /** 由 Python 在"收成小窗"前调用：内容退场 */
+    playExit: () => playExit(),
+    /** 连击反馈 */
+    burstShake: () => burstShake(),
     /** 由 Python 在窗口显示前调用：对齐偏好并全量重算 */
     beforeShow: () => beforeShow(),
     /** 由 Python 在原生拖动结束时调用 */
