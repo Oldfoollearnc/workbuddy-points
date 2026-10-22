@@ -133,32 +133,45 @@
         <span class="chip" id="cloudChip">未连接</span>
       </header>
 
-      <section class="ap-balance">
-        <div class="ap-balance-top">
-          <span>可用积分</span>
-          <b id="cloudAvail">—</b>
-        </div>
-        <div class="ap-track"><i id="apAvailBar" style="width:0%"></i></div>
-        <div class="ap-balance-foot">
-          <span>本周期已用 <b id="cloudUsed">—</b></span>
-          <span>有效期至 <b id="cloudExpire">—</b></span>
-        </div>
-      </section>
-
-      <div class="ap-meta">
-        <div><span>当前周期</span><b id="cloudCycle">—</b></div>
-        <div><span>账号</span><b class="mono" id="accId">—</b></div>
+      <!-- 未连接：只留一个说明 + 一个动作，不摆空数据 -->
+      <div class="ap-empty" id="apEmpty">
+        <span class="ap-empty-icon"><svg class="i"><use href="#i-bolt"/></svg></span>
+        <p class="ap-empty-title">还没连接 WorkBuddy 账号</p>
+        <p class="ap-empty-desc">扫一次码，就能读到<b>云端余额</b>、<b>周期额度</b>和<b>账号级积分流水</b>。</p>
+        <button class="btn btn-primary ap-cta" id="cloudLogin">扫码连接账号</button>
       </div>
 
-      <div class="ap-sync"><span>上次同步</span><b id="accLastSync">—</b></div>
+      <!-- 已连接：余额 → 元信息 → 同步 → 积分包 → 断开 -->
+      <div class="ap-live" id="apLive" hidden>
+        <section class="ap-balance">
+          <div class="ap-balance-top">
+            <span>可用积分</span>
+            <b id="cloudAvail">—</b>
+          </div>
+          <div class="ap-track"><i id="apAvailBar" style="width:0%"></i></div>
+          <div class="ap-balance-foot">
+            <span>本周期已用 <b id="cloudUsed">—</b></span>
+            <span>有效期至 <b id="cloudExpire">—</b></span>
+          </div>
+        </section>
 
-      <div class="pkg-list" id="pkgList"></div>
+        <div class="ap-meta">
+          <div><span>当前周期</span><b id="cloudCycle">—</b></div>
+          <div><span>账号</span><b class="mono" id="accId">—</b></div>
+        </div>
 
-      <div class="acct-actions">
-        <button class="btn btn-primary btn-sm" id="cloudLogin">连接账号</button>
-        <button class="btn btn-ghost btn-sm" id="cloudSync">立即同步</button>
-        <button class="btn btn-ghost btn-sm" id="cloudLogout">断开</button>
+        <div class="ap-sync">
+          <span>上次同步 <b id="accLastSync">—</b></span>
+          <button class="ap-link-btn" id="cloudSync">立即同步</button>
+        </div>
+
+        <div class="pkg-list" id="pkgList"></div>
+
+        <div class="acct-actions">
+          <button class="btn btn-ghost btn-sm" id="cloudLogout">断开账号</button>
+        </div>
       </div>
+
       <p class="acct-pop-note" id="cloudHint">登录态经 DPAPI 加密保存在本机，不上传</p>
     </div>
     <div class="win-controls" id="winControls">

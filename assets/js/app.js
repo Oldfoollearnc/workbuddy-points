@@ -197,9 +197,20 @@
   function diffDays(a, b) { return Math.round((startOfDay(b) - startOfDay(a)) / 86400000); }
   function parseDate(v) {
     if (!v) return null;
-    const m = String(v).match(/(\d{4})-(\d{2})-(\d{2})/);
-    if (!m) return null;
-    return new Date(+m[1], +m[2] - 1, +m[3]);
+    const s = String(v).trim();
+    let m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+    // 云端返回的有效期是 "11-19" 这种不带年份的格式（_date() 只取 MM-DD）。
+    // 以前只认 yyyy-mm-dd，于是永远解析失败、回退成"今天 +30 天"，
+    // 折算天数偏大、每日可用被压低，才会出现"明明够用却显示超支"。
+    m = s.match(/^(\d{1,2})-(\d{1,2})$/);
+    if (m) {
+      const now = new Date();
+      let d = new Date(now.getFullYear(), +m[1] - 1, +m[2]);
+      if (d < startOfDay(now)) d = new Date(now.getFullYear() + 1, +m[1] - 1, +m[2]);
+      return d;
+    }
+    return null;
   }
   /** 折算日判定。
    *  「工作日折算」开 = 只算工作日（剔除周末与法定节假日）；
@@ -612,7 +623,9 @@
     const dur = 420;
     const t0 = performance.now();
     const step = t => {
-      const p = Math.min(1, (t - t0) / dur);
+      // rAF 回调的时间戳是"这一帧开始"的时刻，可能早于调用 countUp 的 t0，
+      // 不夹住会让 p 变成负数，数字会先甩出一个负值（实测出现 -6,253）。
+      const p = Math.min(1, Math.max(0, (t - t0) / dur));
       const e = 1 - Math.pow(1 - p, 3);
       node.textContent = format(from + (to - from) * e);
       if (p < 1) requestAnimationFrame(step);
@@ -1763,6 +1776,12 @@
     chip.textContent = text;
     chip.className = 'chip ' + cls;
 
+    // 未连接就只显示"连接"引导，不摆一堆空指标；连上之后换成余额视图
+    const isLive = st === 'connected' && !!ACCOUNT.cloud;
+    const emptyBox = $('#apEmpty'), liveBox = $('#apLive');
+    if (emptyBox) emptyBox.hidden = isLive;
+    if (liveBox) liveBox.hidden = !isLive;
+
     const c = ACCOUNT.cloud || {};
     const u = (ACCOUNT.user || {});
     const credit = v => (v == null ? '—' : F.credit(v) + ' 分');
@@ -1826,7 +1845,9 @@
     if (sel && document.activeElement !== sel) sel.value = String(ACCOUNT.interval == null ? 60 : ACCOUNT.interval);
     setText('#cloudHint', ACCOUNT.lastError
       ? `最近一次同步失败：${ACCOUNT.lastError}（登录态可能已过期，点「连接账号」重新扫码）`
-      : '登录态经 DPAPI 加密保存在本机，不上传；「刷新」只读本机记录，云端按设置里的间隔同步');
+      : isLive
+        ? '数据只读；登录态经 DPAPI 加密保存在本机，不上传'
+        : '扫码在官方页面完成，登录态只保存在本机（DPAPI 加密）');
   }
 
   function renderSettings() {
@@ -2475,7 +2496,10 @@
      ========================================================= */
 
   function bootRender() {
-    if (ready) { renderActive(); return; }
+    // 首屏必须强制渲染：之前这里走的是节流版 renderActive()，
+    // 若 paintTheme 的 60ms 定时渲染刚好在前，这一发就会被 250ms 节流吞掉 ——
+    // 用户看到的是"数据还没到"那一版（额度被算成超支），要等下次交互才恢复。
+    if (ready) { renderActive(true); return; }
     ready = true;
     if (state.mode === 'popup') {
       renderPopup();
@@ -2487,7 +2511,7 @@
         setText('#pageTitle', t);
         setText('#pageSub', s);
       }
-      renderActive();
+      renderActive(true);
       requestAnimationFrame(moveIndicator);
     }
     paintTheme(resolved(), true);

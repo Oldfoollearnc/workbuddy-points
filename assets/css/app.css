@@ -1726,6 +1726,38 @@ body.is-loading .boot-mask { display: flex; }
 .ap-head .acct-name span { font-size: 10px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ap-head .chip { flex: none; }
 
+/* 未连接：一个说明 + 一个动作，不摆空数据 */
+.ap-empty {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 7px; padding: 18px 4px 6px;
+  text-align: center;
+}
+.ap-empty-icon {
+  display: grid; place-items: center;
+  width: 48px; height: 48px; margin-bottom: 3px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--brand-soft), var(--brand-softer));
+  color: var(--brand);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.ap-empty-icon .i { width: 22px; height: 22px; }
+.ap-empty-title { font-size: 12.5px; font-weight: 650; color: var(--text-1); }
+.ap-empty-desc { max-width: 264px; font-size: 10.5px; color: var(--text-3); line-height: 1.65; }
+.ap-empty-desc b { color: var(--text-2); font-weight: 600; }
+.ap-cta {
+  width: 100%; height: 34px; margin-top: 9px;
+  justify-content: center; border-radius: 10px;
+}
+
+/* 已连接 */
+.ap-live[hidden], .ap-empty[hidden] { display: none; }
+.ap-link-btn {
+  font-size: 10.5px; font-weight: 600; color: var(--brand);
+  padding: 3px 8px; border-radius: 6px;
+  transition: background var(--dur-1) var(--ease-out);
+}
+.ap-link-btn:hover { background: var(--brand-soft); }
+
 /* 余额块：大数字 + 进度 + 两侧小字 */
 .ap-balance {
   margin-top: 14px;
@@ -1768,7 +1800,8 @@ body.is-loading .boot-mask { display: flex; }
   display: flex;
   gap: 8px;
 }
-.acct-pop .acct-actions .btn { flex: 1 1 0; justify-content: center; padding-left: 6px; padding-right: 6px; }
+.acct-pop .acct-actions .btn { flex: 1 1 0; justify-content: center; padding-left: 6px; padding-right: 6px; color: var(--text-3); }
+.acct-pop .acct-actions .btn:hover { color: var(--bad); border-color: var(--bad-soft); }
 .acct-pop-note { margin: 10px 0 0; font-size: 9.5px; color: var(--text-3); line-height: 1.55; }
 
 /* ===================== 总览提示条 ===================== */
