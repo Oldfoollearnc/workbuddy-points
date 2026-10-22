@@ -22,6 +22,7 @@ EnumProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
 
 def visible_windows(keyword):
+    skip = ("visual studio code", "文件资源管理器", "microsoft edge")
     found = []
 
     def cb(hwnd, _):
@@ -32,7 +33,8 @@ def visible_windows(keyword):
             return True
         buf = ctypes.create_unicode_buffer(n + 1)
         user32.GetWindowTextW(hwnd, buf, n + 1)
-        if keyword.lower() in buf.value.lower():
+        title = buf.value.lower()
+        if keyword.lower() in title and not any(s in title for s in skip):
             found.append((hwnd, buf.value))
         return True
 
@@ -71,12 +73,13 @@ def main():
     os.makedirs(out, exist_ok=True)
 
     print("elevated:", bool(ctypes.windll.shell32.IsUserAnAdmin()))
+    KEY = sys.argv[3] if len(sys.argv) > 3 else "积分观测台"
     p = subprocess.Popen([exe])
 
     deadline = time.time() + 25
     wins = []
     while time.time() < deadline:
-        wins = visible_windows("WorkBuddy")
+        wins = visible_windows(KEY)
         if wins:
             break
         time.sleep(0.4)
@@ -94,7 +97,7 @@ def main():
     # 有旧版本时会先弹确认框：回车选"是"（继续安装），再到欢迎页
     press_enter()
     time.sleep(1.5)
-    wins = visible_windows("WorkBuddy")
+    wins = visible_windows(KEY)
     if wins:
         hwnd, title = wins[-1]
         print("after enter:", hex(hwnd), repr(title))

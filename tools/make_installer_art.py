@@ -90,7 +90,7 @@ def draw_wizard():
     # 底部说明
     fy = H * SS - px(38)
     d.line([px(24), fy - px(10), W * SS - px(24), fy - px(10)], fill=LINE, width=max(1, px(0.6)))
-    d.text((px(24), fy), "升级安装保留登录状态", font=f_foot, fill=INK_3)
+    d.text((px(24), fy), "升级安装保留登录状态", font=f_foot, fill=(100, 116, 139))
 
     return img
 

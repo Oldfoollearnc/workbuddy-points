@@ -33,8 +33,9 @@ OutputBaseFilename=WorkBuddyPoints-Setup-{#MyVersion}
 SetupIconFile=..\assets\icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
-; ultra64 用 64MB 字典，比 max 再省几个百分点；MinVersion=10.0 保证目标机都是 64 位
-Compression=lzma2/ultra64
+; lzma2/max 与 ultra64 实测只差 ~60KB，但 ultra64 要 1GB+ 内存、偶发 "Out of memory"，
+; 压缩比收益远小于编译失败风险，保持 max
+Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 ; 左侧品牌图 164x314（modern 样式），第二份是 200% DPI；右上角 55x55 小图
@@ -240,7 +241,7 @@ begin
     '连上云端后还能逐笔对账。' + #13#10#13#10 +
     '安装前请了解三点：' + #13#10 +
     '· 纯本机运行，无广告与推广组件；' + #13#10 +
-    '· 登录状态与历史数据保存在 %APPDATA%\WorkBuddyPoints，升级、重装、卸载都不会删除；' + #13#10 +
+    '· 登录状态与历史数据放在用户目录，升级、重装、卸载都不会删除；' + #13#10 +
     '· 依赖 Microsoft Edge WebView2 运行时（Windows 10/11 通常已自带）。';
 end;
 

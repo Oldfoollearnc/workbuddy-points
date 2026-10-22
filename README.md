@@ -70,6 +70,18 @@ node tests\metrics.test.js
 
 支持"为所有用户安装"与"仅为我安装"（公司电脑无管理员权限时选后者）。
 
+**升级不会丢登录态**：安装/升级只覆盖程序目录（`[UninstallDelete]` 只清 `{app}`），
+登录 Cookie、账号缓存、WebView2 登录档、额度配置、日志全部在
+`%APPDATA%\WorkBuddyPoints`，重装与卸载均不删除。
+
+**体积**：安装包约 12MB，大头是 Python 运行时（6MB）、OpenSSL（9MB，HTTPS 必需）、
+sqlite3（1.6MB，读客户端数据库必需）与 WebView2 绑定；`build.spec` 已剔除 pywebview
+的其它平台后端（gtk/qt/cocoa/cef/mshtml/android）与测试/文档类标准库。
+`webview/lib/runtimes` 下的 arm64/x86 目录**不能删**——pywebview 启动时会无条件探测三个架构。
+
+**引导图**：左侧竖图与右上角小图由 `tools\make_installer_art.py` 生成
+（改文案/配色后重跑一次，再编译安装包即可）。
+
 ---
 
 ## 3. 目录结构
