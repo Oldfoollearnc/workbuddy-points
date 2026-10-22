@@ -295,6 +295,11 @@ class Desktop:
         self.close_to_tray = True
         self.scale = dpi_scale()
         self.pop_size = (POP_W, POP_H)
+        # 小窗状态簿记：意图（而非可见性）驱动托盘单击的开/关，避免与"点外部收起"互相打架
+        self._popup_intent = False
+        self._popup_hidden_at = 0.0
+        self._hidden_by_watcher_at = 0.0
+        self._collapsing = False
         self.usage = usage_source.UsageService()
         self.account = AccountService()
 
@@ -387,14 +392,20 @@ class Desktop:
         mh = user32.FindWindowW(None, MAIN_TITLE)
         if mh:
             user32.ShowWindow(mh, 0)
+
+        hwnd = user32.FindWindowW(None, POPUP_TITLE)
+        # 连击判定：刚收起不到 450ms 又打开 → 不播入场动画，否则一开一关会"闪"
+        calm = (time.time() - getattr(self, "_popup_hidden_at", 0)) > 0.45
+        if hwnd:
+            # 关键：尺寸/位置在**隐藏状态**下就校正到位，再显示。
+            # 以前是先 show 再 align + 1px 抖动，用户看到的就是"出现→跳一下"的闪烁。
+            self._align_popup_once(hwnd)
+            self._nudge(hwnd)
         try:
             self.popup.show()
         except Exception as e:
             log(f"popup.show error: {e}")
-        hwnd = user32.FindWindowW(None, POPUP_TITLE)
         if hwnd:
-            self._align_popup(hwnd)
-            user32.ShowWindow(hwnd, 5)
             # 置顶 + 前台：否则会被其他窗口遮住，看起来像"没有打开"
             user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
                                 SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE)
@@ -404,10 +415,13 @@ class Desktop:
                 pass
             user32.BringWindowToTop(hwnd)
             user32.SetForegroundWindow(hwnd)
-            self._nudge(hwnd)
-            # 入场动效：窗口本身是"瞬间出现"的，靠页面内的一次位移+淡入补足过渡感
-            self._safe_js(self.popup,
-                          "window.App && (App.beforeShow(), App.playEnter('popup'))")
+            self._align_popup(hwnd)        # 显示后只校正"确有偏差"的情况，正常情况下不动
+            self._safe_js(self.popup, "window.App && App.beforeShow()")
+            if calm:
+                self._safe_js(self.popup, "window.App && App.playEnter('popup')")
+            else:
+                self._safe_js(self.popup, "window.App && App.burstShake()")
+            self._popup_intent = True
             self._popup_shown_at = time.time()
             self._fg_at_show = int(user32.GetForegroundWindow() or 0)
         threading.Timer(0.35, self._refresh_popup_layout).start()
@@ -449,6 +463,7 @@ class Desktop:
                 inside = rc.left <= pt.x < rc.right and rc.top <= pt.y < rc.bottom
                 if not inside:
                     log(f"popup outside click ({pt.x},{pt.y}) -> hide")
+                    self._hidden_by_watcher_at = time.time()
                     self.hide_popup()
             except Exception as e:
                 log(f"popup click watcher error: {e}")
@@ -462,16 +477,12 @@ class Desktop:
         hwnd = user32.FindWindowW(None, POPUP_TITLE)
         if hwnd:
             user32.ShowWindow(hwnd, 0)
+        self._popup_intent = False
+        self._popup_hidden_at = time.time()
 
     def show_main(self):
-        try:
-            if self.popup:
-                self.popup.hide()
-        except Exception:
-            pass
-        ph = user32.FindWindowW(None, POPUP_TITLE)
-        if ph:
-            user32.ShowWindow(ph, 0)
+        # 小窗让位（同时把小窗状态簿记成"已收起"）
+        self.hide_popup()
         try:
             self.main.show()
             self.main.restore()
@@ -642,18 +653,65 @@ class Desktop:
                 log(f"drag end: {moved} steps -> ({rc.left},{rc.top})")
             # 结束态交回前端：解除拖动光标、补一次窗口状态
             self._safe_js(self.main, "window.App && App.__dragEnd()")
+
     def win_min(self):
-        """最小化：进入系统最小化，由 _watch_minimize 转成右下角小窗。"""
+        """最小化 = 收成右下角小窗，并播放"主窗收拢 → 小窗浮现"的过渡。
+
+        以前是 ShowWindow(SW_MINIMIZE) 再由监视线程恢复 + 弹小窗，中间会闪一下
+        系统的任务栏最小化动画。现在不真的最小化，直接做几何收拢：
+        主窗矩形按 ease-out 插值到小窗位置，同时页面内容淡出，最后换小窗入场。
+        """
         hwnd = find_hwnd(MAIN_TITLE)
+        if not hwnd:
+            return {"ok": False}
+        if getattr(self, "_collapsing", False):
+            return {"ok": True, "busy": True}
+        self._collapsing = True
+        threading.Thread(target=self._collapse_to_popup, args=(hwnd,), daemon=True).start()
+        return {"ok": True}
+
+    def _collapse_to_popup(self, hwnd):
+        rc = RECT()
+        sx = sy = sw = sh = 0
+        was_maxed = bool(getattr(self, "_maxed", False))
+        ok = False
         try:
-            if hwnd:
-                user32.ShowWindow(hwnd, SW_MINIMIZE)
-            elif self.main:
-                self.main.minimize()
-            return {"ok": True}
+            user32.GetWindowRect(hwnd, ctypes.byref(rc))
+            sx, sy, sw, sh = rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top
+            scale = self.scale or 1.0
+            tw = max(120, int(self.pop_size[0] * scale))
+            th = max(120, int(self.pop_size[1] * scale))
+            tx = int(self.pop_x * scale)
+            ty = int(self.pop_y * scale)
+
+            # 页面先淡出/微缩，避免缩小过程中内容重排得难看
+            self._safe_js(self.main, "window.App && App.playExit('popup')")
+            time.sleep(0.05)
+            frames = 9
+            for i in range(1, frames + 1):
+                t = i / frames
+                e = 1 - (1 - t) ** 3          # ease-out cubic
+                x = int(round(sx + (tx - sx) * e))
+                y = int(round(sy + (ty - sy) * e))
+                w = max(160, int(round(sw + (tw - sw) * e)))
+                h = max(160, int(round(sh + (th - sh) * e)))
+                user32.SetWindowPos(hwnd, HWND_TOP, x, y, w, h, SWP_NOACTIVATE)
+                time.sleep(0.013)
+            ok = True
         except Exception as e:
-            log(f"win_min error: {e}")
-            return {"ok": False, "error": str(e)}
+            log(f"collapse error: {e}")
+        finally:
+            self._collapsing = False
+            self.hide_main()          # 先隐藏，再还原几何，避免"缩成小窗又弹回大窗"的一帧
+            # 窗口尺寸被改小了，必须在隐藏状态下还原，否则下次展开主界面只有小窗那么大
+            if ok and sw and sh:
+                try:
+                    user32.SetWindowPos(hwnd, None, sx, sy, sw, sh,
+                                        SWP_NOZORDER | SWP_NOACTIVATE)
+                    self._maxed = was_maxed
+                except Exception as e:
+                    log(f"collapse restore error: {e}")
+            self.show_popup()
 
     def win_max(self):
         """切换最大化/还原：按工作区手工铺满（不盖任务栏），并记住原位置。"""
@@ -694,36 +752,39 @@ class Desktop:
         log("win_close -> hide to tray")
         return {"ok": True, "toTray": True}
 
-    def _align_popup(self, hwnd, attempt=0):
-        """按客户区把窗口贴到右下角；窗口初始化会异步覆盖尺寸，因此带重试。"""
-        try:
-            wr, cr, pt = RECT(), RECT(), POINT(0, 0)
+    def _align_popup_once(self, hwnd):
+        """把窗口按客户区贴到右下角，返回 (dx, dy)。"""
+        wr, cr, pt = RECT(), RECT(), POINT(0, 0)
+        user32.GetWindowRect(hwnd, ctypes.byref(wr))
+        user32.GetClientRect(hwnd, ctypes.byref(cr))
+        target_w, target_h = self.pop_size
+
+        if cr.right != target_w or cr.bottom != target_h:
+            frame_w = (wr.right - wr.left) - cr.right
+            frame_h = (wr.bottom - wr.top) - cr.bottom
+            user32.SetWindowPos(hwnd, None, 0, 0,
+                                int(target_w * self.scale) + frame_w,
+                                int(target_h * self.scale) + frame_h,
+                                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)
             user32.GetWindowRect(hwnd, ctypes.byref(wr))
             user32.GetClientRect(hwnd, ctypes.byref(cr))
-            target_w, target_h = self.pop_size
 
-            if cr.right != target_w or cr.bottom != target_h:
-                frame_w = (wr.right - wr.left) - cr.right
-                frame_h = (wr.bottom - wr.top) - cr.bottom
-                user32.SetWindowPos(hwnd, None, 0, 0,
-                                    int(target_w * self.scale) + frame_w,
-                                    int(target_h * self.scale) + frame_h,
-                                    SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)
-                user32.GetWindowRect(hwnd, ctypes.byref(wr))
-                user32.GetClientRect(hwnd, ctypes.byref(cr))
+        user32.ClientToScreen(hwnd, ctypes.byref(pt))
+        wa = work_area()
+        margin = int(MARGIN * self.scale)
+        dx = (wa[2] - margin) - (pt.x + cr.right)
+        dy = (wa[3] - margin) - (pt.y + cr.bottom)
+        if dx or dy:
+            user32.SetWindowPos(hwnd, None, wr.left + dx, wr.top + dy, 0, 0,
+                                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+        return dx, dy
 
-            user32.ClientToScreen(hwnd, ctypes.byref(pt))
-            wa = work_area()
-            margin = int(MARGIN * self.scale)
-            dx = (wa[2] - margin) - (pt.x + cr.right)
-            dy = (wa[3] - margin) - (pt.y + cr.bottom)
-            if dx or dy:
-                user32.SetWindowPos(hwnd, None, wr.left + dx, wr.top + dy, 0, 0,
-                                    SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
-
+    def _align_popup(self, hwnd, attempt=0):
+        """显示后再校正一次（pywebview 可能套用自己的布局），只做必要的修正。"""
+        try:
+            dx, dy = self._align_popup_once(hwnd)
             if attempt == 0:
-                log(f"align: client={cr.right}x{cr.bottom} target={target_w}x{target_h} dx={dx} dy={dy}")
-            # pywebview 在窗口显示后会再套用一次自身布局，因此固定重试一段时间
+                log(f"align: target={self.pop_size[0]}x{self.pop_size[1]} dx={dx} dy={dy}")
             if attempt < 8:
                 threading.Timer(0.15, lambda: self._align_popup(hwnd, attempt + 1)).start()
         except Exception as e:
@@ -731,7 +792,11 @@ class Desktop:
 
     @staticmethod
     def _nudge(hwnd):
-        """隐藏期间创建的 WebView2 可能不出帧，轻微改变尺寸强制其重新布局并绘制。"""
+        """隐藏期间创建的 WebView2 可能不出帧，轻微改变尺寸强制其重新布局并绘制。
+
+        注意：这一步必须在窗口**显示之前**做（见 show_popup），
+        否则用户会看到一次 1px 的尺寸抖动，观感就是"闪一下"。
+        """
         try:
             rc = RECT()
             user32.GetWindowRect(hwnd, ctypes.byref(rc))
@@ -758,16 +823,27 @@ class Desktop:
     # ---------- 托盘 ----------
 
     def toggle_popup(self):
+        """托盘单击：严格一开一关。
+
+        两个坑：
+        1. 以前双击会额外触发 open_main（托盘 WM_LBUTTONDBLCLK），连点几下主界面就闪出来；
+           现在托盘侧已去掉该分支，主界面只能从「展开完整面板」或右键菜单进入。
+        2. 点托盘图标对"点外部收起"的监听器来说也是一次外部点击，它会先把小窗关掉，
+           如果这里再按可见性取反，就会又把它打开 —— 表现为"点了像没反应"。
+           所以以意图为准，并忽略刚刚被监听器关掉的那一次。
+        """
         if not self.popup:
             return
-        try:
-            visible = bool(user32.IsWindowVisible(user32.FindWindowW(None, POPUP_TITLE)))
-        except Exception:
-            visible = False
-        log(f"toggle popup, visible={visible}")
-        if visible:
+        now = time.time()
+        if now - getattr(self, "_hidden_by_watcher_at", 0) < 0.45:
+            self._hidden_by_watcher_at = 0
+            log("toggle popup: handled by outside-click watcher")
+            return
+        if getattr(self, "_popup_intent", False):
+            log("toggle popup -> hide")
             self.hide_popup()
         else:
+            log("toggle popup -> show")
             self.show_popup()
 
     def open_main(self):

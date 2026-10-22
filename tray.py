@@ -113,7 +113,7 @@ shell32.Shell_NotifyIconW.restype = wintypes.BOOL
 
 
 class Tray:
-    """系统托盘图标：左键单击 → 快捷面板；双击/菜单 → 主界面。"""
+    """系统托盘图标：左键单击 → 快捷面板开/关；右键菜单 → 主界面、刷新、退出。"""
 
     def __init__(self, icon_path, on_click=None, on_open_main=None, on_refresh=None, on_exit=None,
                  tooltip="WorkBuddy 积分观测台 · 单击查看今日积分", logger=None):
@@ -205,7 +205,11 @@ class Tray:
                 elif lparam in (WM_RBUTTONUP,):
                     self._popup_menu()
                 elif lparam == WM_LBUTTONDBLCLK:
-                    self._safe(self.on_open_main)
+                    # 双击**不能**再开主界面：一次双击本来就产生了两次 WM_LBUTTONUP
+                    # （开一次、关一次），再叠一个 open_main 就会让主界面闪一下又消失，
+                    # 用户看到的就是"连点几下，主界面闪出来了"。
+                    # 进主界面只走小窗里的「展开完整面板」或右键菜单。
+                    return 0
                 return 0
             if msg == WM_CLOSE:
                 user32.DestroyWindow(hwnd)
