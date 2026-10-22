@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
+<!-- 本地页面不需要联网：脚本/样式/图标全部随包，头像走 https 账号接口。
+     connect-src 不放开 —— 页面内不发任何 fetch，取数全部走 pywebview 桥。 -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>WorkBuddy 积分观测台</title>
 <link rel="icon" href="assets/icon.png">
 <link rel="stylesheet" href="assets/css/tokens.css">

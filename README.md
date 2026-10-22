@@ -73,6 +73,7 @@ account_service.py    云端账号：扫码登录、四个只读接口、Cookie 
 data_source.py        本机数据目录解析 + SQLite 快照读取（见 docs/本地数据源方案.md）
 app_paths.py          资源目录 / 可写数据目录分离（安装版写 %APPDATA%）
 dpapi.py              Windows DPAPI 加解密（session.bin）
+logutil.py            日志追加写 + 2MB 轮转（三个模块共用）
 index.html            双形态入口（#main / #popup）
 assets/css/tokens.css 设计令牌（明暗两套）
 assets/css/app.css    布局与组件
@@ -133,6 +134,21 @@ Token 云端不返回，仍取本机，界面上单独标注。
 云端只调用四个 `POST /billing/meter/*` 只读接口 + `GET /console/accounts`；
 登录 Cookie 用 DPAPI 加密存本机 `session.bin`，不打印、不上传。
 
+**8）默认不开调试端口。**
+`--remote-debugging-port` + `--remote-allow-origins=*` 会让**同机任意进程**能接管
+WebView2、读走全部 Cookie，所以正式运行时不带这两个参数。开发期要用
+`tools/live.py`（截图 / 求值）时显式设 `WB_CDP=1`，退出即失效。
+登录窗加载的是远端页面，**不挂 js_api**：页面里拿不到任何桌面能力。
+
+**9）「退出登录」就是退出。**
+退出时删除 `session.bin`、清空内存与落盘缓存、并记住 `autoLogin=false`，
+下次启动不再自动回填；主动点「连接账号」才恢复自动登录。
+
+**10）逐笔合计与云端「已用」的差额要露出来。**
+去重是启发式的、周期边界也不一定对齐，两者不可能永远相等。
+顶部提示条会在差额 ≥1% 时给出「逐笔合计 / 云端已用 / 差几个点」，
+以云端已用为准——比假装一致更有用。
+
 ---
 
 ## 6. 排查
@@ -142,6 +158,8 @@ Token 云端不返回，仍取本机，界面上单独标注。
 - 闪退：看 `logs/crash.log`（faulthandler 记录原生崩溃现场）与 `app.log` 的 `webview.exit` 行。
 - 找不到本机数据：设置 → 数据源 → 选择目录，或设环境变量 `WORKBUDDY_HOME`。
 - 云端一直"未连接"：点头像 → 连接账号重新扫码；日志见 `logs/api-probe.log`。
+- 开发期要截图/求值（`tools/live.py`）：先 `set WB_CDP=1` 再启动，用完关掉；
+  默认端口是关闭的，直接跑会连不上 9333，这是设计如此。
 
 更多：`docs/设计说明.md`（界面迭代史）、`docs/架构说明.md`（模块与数据流）、
 `docs/本地数据源方案.md`（公司电脑取数方案对比）。

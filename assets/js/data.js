@@ -1,9 +1,11 @@
 /* =========================================================
-   数据层（演示数据）
+   演示数据（只在「浏览器预览」时按需生成）
+   - 桌面态由 Python 侧提供真实数据，这里不生成、不占启动时间：
+     以前它在 index.html 里被无条件加载，每次启动都先算一遍假数字，
+     异常路径下还可能把假数字当真的显示出来。
    - 所有维度由同一份总量派生，保证「柱状 / 环形 / 流水 / 排行」互相对得上
-   - 接入真实接口时，只需替换 build() 的返回结构
    ========================================================= */
-(function () {
+window.buildDemoData = function () {
   'use strict';
 
   const NOW = new Date();
@@ -331,7 +333,7 @@
     }
   ];
 
-  window.APP_DATA = {
+  return {
     meta: {
       now: NOW,
       updated: `${clock(NOW)}`,
@@ -381,6 +383,4 @@
     pctOfQuota: todayConsumed / TOTAL_QUOTA,
     insights
   };
-
-  window.APP_FMT = { fmt, fmtWan, pad, dateKey, clock };
-})();
+};

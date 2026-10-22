@@ -169,4 +169,29 @@ ok('未连接时可用余额为空、pending 为 0', () => {
   assert.deepStrictEqual(M.effAccount(), {});   // D.account 未给，回落空对象
 });
 
+/* ---------------- 跨年 ---------------- */
+
+console.log('跨年还原');
+ok('12-31 在 1 月查看 → 归到上一年', () => {
+  const d = M.monthDayToDate('12-31', new Date(2026, 0, 2));
+  assert.strictEqual(d.getFullYear(), 2025);
+  assert.strictEqual(d.getMonth(), 11);
+  assert.strictEqual(d.getDate(), 31);
+});
+ok('01-01 在 10 月查看 → 保持当年', () => {
+  const d = M.monthDayToDate('01-01', new Date(2026, 9, 22));
+  assert.strictEqual(d.getFullYear(), 2026);
+  assert.strictEqual(d.getMonth(), 0);
+});
+ok('今天本身不往回退一年', () => {
+  const today = new Date(2026, 9, 22, 18, 30);
+  const d = M.monthDayToDate('10-22', today);
+  assert.strictEqual(M.dayKeyOf(d), '2026-10-22');
+});
+ok('非 MM-DD 输入返回 null', () => {
+  assert.strictEqual(M.monthDayToDate('2026-01-01'), null);
+  assert.strictEqual(M.monthDayToDate(''), null);
+  assert.strictEqual(M.monthDayToDate(null), null);
+});
+
 console.log(`\n${passed} 项通过`);

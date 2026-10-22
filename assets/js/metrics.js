@@ -43,6 +43,20 @@
   function diffDays(a, b) { return Math.round((startOfDay(b) - startOfDay(a)) / 86400000); }
   const dayKeyOf = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
+  /**
+   * 把 "MM-DD"（本机口径的 daily.date）还原成日期对象。
+   * 必须处理跨年：12 月的记录在 1 月查看，直接拼当前年就会错到 11 个月后。
+   * 规则：不晚于今天，晚了就归到上一年。
+   */
+  function monthDayToDate(md, now) {
+    const m = /^(\d{1,2})-(\d{1,2})$/.exec(String(md || ''));
+    if (!m) return null;
+    const base = now || new Date();
+    const d = new Date(base.getFullYear(), +m[1] - 1, +m[2]);
+    if (startOfDay(d) > startOfDay(base)) d.setFullYear(d.getFullYear() - 1);
+    return d;
+  }
+
   function parseDate(v) {
     if (!v) return null;
     const s = String(v).trim();
@@ -229,8 +243,10 @@
       ACCOUNT.daily.forEach(d => { if (d && d.date) cmap[d.date] = d.points || 0; });
     }
     const lmap = {};
-    const year = new Date().getFullYear();
-    (D.daily || []).forEach(d => { if (d.date) lmap[`${year}-${d.date}`] = d.consumed || 0; });
+    (D.daily || []).forEach(d => {
+      const t = monthDayToDate(d.date);
+      if (t) lmap[dayKeyOf(t)] = d.consumed || 0;
+    });
     const out = [];
     for (let i = n - 1; i >= 0; i--) {
       const d = addDays(new Date(), -i);
@@ -321,10 +337,7 @@
       return { sum: round2(sum), from };
     }
 
-    const mk = s => {
-      const m = /^(\d{1,2})-(\d{1,2})$/.exec(String(s || ''));
-      return m ? new Date(now.getFullYear(), +m[1] - 1, +m[2]) : null;
-    };
+    const mk = s => monthDayToDate(s, now);
     let sum = 0;
     (D.daily || []).forEach(d => {
       const t = mk(d.date);
@@ -336,7 +349,7 @@
 
   const api = {
     configure, ctx,
-    startOfDay, addDays, diffDays, parseDate, dayKeyOf, round2,
+    startOfDay, addDays, diffDays, parseDate, dayKeyOf, round2, monthDayToDate,
     isWorkday, countWorkdays, allowance, leftDaysText,
     cloudRows, rowTime, lastSyncMs, localTail,
     todayStat, dailySeries, pendingSinceSync, effAccount, quotaWindow

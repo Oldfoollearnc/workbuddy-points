@@ -70,8 +70,14 @@
     }
   };
 
-  /* ---------------- 偏好 ---------------- */
+  /**
+   * HTML 转义：模型名 / 项目名 / 积分包名都来自外部数据，拼进模板前必须过一遍。
+   * 本地目录名里出现 < > & 完全合法，不转义轻则破坏结构，重则注入脚本。
+   */
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+  /* ---------------- 偏好 ---------------- */
   const PREF_KEY = 'pi.prefs.v1';
   const prefs = Object.assign(
     { theme: 'light', motion: 'full', countUp: true, labels: true, tray: true,
@@ -629,6 +635,13 @@
     if (D.meta && D.meta.sourceKind === 'db') {
       txt += ' 未找到会话明细，已按 <b>workbuddy.db</b> 估算。';
     }
+    // 逐笔合计与账号自报"已用"必然有差（去重是启发式的、周期边界也不一定对齐）。
+    // 与其假装一致，不如把差额摆出来：用户才知道这个数字有多可信。
+    const c = ACCOUNT && ACCOUNT.cloud;
+    if (connected && c && c.used > 0 && Math.abs(c.driftPct || 0) >= 0.01) {
+      txt += ` 逐笔合计 <b>${F.credit(c.rowsSum)}</b> / 云端已用 <b>${F.credit(c.used)}</b>，`
+          + `差 <b>${(c.driftPct * 100).toFixed(1)}%</b>（以云端为准）。`;
+    }
     el.innerHTML = txt;
   }
 
@@ -866,7 +879,7 @@
         const pct = (m.calls / total) * 100;
         return `<div class="comp-row">
           <i class="dot" style="background:${C.toneColor(m.tone)}"></i>
-          <span class="nm" title="${m.name}">${m.name}</span>
+          <span class="nm" title="${esc(m.name)}">${esc(m.name)}</span>
           <span class="val">${F.fmt(m.calls)} 次</span>
           <span class="pct">${pct.toFixed(1)}%</span>
         </div>`;
@@ -934,7 +947,7 @@
       const topTask = (stat.models || [])[0] || D.tasks[0];
       strip.innerHTML = `
         <span class="badge"><svg class="i"><use href="#i-spark"/></svg></span>
-        <span class="txt">今日已消耗 <b>${F.credit(stat.consumed)} 分</b> · ${F.fmt(stat.requests)} 次调用 · 峰值 <b>${F.pad(stat.peakHour || 0)}:00</b>${topTask ? ` · 主要来自 <b>${topTask.name}</b>` : ''}${source === 'demo' ? ' · <b>演示数据</b>' : ''}</span>
+        <span class="txt">今日已消耗 <b>${F.credit(stat.consumed)} 分</b> · ${F.fmt(stat.requests)} 次调用 · 峰值 <b>${F.pad(stat.peakHour || 0)}:00</b>${topTask ? ` · 主要来自 <b>${esc(topTask.name)}</b>` : ''}${source === 'demo' ? ' · <b>演示数据</b>' : ''}</span>
         <button class="link" id="goAnalytics">查看分析 →</button>`;
       const link = $('#goAnalytics');
       if (link) link.addEventListener('click', () => go('analytics'));
@@ -1088,10 +1101,10 @@
       const tone = C.toneColor('c' + ((i % 6) + 1));
       const w = Math.max(3, (m.points / max) * 100);
       const calls = (m.calls == null) ? '' : ` · ${F.fmt(m.calls)} 次`;
-      return `<div class="rows-row" data-name="${String(m.name).replace(/"/g, '&quot;')}"
+      return `<div class="rows-row" data-name="${esc(m.name)}"
           data-points="${F.credit(m.points)}" data-pct="${pct.toFixed(1)}" data-calls="${m.calls == null ? '' : m.calls}">
         <span class="rows-idx">${String(i + 1).padStart(2, '0')}</span>
-        <span class="rows-name" title="${m.name}${calls}">${m.name}</span>
+        <span class="rows-name" title="${esc(m.name)}${calls}">${esc(m.name)}</span>
         <span class="rows-track"><i data-w="${w.toFixed(1)}" style="width:0%;background:linear-gradient(90deg, ${C.hexToRgba(tone, .45)}, ${tone})"></i></span>
         <span class="rows-val">${F.credit(m.points)}</span>
         <span class="rows-pct">${pct.toFixed(1)}%</span>
@@ -1212,7 +1225,7 @@
         single.innerHTML = `
           <div class="ms-donut" id="msDonut"></div>
           <div class="ms-stats">
-            <div><span>模型</span><b>${m ? m.name : '—'}</b></div>
+            <div><span>模型</span><b>${m ? esc(m.name) : '—'}</b></div>
             <div><span>调用次数</span><b>${m && m.calls != null ? F.fmt(m.calls) + ' 次' : '—'}</b></div>
             <div><span>平均每次</span><b>${m && m.calls ? (m.points / m.calls).toFixed(2) + ' 分' : '—'}</b></div>
             <div><span>累计 Token</span><b>${tokens || '—'}</b></div>
@@ -1259,7 +1272,7 @@
       list.innerHTML = items.map((it, i) => `
         <div class="insight-item" style="animation-delay:${i * 60}ms">
           <span class="badge"><svg class="i"><use href="#${it.icon || 'i-info'}"/></svg></span>
-          <div><h4>${it.title}</h4><p>${it.text}</p></div>
+          <div><h4>${esc(it.title)}</h4><p>${it.text}</p></div>
         </div>`).join('');
     }
   }
@@ -1425,9 +1438,9 @@
         return `<div class="table-row${isFirst ? '' : ' is-cont'}" style="animation-delay:${Math.min(i, 14) * 22}ms">
           ${timeCell}
           <span><i class="badge-type ${isEarn ? 'badge-earn' : 'badge-consume'}">${isEarn ? '赠送' : '消耗'}</i></span>
-          <span class="nm"><i class="legend-dot" style="background:${C.toneColor(e.tone)}"></i><b title="${e.model}">${e.model}</b>${tokenTxt}</span>
-          <span class="dim">${e.task}</span>
-          <span class="dim col-project">${e.project}</span>
+          <span class="nm"><i class="legend-dot" style="background:${C.toneColor(e.tone)}"></i><b title="${esc(e.model)}">${esc(e.model)}</b>${tokenTxt}</span>
+          <span class="dim">${esc(e.task)}</span>
+          <span class="dim col-project">${esc(e.project)}</span>
           ${ptCell}
           ${shareCell}
         </div>`;
@@ -1543,7 +1556,7 @@
       list.innerHTML = pkgs.length
         ? pkgs.map(p => {
             const pct = p.total ? Math.max(2, (p.remain / p.total) * 100) : 0;
-            return `<div class="pkg-row"><span class="nm">${p.name}</span>
+            return `<div class="pkg-row"><span class="nm">${esc(p.name)}</span>
               <span class="bar"><i style="width:${pct.toFixed(1)}%"></i></span>
               <b>${F.credit(p.remain)}</b><span>/ ${F.credit(p.total)}</span></div>`;
           }).join('')
@@ -2311,6 +2324,14 @@
       await loadUsage();
       await loadAccount();
       await loadVersion();
+    }
+
+    // 只有浏览器预览（没有桌面桥）才生成演示数据：
+    // 桌面态宁可为空，也不先摆一份假数字上去。
+    if (!bridge.has() && window.buildDemoData) {
+      D = normalize(window.buildDemoData());
+      window.APP_DATA = D;
+      source = 'demo';
     }
 
     bootRender();
