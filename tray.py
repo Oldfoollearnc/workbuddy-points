@@ -39,6 +39,8 @@ WM_KEYDOWN = 0x0100
 WM_ACTIVATE = 0x0006
 WM_NCHITTEST = 0x0084
 WM_KILLFOCUS = 0x0008
+WM_SETCURSOR = 0x0020
+IDC_ARROW = 32512
 
 NIM_ADD, NIM_MODIFY, NIM_DELETE = 0, 1, 2
 NIF_MESSAGE, NIF_ICON, NIF_TIP, NIF_INFO = 0x1, 0x2, 0x4, 0x10
@@ -172,6 +174,10 @@ user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctyp
                                 ctypes.c_int, ctypes.c_int, wintypes.UINT]
 user32.InvalidateRect.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.BOOL]
 user32.SetFocus.argtypes = [wintypes.HWND]
+user32.LoadCursorW.argtypes = [wintypes.HINSTANCE, ctypes.c_void_p]
+user32.LoadCursorW.restype = ctypes.c_void_p
+user32.SetCursor.argtypes = [ctypes.c_void_p]
+user32.SetCursor.restype = ctypes.c_void_p
 user32.BeginPaint.argtypes = [wintypes.HWND, ctypes.POINTER(PAINTSTRUCT)]
 user32.BeginPaint.restype = wintypes.HDC
 user32.EndPaint.argtypes = [wintypes.HWND, ctypes.POINTER(PAINTSTRUCT)]
@@ -251,6 +257,7 @@ class Tray:
         self._menu_w = MENU_W
         self._menu_h = 0
         self._font = None
+        self._arrow = None
 
     # ---------- 主题 / 字体 ----------
 
@@ -259,6 +266,16 @@ class Tray:
 
     def _pal(self):
         return PALETTE.get(self.theme, PALETTE["light"])
+
+    def _ensure_cursor(self):
+        """菜单窗口必须显式给一个箭头光标。
+
+        以前窗口类没设 hCursor、也没处理 WM_SETCURSOR，鼠标移到菜单上会一直显示
+        系统上一次留下的"后台运行"指针（箭头旁边转圈），看起来像程序卡死了。
+        """
+        if not self._arrow:
+            self._arrow = user32.LoadCursorW(None, ctypes.c_void_p(IDC_ARROW))
+        return self._arrow
 
     def _ensure_font(self):
         if self._font:
@@ -387,6 +404,7 @@ class Tray:
         wc.style = CS_HREDRAW | CS_VREDRAW | CS_DROPSHADOW
         wc.lpfnWndProc = ctypes.cast(self._menu_proc, ctypes.c_void_p)
         wc.hInstance = hinst
+        wc.hCursor = self._ensure_cursor()
         wc.lpszClassName = "PointsInsightMenuWnd"
         user32.RegisterClassW(ctypes.byref(wc))       # 已注册会失败，忽略
         hwnd = user32.CreateWindowExW(
@@ -470,6 +488,11 @@ class Tray:
                 if (int(wparam) & 0xFFFF) == 0:      # WA_INACTIVE
                     self._hide_menu()
                 return 0
+            if msg == WM_SETCURSOR:
+                cur = self._ensure_cursor()
+                if cur:
+                    user32.SetCursor(cur)
+                    return 1
             if msg == WM_NCHITTEST:
                 return HTCLIENT
         except Exception as e:
