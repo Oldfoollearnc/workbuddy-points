@@ -111,6 +111,29 @@ class MapTest(unittest.TestCase):
         self.assertEqual(len(out["usageRows"]), 2)
         self.assertAlmostEqual(out["cloud"]["rowsSum"], 8.0, places=2)
 
+    def test_reconcile_only_counts_current_cycle(self):
+        """对账必须裁到本周期：周期开始前的消耗算进来会让差额虚高 4 倍。"""
+        start = (dt.date.today() - dt.timedelta(days=2)).strftime("%Y-%m-%d")
+        before = (dt.date.today() - dt.timedelta(days=6)).strftime("%Y-%m-%d") + " 10:00:00"
+        bill = _bill([_row(before, "old", 20.0),
+                      _row(self.today + " 10:00:00", "new", 5.0)], used=5.0)
+        bill["free"] = {"json": {"data": {"Accounts": [{
+            "CycleStartTime": start + " 00:00:00", "CapacityRemain": 100}]}}}
+        out = self.svc._map(bill)
+        self.assertAlmostEqual(out["cloud"]["rowsSum"], 5.0, places=2, msg="周期外的 20 分不应计入")
+        self.assertAlmostEqual(out["cloud"]["drift"], 0.0, places=2)
+        self.assertEqual(out["cloud"]["cycleRows"], 1)
+
+    def test_count_kind_detects_buckets(self):
+        """云端按 5 分钟聚合时，条数是"笔"不是"次"，前端要据此换单位。"""
+        bucket_rows = [_row(self.today + " 21:00:00", "r1"),
+                       _row(self.today + " 20:55:00", "r2")]
+        self.assertEqual(self.svc._map(_bill(bucket_rows))["cloud"]["countKind"], "bucket")
+
+        minute_rows = [_row(self.today + " 21:03:00", "r1"),
+                       _row(self.today + " 20:47:00", "r2")]
+        self.assertEqual(self.svc._map(_bill(minute_rows))["cloud"]["countKind"], "request")
+
     def test_logout_really_disconnects(self):
         """退出登录必须删掉会话存档并记住"不要自动回填"。"""
         with open(self.cookie, "wb") as f:

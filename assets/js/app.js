@@ -623,11 +623,15 @@
     let txt;
     if (connected) {
       const cloudToday = !!(stat && stat.cloud);
+      const bucketed = !!(ACCOUNT.cloud && ACCOUNT.cloud.countKind === 'bucket');
       txt = `云端<b>每 ${every}同步一次</b>（上次 ${sync || '—'}）；`
           + (cloudToday
-            ? `今日消耗 / 调用 / 构成取<b>云端逐笔</b>（与积分流水逐行相加一致）`
-            : `今日消耗取<b>本机记录</b>（云端逐笔尚未返回）`)
+            ? `今日消耗 / 笔数 / 构成取<b>云端${bucketed ? '计费记录' : '逐笔'}</b>（与积分流水逐行相加一致）`
+            : `今日消耗取<b>本机记录</b>（云端${bucketed ? '计费记录' : '逐笔'}尚未返回）`)
           + `，Token 仍取本机。`;
+      if (bucketed) {
+        txt += ` 云端按 <b>5 分钟 × 模型</b>聚合，<b>一笔 ≠ 一次调用</b>。`;
+      }
     } else {
       txt = `当前只有<b>本机记录</b>：消耗与 Token 实时，但<b>不含账号余额</b>；`
           + `点右上角头像 → 连接账号（扫码一次），之后自动显示可用积分与周期。`;
@@ -640,7 +644,7 @@
     const c = ACCOUNT && ACCOUNT.cloud;
     if (connected && c && c.used > 0 && Math.abs(c.driftPct || 0) >= 0.01) {
       txt += ` 逐笔合计 <b>${F.credit(c.rowsSum)}</b> / 云端已用 <b>${F.credit(c.used)}</b>，`
-          + `差 <b>${(c.driftPct * 100).toFixed(1)}%</b>（以云端为准）。`;
+          + `差 <b>${(c.driftPct * 100).toFixed(1)}%</b>（周期边界与入账时序，以云端为准）。`;
     }
     el.innerHTML = txt;
   }
@@ -845,7 +849,7 @@
     renderPopHours(stat);
   }
 
-  /** 今日消耗构成：按「调用次数」拆分（不再用积分占比），只留环图 + 颜色图例 */
+  /** 今日消耗构成：按「计费笔数 / 调用次数」拆分（云端是计费记录，本机是逐次调用） */
   function renderComposition(items) {
     const list = $('#compList'), donutBox = $('#compDonut');
     const rows = (items || []).filter(m => (m.calls || 0) > 0)
@@ -917,8 +921,15 @@
     }
 
     countUp($('[data-count="todayReq"]'), stat.requests);
-    setText('#kpiNet', (stat.avgPerRequest || 0).toFixed(2));
+    // 云端返回的是"计费记录"（近期按 5 分钟 × 模型聚合），不是单次调用：
+    // 拿条数当"调用次数"展示会差一个数量级，所以标签、单位、脚注一起切。
+    const cloudCount = !!stat.cloud;
+    setText('#kpi3Label', cloudCount ? '今日计费笔数' : '今日调用');
+    const reqNode = $('[data-count="todayReq"]');
+    if (reqNode && reqNode.nextElementSibling) reqNode.nextElementSibling.textContent = cloudCount ? '笔' : '次';
     setText('#kpiEarnedSub', '均价');
+    setText('#kpiNetUnit', cloudCount ? ' 分/笔' : ' 分/次');
+    setText('#kpiNet', (stat.avgPerRequest || 0).toFixed(2));
 
     const tk = stat.tokens || 0;
     const useYi = tk >= 1e8;
@@ -947,7 +958,7 @@
       const topTask = (stat.models || [])[0] || D.tasks[0];
       strip.innerHTML = `
         <span class="badge"><svg class="i"><use href="#i-spark"/></svg></span>
-        <span class="txt">今日已消耗 <b>${F.credit(stat.consumed)} 分</b> · ${F.fmt(stat.requests)} 次调用 · 峰值 <b>${F.pad(stat.peakHour || 0)}:00</b>${topTask ? ` · 主要来自 <b>${esc(topTask.name)}</b>` : ''}${source === 'demo' ? ' · <b>演示数据</b>' : ''}</span>
+        <span class="txt">今日已消耗 <b>${F.credit(stat.consumed)} 分</b> · ${F.fmt(stat.requests)} ${stat.cloud ? '笔计费' : '次调用'} · 峰值 <b>${F.pad(stat.peakHour || 0)}:00</b>${topTask ? ` · 主要来自 <b>${esc(topTask.name)}</b>` : ''}${source === 'demo' ? ' · <b>演示数据</b>' : ''}</span>
         <button class="link" id="goAnalytics">查看分析 →</button>`;
       const link = $('#goAnalytics');
       if (link) link.addEventListener('click', () => go('analytics'));
@@ -1100,7 +1111,7 @@
       const pct = (m.points / sum) * 100;
       const tone = C.toneColor('c' + ((i % 6) + 1));
       const w = Math.max(3, (m.points / max) * 100);
-      const calls = (m.calls == null) ? '' : ` · ${F.fmt(m.calls)} 次`;
+      const calls = (m.calls == null) ? '' : ` · ${F.fmt(m.calls)} ${cloudRows() ? '笔' : '次'}`;
       return `<div class="rows-row" data-name="${esc(m.name)}"
           data-points="${F.credit(m.points)}" data-pct="${pct.toFixed(1)}" data-calls="${m.calls == null ? '' : m.calls}">
         <span class="rows-idx">${String(i + 1).padStart(2, '0')}</span>
@@ -1157,13 +1168,17 @@
   }
 
   function renderAnalytics() {
+    const cloudMode = !!cloudRows();
+    setText('#modelSub', cloudMode
+      ? '近 30 天按模型统计积分与计费笔数（云端按 5 分钟聚合）'
+      : '近 30 天按模型统计积分与调用次数');
     /* ---------- 消耗日历：云端逐笔优先，本机记录补盲区 ---------- */
     const cal = calendarDays();
     const calDays = cal.days;
     const calTotal = calDays.reduce((a, b) => a + b.points, 0);
     const activeDays = calDays.filter(d => d.points > 0).length;
     setText('#weekSum', `区间合计 ${F.credit(calTotal)} 分`);
-    setText('#calSub', `每格一天，从当月起按整月对齐 · 颜色越深消耗越多 · 悬停查看积分 / Token / 调用次数`);
+    setText('#calSub', `每格一天，从当月起按整月对齐 · 颜色越深消耗越多 · 悬停查看积分 / Token / ${cloudMode ? '计费笔数' : '调用次数'}`);
 
     const srcChip = $('#calSource');
     if (srcChip) {
@@ -1226,7 +1241,7 @@
           <div class="ms-donut" id="msDonut"></div>
           <div class="ms-stats">
             <div><span>模型</span><b>${m ? esc(m.name) : '—'}</b></div>
-            <div><span>调用次数</span><b>${m && m.calls != null ? F.fmt(m.calls) + ' 次' : '—'}</b></div>
+            <div><span>${cloudRows() ? '计费笔数' : '调用次数'}</span><b>${m && m.calls != null ? F.fmt(m.calls) + (cloudRows() ? ' 笔' : ' 次') : '—'}</b></div>
             <div><span>平均每次</span><b>${m && m.calls ? (m.points / m.calls).toFixed(2) + ' 分' : '—'}</b></div>
             <div><span>累计 Token</span><b>${tokens || '—'}</b></div>
           </div>
@@ -1253,7 +1268,9 @@
     /* ---------- 项目消耗排行：本机记录（云端不返回项目） ---------- */
     const projItems = (D.projects7 || []).map(p => ({ name: p.name, points: p.points }));
     const pTotal = projItems.reduce((a, b) => a + b.points, 0);
-    setText('#projTotal', projItems.length ? `近 7 天 ${F.credit(pTotal)} 分` : '暂无数据');
+    setText('#projTotal', projItems.length
+      ? `近 7 天 ${cloudMode ? '本机 ' : ''}${F.credit(pTotal)} 分`
+      : '暂无数据');
     renderRows($('#projectRank'), projItems, { limit: 6, empty: '近 7 天暂无项目消耗' });
 
     const list = $('#insightList');
@@ -1368,7 +1385,7 @@
       const tkTip = '本机会话累计：每次调用的 totalTokens 含整段上下文，逐次相加会重复计入；云端逐笔不返回 Token，所以这一列固定取本机记录';
       sum.innerHTML = `
         <div><span>今日消耗${cloudSrc ? '<i class="src-tag">云端+本机</i>' : ''}</span><b>${F.credit(stat.consumed)} <small style="font-size:10px;color:var(--text-3)">分</small></b></div>
-        <div><span>今日调用${cloudSrc ? '<i class="src-tag">云端+本机</i>' : ''}</span><b>${F.fmt(stat.requests)} <small style="font-size:10px;color:var(--text-3)">次</small></b></div>
+        <div><span>今日${cloudSrc ? '计费笔数' : '调用'}${cloudSrc ? '<i class="src-tag">云端+本机</i>' : ''}</span><b>${F.fmt(stat.requests)} <small style="font-size:10px;color:var(--text-3)">${cloudSrc ? '笔' : '次'}</small></b></div>
         <div title="${tkTip}"><span>今日 Token${cloudSrc && tk > 0 ? '<i class="src-tag">本机</i>' : ''}</span><b>${tkText}</b></div>
         <div><span>筛选结果</span><b>${all.length} <small style="font-size:10px;color:var(--text-3)">条</small></b></div>`;
     }

@@ -270,7 +270,7 @@
               <span class="kpi-icon tint-green"><svg class="i"><use href="#i-refresh"/></svg></span>
             </div>
             <div class="kpi-value"><span data-count="todayReq">0</span><em>次</em></div>
-            <div class="kpi-foot"><span class="chip chip-good" id="kpiEarnedSub">平均每次</span><span class="muted"><b id="kpiNet">—</b> 分/次</span></div>
+            <div class="kpi-foot"><span class="chip chip-good" id="kpiEarnedSub">平均每次</span><span class="muted"><b id="kpiNet">—</b><span id="kpiNetUnit"> 分/次</span></span></div>
             <div class="kpi-spark" data-spark="todayReq"></div>
           </article>
 
@@ -386,7 +386,7 @@
         <div class="grid grid--lists ana-row2">
           <article class="card list-card span-6" style="--i:1">
             <header class="card-head">
-              <div><h2>模型使用量</h2><p>近 30 天按模型统计积分与调用次数</p></div>
+              <div><h2>模型使用量</h2><p id="modelSub">近 30 天按模型统计积分与调用次数</p></div>
               <div class="card-tools"><span class="chip" id="modelTotal">—</span></div>
             </header>
             <div class="rows-head"><span></span><span>模型</span><span></span><span class="ta-r">积分</span><span class="ta-r">占比</span></div>
@@ -396,7 +396,7 @@
 
           <article class="card list-card span-6" style="--i:2">
             <header class="card-head">
-              <div><h2>项目消耗排行</h2><p>近 7 天 Top 6 项目，条形长度按消耗占比</p></div>
+              <div><h2>项目消耗排行</h2><p>近 7 天 Top 6 项目，条形长度按消耗占比（仅本机记录，不含其他设备）</p></div>
               <div class="card-tools"><span class="chip" id="projTotal">—</span></div>
             </header>
             <div class="rows-head"><span></span><span>项目</span><span></span><span class="ta-r">积分</span><span class="ta-r">占比</span></div>

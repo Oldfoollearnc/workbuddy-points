@@ -666,12 +666,28 @@ class AccountService:
                 "isToday": i == 0,
             })
 
-        # 对账：逐笔合计 vs 账号自报"周期已用"。
-        # 两者不可能完全相等（去重是启发式的、周期边界也不一定对齐），
-        # 与其假装一致，不如把差额暴露出来 —— 用户才知道这个数字有多可信。
-        rows_sum = round(sum(_num(r.get("credit")) for r in rows_all), 2)
+        # 对账：逐笔合计 vs 账号自报"周期已用"，**只在同一个周期内比**。
+        # 踩过的坑：29 天窗口里包含周期开始前的消耗，会让差额从 2.4% 虚高到 9.4%。
+        cycle_from = (cycle_start or "")[:10]
+        rows_cycle = [r for r in rows_all
+                      if not cycle_from or str(r.get("requestTime") or "")[:10] >= cycle_from]
+        rows_sum = round(sum(_num(r.get("credit")) for r in rows_cycle), 2)
         drift = round(rows_sum - used, 2) if used > 0 else 0.0
         drift_pct = round(drift / used, 4) if used > 0 else 0.0
+
+        # 云端返回的到底是"逐笔调用"还是"聚合后的计费记录"？
+        # 实测近两天全部落在 5 分钟整点上（秒=00 且分钟是 5 的倍数），
+        # 说明它是按"5 分钟 × 模型"聚合的计费批次。此时条数 ≠ 调用次数，
+        # 界面必须按"笔"而不是"次"展示，否则会差一个数量级。
+        def _is_bucket(t):
+            s = str(t or "")
+            try:
+                return s[17:19] == "00" and int(s[14:16]) % 5 == 0
+            except (ValueError, IndexError):
+                return False
+
+        bucket_n = sum(1 for r in rows_cycle if _is_bucket(r.get("requestTime")))
+        count_kind = "bucket" if rows_cycle and bucket_n / len(rows_cycle) >= 0.8 else "request"
 
         return {
             "user": dict({"plan": sm.get("SubscriptionPackageName") or "",
@@ -686,6 +702,8 @@ class AccountService:
                 "rowsSum": rows_sum,
                 "drift": drift,
                 "driftPct": drift_pct,
+                "countKind": count_kind,
+                "cycleRows": len(rows_cycle),
                 "expireAtText": _date(expire_at),
                 "cycleStartText": cycle_start,
                 "cycleEndText": "",
