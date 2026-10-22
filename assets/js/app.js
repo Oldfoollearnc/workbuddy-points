@@ -96,6 +96,7 @@
   const bridge = {
     api() { return (window.pywebview && window.pywebview.api) || null; },
     has() { const a = this.api(); return !!(a && typeof a.get_usage === 'function'); },
+    can(name) { const a = this.api(); return !!(a && typeof a[name] === 'function'); },
     call(name, ...args) {
       const api = this.api();
       if (!api || typeof api[name] !== 'function') return null;
@@ -144,6 +145,7 @@
     d.daily = d.daily || [];
     d.week = d.week || [];
     d.heat = d.heat || [];
+    d.recent = d.recent || [];
     d.taskDefs = d.taskDefs || [];
     d.insights = d.insights || [];
     return d;
@@ -230,6 +232,103 @@
     return { perDay, perWeek, leftWorkdays, leftDays, pool, signin, end, total, available };
   }
 
+  /* ---------------- 今日口径：统一以云端流水为准 ---------------- */
+
+  const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
+  const dayKeyOf = d => `${d.getFullYear()}-${F.pad(d.getMonth() + 1)}-${F.pad(d.getDate())}`;
+
+  /** 可用的云端逐笔（积分流水）。没有它就退回本机记录。 */
+  function cloudRows() {
+    const a = ACCOUNT || {};
+    return (a.status === 'connected' && Array.isArray(a.usageRows) && a.usageRows.length) ? a.usageRows : null;
+  }
+
+  const rowTime = r => new Date(String((r && r.t) || '').replace(' ', 'T'));
+
+  /**
+   * 今日消耗/调用/时段/模型构成：**一个数据源**。
+   *
+   * 之前总览与小窗用本机 JSONL 求和、积分流水页用云端逐笔求和，分母不同，
+   * 用户看到的就是"今日消耗 ≠ 流水合计"。这里统一成：连上云端就全部取云端
+   * 逐笔（与积分流水页逐行相加完全相等），未连接才退回本机记录。
+   * Token 云端不返回，只能仍取本机，界面上单独标注。
+   */
+  function todayStat() {
+    const rows = cloudRows();
+    if (rows) {
+      const now = new Date();
+      const todayKey = dayKeyOf(now);
+      const yestKey = dayKeyOf(addDays(now, -1));
+      const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h, points: 0, requests: 0 }));
+      const map = new Map();
+      let sum = 0, calls = 0, yday = 0;
+      rows.forEach(r => {
+        const d = rowTime(r);
+        if (isNaN(d.getTime())) return;
+        const credit = Number(r.credit) || 0;
+        const key = dayKeyOf(d);
+        if (key === yestKey) yday += credit;
+        if (key !== todayKey) return;
+        sum += credit; calls += 1;
+        const hb = hours[d.getHours()];
+        hb.points += credit; hb.requests += 1;
+        const name = r.model || '未知模型';
+        const m = map.get(name) || { name, points: 0, calls: 0 };
+        m.points += credit; m.calls += 1;
+        map.set(name, m);
+      });
+      const models = Array.from(map.values()).sort((a, b) => b.points - a.points);
+      models.forEach((m, i) => { m.points = round2(m.points); m.tone = 'c' + ((i % 6) + 1); });
+      hours.forEach(h => { h.points = round2(h.points); });
+      const peak = hours.reduce((a, b) => (b.points > a.points ? b : a), hours[0]);
+      return {
+        cloud: true,
+        consumed: round2(sum),
+        requests: calls,
+        tokens: (D.today && D.today.tokens) || 0,   // 云端逐笔不含 Token，仍取本机
+        avgPerRequest: calls ? sum / calls : 0,
+        deltaPct: yday ? (sum / yday - 1) * 100 : 0,
+        hours, models,
+        peakHour: peak ? peak.hour : 0,
+        peakPoints: peak ? peak.points : 0
+      };
+    }
+
+    const t = D.today || {};
+    const hours = Array.from({ length: 24 }, (_, h) => {
+      const src = (D.hourly || []).find(x => x.hour === h) || {};
+      return { hour: h, points: src.points || 0, requests: src.requests || 0 };
+    });
+    return {
+      cloud: false,
+      consumed: t.consumed || 0,
+      requests: t.requests || 0,
+      tokens: t.tokens || 0,
+      avgPerRequest: t.avgPerRequest || 0,
+      deltaPct: t.deltaPct || 0,
+      hours,
+      models: (D.models || []).map(m => ({ name: m.name, points: m.points, calls: m.calls, tone: m.tone })),
+      peakHour: D.peakHour || 0,
+      peakPoints: D.peakPoints || 0
+    };
+  }
+
+  const PENDING_MAX_H = 72;   // 服务端只带回最近 72 小时的本地逐笔，超出就不做补偿
+
+  /**
+   * 上次云端同步之后，本机又消耗了多少分（云端还没入账的部分）。
+   * 云端 available 是同步那一刻的快照，扣掉这段增量才是"此刻"的可用积分。
+   */
+  function pendingSinceSync() {
+    if (!ACCOUNT || ACCOUNT.status !== 'connected' || !ACCOUNT.lastSync) return 0;
+    const since = new Date(String(ACCOUNT.lastSync).replace(' ', 'T')).getTime();
+    if (!since || isNaN(since)) return 0;
+    if (Date.now() - since > PENDING_MAX_H * 3600000) return 0;   // 窗口不全，宁可不补
+    let sum = 0;
+    (D.recent || []).forEach(r => { if (r[0] > since) sum += Number(r[1]) || 0; });
+    return round2(sum);
+  }
+
   /** 云端账户优先，本地记录兜底 */
   function effAccount() {
     const base = (D && D.account) || {};
@@ -241,9 +340,16 @@
     const available = (c.available != null) ? c.available
       : Math.max(0, (total || 0) - (used || 0));
     const configured = !!(total > 0);
+    // 关键修正：余额减去"同步后本地新增消耗"，避免界面上的可用积分一直停在旧快照
+    const pending = pendingSinceSync();
+    const liveAvailable = Math.max(0, available - pending);
+    const liveUsed = Math.max(0, used + pending);
     return Object.assign({}, base, {
-      total, used, available, configured,
-      usedPct: configured ? used / total : 0,
+      total, used: liveUsed, available: liveAvailable, configured,
+      pending,
+      cloudAvailable: available,
+      cloudUsed: used,
+      usedPct: configured ? Math.min(1, liveUsed / total) : 0,
       cycleStart: c.cycleStartText || base.cycleStart || '',
       cycleEnd: c.cycleEndText || base.cycleEnd || '',
       expireAt: c.expireAtText || '',
@@ -316,6 +422,69 @@
     applyTheme(pref, !motionOff());
   }
 
+  /* ---------------- 偏好：跨窗口同步 ---------------- */
+
+  /** 所有依赖"额度折算"的地方一次性重算。
+   *  工作日折算 / 计入签到 一改，小窗、侧边栏、额度卡三处数字必须同时变，
+   *  不能等用户切页或等下一次定时刷新。 */
+  function renderQuotaSurfaces() {
+    if (state.mode === 'popup') { renderPopup(); return; }
+    renderSidebar();
+    if (state.view === 'overview') renderOverview();
+    else renderQuotaCard(effAccount(), hasQuota());
+  }
+
+  /** 把自己这份 prefs 推给另一个窗口（小窗与主界面是两个独立 WebView） */
+  function pushPrefs() {
+    if (!bridge.has()) return;
+    try { bridge.call('sync_prefs', JSON.stringify(prefs)); } catch (e) { /* ignore */ }
+  }
+
+  /** 收到另一端的 prefs：合并 → 落盘 → 重算；绝不回推，避免来回弹球 */
+  function applyPrefs(raw) {
+    let p = raw;
+    if (typeof raw === 'string') {
+      try { p = JSON.parse(raw); } catch (e) { return false; }
+    }
+    if (!p || typeof p !== 'object') return false;
+    const themeChanged = !!p.theme && p.theme !== prefs.theme;
+    Object.keys(p).forEach(k => {
+      if (Object.prototype.hasOwnProperty.call(prefs, k)) prefs[k] = p[k];
+    });
+    savePrefs();
+    document.documentElement.setAttribute('data-motion', prefs.motion);
+    if (themeChanged) { lastPainted = null; paintTheme(resolved(), true, true); }
+    if (state.mode === 'main') renderSettings();
+    renderQuotaSurfaces();
+    return true;
+  }
+
+  /** 兜底：窗口唤起时从 localStorage 对齐一次偏好。
+   *  跨窗口推送偶发丢失（隐藏窗口被 WebView2 挂起）时，本地存储仍是最新的。 */
+  function prefsFromStore() {
+    const stored = readPrefs();
+    let changed = false;
+    Object.keys(stored).forEach(k => {
+      if (Object.prototype.hasOwnProperty.call(prefs, k) && prefs[k] !== stored[k]) {
+        prefs[k] = stored[k];
+        changed = true;
+      }
+    });
+    return changed;
+  }
+
+  /** 窗口显示前统一调用：对齐偏好 + 全量重算 */
+  function beforeShow() {
+    const changed = prefsFromStore();
+    document.documentElement.setAttribute('data-motion', prefs.motion);
+    if (changed) {
+      lastPainted = null;
+      paintTheme(resolved(), true, true);
+    }
+    renderActive(true);
+    return changed;
+  }
+
   /* ---------------- 动效 / 计数 ---------------- */
 
   function setMotion(level) {
@@ -324,6 +493,7 @@
     document.documentElement.setAttribute('data-motion', level);
     $$('#motionSeg button').forEach(b => b.classList.toggle('is-active', b.dataset.motionChoice === level));
     renderActive();
+    pushPrefs();
     toast(`动效已设为「${level === 'full' ? '完整' : level === 'reduced' ? '精简' : '关闭'}」`);
   }
 
@@ -338,6 +508,40 @@
     const o = opts || {};
     const format = o.format || (v => F.fmt(v, o.decimals || 0));
     node.textContent = format(Number(target) || 0);
+  }
+
+  /* ---------------- 窗口出现时的入场动效 ---------------- */
+
+  /**
+   * 窗口"出现"发生在 Win32 层，页面收不到通知，因此由 Python 在 ShowWindow 之后调用。
+   * 用 Web Animations API 而不是切 class：class 变化会牵动既有 CSS 动画重播，
+   * 而 WAAPI 每次都是独立的一次播放，反复开关也不会残留状态。
+   */
+  function playEnter(mode) {
+    if (prefs.motion === 'off') return;
+    const m = mode || state.mode;
+    const groups = m === 'popup'
+      ? [['.pop-head', 0], ['.pop-hero', 40], ['.pop-latency', 70],
+         ['.pop-block--hours', 95], ['.pop-foot', 125]]
+      : [['.topbar', 0], ['.sidebar', 20], ['.view.is-active .notice', 30],
+         ['.view.is-active .card', 60], ['.view.is-active .insight-strip', 90]];
+    const dur = prefs.motion === 'reduced' ? 190 : 380;
+    const jobs = [];
+    groups.forEach(([sel, delay]) => {
+      $$(sel).forEach((el, i) => {
+        // 卡片按顺序错开，形成"从上往下铺开"的节奏
+        const extra = sel === '.view.is-active .card' ? Math.min(i, 8) * 30 : 0;
+        jobs.push([el, delay + extra]);
+      });
+    });
+    jobs.forEach(([el, delay]) => {
+      try {
+        el.animate(
+          [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }],
+          { duration: dur, delay, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'backwards' }
+        );
+      } catch (e) { /* 老内核不支持 WAAPI：直接显示，不影响功能 */ }
+    });
   }
 
   /* ---------------- 通用 ---------------- */
@@ -385,7 +589,7 @@
   /* ---------------- 总览提示条 ---------------- */
 
   /** 顶部那条明确提示：说清"哪个数字是实时的、哪个有延迟、当前读的是哪份数据"。 */
-  function renderNotice() {
+  function renderNotice(stat) {
     const el = $('#noticeText');
     if (!el) return;
     const box = $('#dataNotice');
@@ -396,8 +600,12 @@
     const every = iv === 0 ? '手动' : (iv ? iv + ' 分钟' : '60 分钟');
     let txt;
     if (connected) {
-      txt = `云端<b>每 ${every}同步一次</b>（上次 ${sync || '—'}，有延迟）；`
-          + `今日消耗 / 模型 / 项目取<b>本机记录</b>，实时。`;
+      const cloudToday = !!(stat && stat.cloud);
+      txt = `云端<b>每 ${every}同步一次</b>（上次 ${sync || '—'}）；`
+          + (cloudToday
+            ? `今日消耗 / 调用 / 构成取<b>云端逐笔</b>（与积分流水逐行相加一致）`
+            : `今日消耗取<b>本机记录</b>（云端逐笔尚未返回）`)
+          + `，Token 仍取本机。`;
     } else {
       txt = `当前只有<b>本机记录</b>：消耗与 Token 实时，但<b>不含账号余额</b>；`
           + `点右上角头像 → 连接账号（扫码一次），之后自动显示可用积分与周期。`;
@@ -524,12 +732,12 @@
   /* ---------------- 小窗：今日消耗时段分布（复刻总览那张柱状图） ---------------- */
 
   /** 与总览「今日消耗时段分布」同一套 C.bar 组件、同一份数据，只是刻度与柱宽按小窗收窄。 */
-  function renderPopHours() {
-    const today = D.today;
-    setText('#popPeak', D.peakPoints ? `峰值 ${F.pad(D.peakHour)}:00 · ${F.credit(D.peakPoints)} 分` : '今日暂无消耗');
-    setHTML('#popFootReq', F.fmt(today.requests));
-    setHTML('#popFootAvg', (today.avgPerRequest || 0).toFixed(2));
-    setHTML('#popFootToken', F.fmtWan(today.tokens || 0));
+  function renderPopHours(stat) {
+    const s = stat || todayStat();
+    setText('#popPeak', s.peakPoints ? `峰值 ${F.pad(s.peakHour)}:00 · ${F.credit(s.peakPoints)} 分` : '今日暂无消耗');
+    setHTML('#popFootReq', F.fmt(s.requests));
+    setHTML('#popFootAvg', (s.avgPerRequest || 0).toFixed(2));
+    setHTML('#popFootToken', F.fmtWan(s.tokens || 0));
     const box = $('[data-chart="popHourly"]');
     if (!box) return;
     // 小窗只有一屏宽，不摆 24 根柱：滑动窗口 = 最近 12 小时，
@@ -537,13 +745,14 @@
     const nowHour = (D.meta && D.meta.nowHour != null) ? D.meta.nowHour : new Date().getHours();
     const end = Math.min(23, nowHour + 3);
     const start = Math.max(0, end - 11);
-    const rows = (D.hourly || []).slice(start, end + 1);
+    const rows = s.hours.slice(start, end + 1);
     const paint = () => C.bar(box, {
       data: rows.map(hr => ({
-        label: hr.label, short: F.pad(hr.hour), value: hr.points, isNow: hr.isNow,
+        label: `${F.pad(hr.hour)}:00`, short: F.pad(hr.hour), value: hr.points,
+        isNow: hr.hour === nowHour,
         tipTitle: `${F.pad(hr.hour)}:00–${F.pad((hr.hour + 1) % 24)}:00`
       })),
-      tone: 'c1', valueName: '消耗', sum: today.consumed,
+      tone: 'c1', valueName: '消耗', sum: s.consumed,
       nowIndex: nowHour - start, xEvery: 3, showValues: false, maxBarW: 18
     });
     // 小窗首帧容器可能还是 0 高（boot 遮罩 / 布局未定型），量到尺寸再画，最多等 3 秒
@@ -557,11 +766,12 @@
   }
 
   function renderPopup() {
-    const today = D.today, acc = effAccount();
+    const stat = todayStat();
+    const acc = effAccount();
     const configured = hasQuota();
     // 大字 = 今日使用积分；可用积分降为辅助小字（原顺序相反，主次不清）
     setText('#popAvailLabel', '今日使用积分');
-    countUp($('#popTodayUsed'), today.consumed, { duration: 760, format: F.credit });
+    countUp($('#popTodayUsed'), stat.consumed, { duration: 760, format: F.credit });
     setText('#popAvailable', configured ? F.credit(acc.available) : '—');
     setText('#popUsedPct', configured ? (acc.usedPct * 100).toFixed(1) + '%' : '未设置');
 
@@ -586,14 +796,14 @@
 
     const delta = $('#popDelta');
     if (delta) {
-      const up = today.deltaPct >= 0;
+      const up = stat.deltaPct >= 0;
       delta.className = 'delta' + (up ? '' : ' is-good');
-      delta.innerHTML = `<svg class="i"><use href="#${up ? 'i-up' : 'i-down'}"/></svg>${Math.abs(today.deltaPct || 0).toFixed(1)}%`;
+      delta.innerHTML = `<svg class="i"><use href="#${up ? 'i-up' : 'i-down'}"/></svg>${Math.abs(stat.deltaPct || 0).toFixed(1)}%`;
     }
     const prog = $('#popProgress');
     if (prog) requestAnimationFrame(() => { prog.style.width = ((configured ? acc.usedPct : 0) * 100).toFixed(2) + '%'; });
 
-    renderPopHours();
+    renderPopHours(stat);
   }
 
   /** 今日消耗构成：按「调用次数」拆分（不再用积分占比），只留环图 + 颜色图例 */
@@ -635,40 +845,46 @@
   }
 
   function renderOverview() {
-    const acc = effAccount(), today = D.today;
+    const acc = effAccount();
     const configured = hasQuota();
+    const stat = todayStat();          // 今日口径：连上云端后 = 积分流水合计
 
-    renderNotice();
+    renderNotice(stat);
     setText('#kpi1Label', configured ? '可用积分' : '本周期消耗');
     countUp($('[data-count="available"]'), configured ? acc.available : acc.used, { format: F.credit });
     setText('#kpiAvailSub', configured ? `已用 ${(acc.usedPct * 100).toFixed(1)}%` : `累计 ${D.meta.days || 0} 天`);
     const syncedAt = (ACCOUNT && ACCOUNT.lastSync) ? String(ACCOUNT.lastSync).slice(11, 16) : '';
     setText('#kpiAvailNote', configured
-      ? (syncedAt ? `云端 ${syncedAt} 同步` : `总额度 ${F.credit(acc.total)}`)
+      ? (acc.pending > 0.005
+        ? `云端 ${F.credit(acc.cloudAvailable)} − 待入账 ${F.credit(acc.pending)}`
+        : (syncedAt ? `云端 ${syncedAt} 同步` : `总额度 ${F.credit(acc.total)}`))
       : '未设置额度上限');
     const availChip = $('#kpiAvailSub');
-    if (availChip) availChip.title = syncedAt
-      ? `可用积分来自云端（${syncedAt} 同步），可能有延迟；今日消耗/调用/Token 为本地实时`
-      : '可用积分来自本地记录';
+    if (availChip) availChip.title = (acc.source === 'cloud')
+      ? `可用积分 = 云端余额 ${F.credit(acc.cloudAvailable)} − 同步后本地新增消耗 ${F.credit(acc.pending)}`
+      : '可用积分来自本地记录（未连接云端）';
 
-    countUp($('[data-count="todayUsed"]'), today.consumed, { format: F.credit });
+    countUp($('[data-count="todayUsed"]'), stat.consumed, { format: F.credit });
     const delta = $('#kpiTodayDelta');
     if (delta) {
-      const up = (today.deltaPct || 0) >= 0;
+      const up = (stat.deltaPct || 0) >= 0;
       delta.className = 'delta' + (up ? '' : ' is-good');
-      delta.innerHTML = `<svg class="i"><use href="#${up ? 'i-up' : 'i-down'}"/></svg>${Math.abs(today.deltaPct || 0).toFixed(1)}%`;
+      delta.innerHTML = `<svg class="i"><use href="#${up ? 'i-up' : 'i-down'}"/></svg>${Math.abs(stat.deltaPct || 0).toFixed(1)}%`;
     }
 
-    countUp($('[data-count="todayReq"]'), today.requests);
-    setText('#kpiNet', (today.avgPerRequest || 0).toFixed(2));
+    countUp($('[data-count="todayReq"]'), stat.requests);
+    setText('#kpiNet', (stat.avgPerRequest || 0).toFixed(2));
     setText('#kpiEarnedSub', '均价');
 
-    const tk = today.tokens || 0;
+    const tk = stat.tokens || 0;
     const useYi = tk >= 1e8;
     const tkNode = $('[data-count="todayToken"]');
     countUp(tkNode, useYi ? tk / 1e8 : tk / 1e4, useYi ? { decimals: 2 } : {});
     if (tkNode && tkNode.nextElementSibling) tkNode.nextElementSibling.textContent = useYi ? '亿' : '万';
-    setText('#kpiAvg', `${F.fmtWan(tk / Math.max(1, today.requests))} / 次`);
+    // Token 只有本机口径，所以"平均上下文"必须用本机的调用次数做分母，
+    // 不能拿云端的请求数去除（云端按请求计，本机按模型调用计，混用会算出离谱值）
+    const reqForToken = (D.today && D.today.requests) || stat.requests;
+    setText('#kpiAvg', `${F.fmtWan(tk / Math.max(1, reqForToken))} / 次`);
 
     const sparks = {
       available: D.daily.slice(-14).map(d => d.balance),
@@ -682,32 +898,34 @@
 
     const strip = $('#insightStrip');
     if (strip) {
-      const topTask = D.tasks[0];
+      const topTask = (stat.models || [])[0] || D.tasks[0];
       strip.innerHTML = `
         <span class="badge"><svg class="i"><use href="#i-spark"/></svg></span>
-        <span class="txt">今日已消耗 <b>${F.credit(today.consumed)} 分</b> · ${F.fmt(today.requests)} 次调用 · 峰值 <b>${F.pad(D.peakHour || 0)}:00</b>${topTask ? ` · 主要来自 <b>${topTask.name}</b>` : ''}${source === 'demo' ? ' · <b>演示数据</b>' : ''}</span>
+        <span class="txt">今日已消耗 <b>${F.credit(stat.consumed)} 分</b> · ${F.fmt(stat.requests)} 次调用 · 峰值 <b>${F.pad(stat.peakHour || 0)}:00</b>${topTask ? ` · 主要来自 <b>${topTask.name}</b>` : ''}${source === 'demo' ? ' · <b>演示数据</b>' : ''}</span>
         <button class="link" id="goAnalytics">查看分析 →</button>`;
       const link = $('#goAnalytics');
       if (link) link.addEventListener('click', () => go('analytics'));
     }
 
-    setText('#hourlyPeak', D.peakPoints ? `峰值 ${F.pad(D.peakHour)}:00 · ${F.credit(D.peakPoints)} 分` : '今日暂无消耗');
-    setHTML('#footReq', F.fmt(today.requests));
-    setHTML('#footAvg', (today.avgPerRequest || 0).toFixed(2));
-    setHTML('#footToken', F.fmtWan(today.tokens || 0));
+    setText('#hourlyPeak', stat.peakPoints ? `峰值 ${F.pad(stat.peakHour)}:00 · ${F.credit(stat.peakPoints)} 分` : '今日暂无消耗');
+    setHTML('#footReq', F.fmt(stat.requests));
+    setHTML('#footAvg', (stat.avgPerRequest || 0).toFixed(2));
+    setHTML('#footToken', F.fmtWan(stat.tokens || 0));
     setHTML('#footNow', D.meta.updated || '—');
 
+    const nowHour = (D.meta && D.meta.nowHour != null) ? D.meta.nowHour : new Date().getHours();
     C.bar($('[data-chart="hourly"]'), {
-      data: D.hourly.map(hr => ({
-        label: hr.label, short: F.pad(hr.hour), value: hr.points, isNow: hr.isNow,
+      data: stat.hours.map(hr => ({
+        label: `${F.pad(hr.hour)}:00`, short: F.pad(hr.hour), value: hr.points,
+        isNow: hr.hour === nowHour,
         tipTitle: `${F.pad(hr.hour)}:00–${F.pad((hr.hour + 1) % 24)}:00`
       })),
-      tone: 'c1', valueName: '消耗', sum: today.consumed,
-      nowIndex: D.meta.nowHour, xEvery: 3, showValues: prefs.labels, maxBarW: 22
+      tone: 'c1', valueName: '消耗', sum: stat.consumed,
+      nowIndex: nowHour, xEvery: 3, showValues: prefs.labels, maxBarW: 22
     });
 
     // 今日消耗构成：按调用次数拆分（免费模型也计入，只要今天被调用过）
-    const compRows = (D.models || []).filter(m => (m.calls || 0) > 0);
+    const compRows = (stat.models || []).filter(m => (m.calls || 0) > 0);
     renderComposition(compRows);
     setText('#compCount', compRows.length ? `${compRows.length} 个模型` : '—');
 
@@ -720,30 +938,40 @@
 
   const QUOTA_LABEL = { day: '今日', week: '本周', cycle: '本期' };
 
-  /** 区间内已消耗多少分：D.daily 只带 MM-DD，按当年补齐成日期再比较 */
+  /** 区间内已消耗多少分：云端优先（与流水同源），否则回退 D.daily（只带 MM-DD） */
   function quotaWindow(kind) {
     const now = new Date();
+    let from;
+    if (kind === 'day') {
+      from = startOfDay(now);
+    } else if (kind === 'month') {
+      from = new Date(now.getFullYear(), now.getMonth(), 1);
+    } else {
+      const wd = (now.getDay() + 6) % 7;          // 周一为 0
+      from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - wd);
+    }
+
+    const rows = cloudRows();
+    if (rows) {
+      let sum = 0;
+      rows.forEach(r => {
+        const t = rowTime(r);
+        if (!isNaN(t.getTime()) && t >= from && t <= now) sum += Number(r.credit) || 0;
+      });
+      return { sum: round2(sum), from };
+    }
+
     const mk = s => {
       const m = /^(\d{1,2})-(\d{1,2})$/.exec(String(s || ''));
       return m ? new Date(now.getFullYear(), +m[1] - 1, +m[2]) : null;
     };
-    let from, count;
-    if (kind === 'day') {
-      from = startOfDay(now); count = 1;
-    } else if (kind === 'month') {
-      from = new Date(now.getFullYear(), now.getMonth(), 1); count = now.getDate();
-    } else {
-      const wd = (now.getDay() + 6) % 7;          // 周一为 0
-      from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - wd);
-      count = wd + 1;
-    }
     let sum = 0;
     (D.daily || []).forEach(d => {
       const t = mk(d.date);
       if (t && t >= from && t <= now) sum += d.consumed;
     });
     if (kind === 'day' && !sum) sum = (D.today && D.today.consumed) || 0;
-    return { sum, count, from };
+    return { sum, from };
   }
 
   /** 环图的"额度"跟着区间走：今日=每日可用，本周=本周可用，本期=总额度（副标题显示周期剩余）
@@ -1080,23 +1308,13 @@
     const body = $('#ledgerBody');
     if (!body) return;
 
-    const today = D.today;
     // 占比与条形只按「消耗」行归一：赠送/退回不参与，否则会出现百分比超过 100%
     const maxPts = Math.max(...all.filter(e => e.type !== 'earn').map(e => e.points), 0.01);
 
-    // 云端流水：今日合计取自云端行本身，保证"行加起来 = 顶上的数"
-    let cloudToday = null;
-    if (ledgerSource === 'cloud') {
-      const now = new Date();
-      const key = `${now.getFullYear()}-${F.pad(now.getMonth() + 1)}-${F.pad(now.getDate())}`;
-      cloudToday = all.reduce((a, e) => {
-        const t = e.time instanceof Date ? e.time : new Date(e.time);
-        const k = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())}`;
-        if (k === key) { a.sum += e.points; a.calls += 1; }
-        return a;
-      }, { sum: 0, calls: 0 });
-    }
-    const dayTotal = ledgerSource === 'cloud' ? (cloudToday.sum || 1) : (today.consumed || 1);
+    // 今日合计统一走 todayStat()：与总览 / 小窗 / 额度卡同一个口径，
+    // 且不受"类型筛选 / 搜索框"影响（以前用筛选后的 all 求和，一搜索数字就变了）
+    const stat = todayStat();
+    const dayTotal = stat.consumed || 1;
 
     setHTML('#ledgerSub', ledgerSource === 'cloud'
       ? `云端逐笔 · ${F.fmt(all.length)} 条（账号级，换电脑登录同一账号看到的是同一份；项目与 Token 云端不返回）`
@@ -1106,12 +1324,12 @@
       const cloudSrc = ledgerSource === 'cloud';
       // 今日 Token 只可能来自本机：云端 billing 逐笔不返回 token。
       // 之前云端模式下这里直接显示 "—"，与总览的今日 Token 对不上，现统一取本机同日累计并标注来源。
-      const tk = today.tokens || 0;
+      const tk = stat.tokens || 0;
       const tkText = tk > 0 ? F.fmtWan(tk) : '—';
       const tkTip = '本机会话累计：每次调用的 totalTokens 含整段上下文，逐次相加会重复计入；云端逐笔不返回 Token，所以这一列固定取本机记录';
       sum.innerHTML = `
-        <div><span>今日消耗${cloudSrc ? '（云端）' : ''}</span><b>${F.credit(cloudSrc ? cloudToday.sum : today.consumed)} <small style="font-size:10px;color:var(--text-3)">分</small></b></div>
-        <div><span>今日调用${cloudSrc ? '（云端）' : ''}</span><b>${F.fmt(cloudSrc ? cloudToday.calls : today.requests)} <small style="font-size:10px;color:var(--text-3)">次</small></b></div>
+        <div><span>今日消耗${cloudSrc ? '（云端）' : ''}</span><b>${F.credit(stat.consumed)} <small style="font-size:10px;color:var(--text-3)">分</small></b></div>
+        <div><span>今日调用${cloudSrc ? '（云端）' : ''}</span><b>${F.fmt(stat.requests)} <small style="font-size:10px;color:var(--text-3)">次</small></b></div>
         <div title="${tkTip}"><span>今日 Token${cloudSrc && tk > 0 ? '<i class="src-tag">本机</i>' : ''}</span><b>${tkText}</b></div>
         <div><span>筛选结果</span><b>${all.length} <small style="font-size:10px;color:var(--text-3)">条</small></b></div>`;
     }
@@ -1238,8 +1456,17 @@
     const c = ACCOUNT.cloud || {};
     const u = (ACCOUNT.user || {});
     const credit = v => (v == null ? '—' : F.credit(v) + ' 分');
-    setText('#cloudAvail', credit(c.available));
-    setText('#cloudUsed', credit(c.used));
+    // 余额与"已用"都按"云端快照 − 本地待入账"后的实时值展示，与总览/小窗同一口径
+    const acc = effAccount();
+    const hasCloud = st === 'connected' && !!ACCOUNT.cloud;
+    setText('#cloudAvail', credit(hasCloud ? acc.available : c.available));
+    const availEl = $('#cloudAvail');
+    if (availEl) {
+      availEl.title = hasCloud
+        ? `云端余额 ${F.credit(acc.cloudAvailable)} − 同步后本地待入账 ${F.credit(acc.pending)} = ${F.credit(acc.available)}`
+        : '';
+    }
+    setText('#cloudUsed', credit(hasCloud ? acc.used : c.used));
     const plan = u.plan || '';
     setText('#cloudCycle', c.cycleStartText ? `${String(c.cycleStartText).slice(5)} 起` : (plan || '—'));
     const cycEl = $('#cloudCycle');
@@ -1275,8 +1502,9 @@
     }
 
     // 上次同步 / 间隔（渲染只回填值，事件在 bind 里只绑一次）
+    const pendingTxt = (hasCloud && acc.pending > 0.005) ? ` · 待入账 ${F.credit(acc.pending)} 分` : '';
     setText('#accLastSync', ACCOUNT.lastSync
-      ? ACCOUNT.lastSync + (ACCOUNT.lastError ? ' · 异常：' + ACCOUNT.lastError : '')
+      ? ACCOUNT.lastSync + pendingTxt + (ACCOUNT.lastError ? ' · 异常：' + ACCOUNT.lastError : '')
       : '尚未同步');
     const sel = $('#cloudInterval');
     if (sel && document.activeElement !== sel) sel.value = String(ACCOUNT.interval == null ? 60 : ACCOUNT.interval);
@@ -1485,7 +1713,8 @@
         prefs[key] = n.checked;
         savePrefs();
         if (after) after();
-        renderActive();
+        renderActive(true);
+        pushPrefs();               // 小窗是另一个窗口，必须显式通知
       });
     };
     bindToggle('#optLabels', 'labels');
@@ -1493,8 +1722,9 @@
     bindToggle('#optCalIntro', 'calIntro', () => { if (state.view === 'analytics') renderAnalytics(); });
     bindToggle('#optGroupMinute', 'groupMinute', () => { if (state.view === 'ledger') renderLedger(true); });
     bindToggle('#optNotice', 'notice', () => { if (state.view === 'overview') renderOverview(); });
-    bindToggle('#optHoliday', 'holiday', () => renderActive(true));
-    bindToggle('#optSignin', 'signin', () => renderActive(true));
+    // 这两个开关直接决定"每日可用 / 每周可用"的折算结果：所有展示额度的地方必须同步刷新
+    bindToggle('#optHoliday', 'holiday', renderQuotaSurfaces);
+    bindToggle('#optSignin', 'signin', renderQuotaSurfaces);
     bindToggle('#optTray', 'tray', () => bridge.call('set_close_to_tray', prefs.tray));
 
     const lr = $('#optLocalRefresh');
@@ -1714,7 +1944,11 @@
       bridge.call('win_max').then(st => { applyWinState(st); setTimeout(readWinState, 240); });
     });
 
-    /* 自绘标题栏拖动：用绝对坐标，避免 pywebview 自带 drag 的增量叠加（越拖越快） */
+    /* 自绘标题栏拖动：
+       优先交给 Python 的原生循环（SetCapture + GetCursorPos 1:1 跟随）。
+       前端算位移有两个致命问题：光标移出窗口后 mousemove 断流 → 窗口停在原地；
+       光标再回来时按累计位移补一次 → 窗口瞬移，甚至直接飞出屏幕。
+       下面的 queueMove 仅作旧后端的兜底。 */
     let drag = null, dragPending = null, dragTimer = 0, dragLast = 0;
     const queueMove = (x, y) => {
       dragPending = [x, y];
@@ -1731,14 +1965,20 @@
     const startDrag = async e => {
       if (!topbar || e.button !== 0 || !bridge.has()) return;
       if (e.target.closest('button, input, select, textarea, a, .win-controls, .dock')) return;
+      e.preventDefault();                   // 别触发文本选中，也别让浏览器自己开始拖拽
+      const native = bridge.can('win_drag_start');
       if (winMaxed) {                       // 最大化时拖动 = 先还原，再跟随光标
         applyWinState(await bridge.call('win_max'));
         await new Promise(r => setTimeout(r, 70));
       }
-      const pos = await bridge.call('win_pos');
-      if (!pos || pos.x == null) return;
-      drag = { sx: e.screenX, sy: e.screenY, wx: pos.x, wy: pos.y, dpr: window.devicePixelRatio || 1 };
       document.body.classList.add('is-dragging');
+      if (native) {
+        bridge.call('win_drag_start');      // 结束时会回调 App.__dragEnd()
+        return;
+      }
+      const pos = await bridge.call('win_pos');
+      if (!pos || pos.x == null) { document.body.classList.remove('is-dragging'); return; }
+      drag = { sx: e.screenX, sy: e.screenY, wx: pos.x, wy: pos.y, dpr: window.devicePixelRatio || 1 };
     };
     if (topbar) topbar.addEventListener('mousedown', startDrag);
     window.addEventListener('mousemove', e => {
@@ -1936,6 +2176,17 @@
   window.App = {
     go, setMode, renderActive, refresh,
     refreshLayout: () => renderActive(),
+    /** 由 Python 在窗口显示后调用：补一次入场过渡 */
+    playEnter: mode => playEnter(mode),
+    /** 由 Python 在窗口显示前调用：对齐偏好并全量重算 */
+    beforeShow: () => beforeShow(),
+    /** 由 Python 在原生拖动结束时调用 */
+    __dragEnd: () => {
+      document.body.classList.remove('is-dragging');
+      setTimeout(readWinState, 60);
+    },
+    /** 另一窗口推来的偏好 */
+    applyPrefs: raw => applyPrefs(raw),
     reloadAccount: async () => {
       const ok = await loadAccount();
       if (ok) { renderAccountCard(); renderActive(true); }

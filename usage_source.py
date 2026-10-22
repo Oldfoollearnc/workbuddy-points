@@ -32,7 +32,7 @@ HOME = os.path.expanduser("~")
 # 这样在公司电脑上把数据放在 D 盘或网络盘时也能读到，见 docs/本地数据源方案.md
 CONFIG_PATH = app_paths.data_path("points_config.json")
 CACHE_PATH = app_paths.data_path(".cache", "usage.json")
-CACHE_VER = 2          # 数据结构变更时 +1，强制重算（本轮：models 增加 calls 字段）
+CACHE_VER = 3          # 数据结构变更时 +1，强制重算（本轮：新增 recent 逐笔时间线）
 
 MODEL_NAMES = {
     "deepseek-v4.1-flash": "DeepSeek-V4.1-Flash",
@@ -191,7 +191,7 @@ class UsageService:
             "models": [], "models30": [], "tasks": [], "projects": [],
             "daily": daily,
             "week": [{"date": "", "weekday": "", "total": 0, "values": [0, 0, 0, 0, 0], "isToday": i == 6} for i in range(7)],
-            "heat": [], "heatMax": 1, "ledger": [], "insights": [],
+            "heat": [], "heatMax": 1, "ledger": [], "recent": [], "insights": [],
             "avg7": 0, "daysLeft": 0, "peakHour": 0, "peakPoints": 0,
             "modelDefs": [], "runOutDate": now.isoformat(),
             "ledgerTodayTotal": 0, "pctOfQuota": 0,
@@ -510,6 +510,13 @@ class UsageService:
 
         data_start = min(by_day.keys()).strftime("%Y-%m-%d") if by_day else today.strftime("%Y-%m-%d")
 
+        # 最近 72 小时逐笔时间线：[毫秒时间戳, 积分]
+        # 用途：云端余额是"上次同步那一刻"的快照，减去这段时间本地又花掉的量，
+        # 才是此刻真实的可用积分（云端入账有延迟，单靠余额会偏高）。
+        recent_cut = int(time.time() - 72 * 3600) * 1000
+        recent = [[int(r["ts"]), round(r["credit"], 4)] for r in all_records if r["ts"] >= recent_cut]
+        recent.sort(key=lambda x: x[0])
+
         insights = []
         if today_credit > 0:
             top = models[0] if models else None
@@ -595,6 +602,7 @@ class UsageService:
             "heat": heat,
             "heatMax": heat_max,
             "ledger": ledger,
+            "recent": recent,
             "ledgerTodayTotal": round(today_credit, 2),
             "avg7": round(avg7, 2),
             "daysLeft": round(days_left, 1),

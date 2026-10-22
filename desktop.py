@@ -100,6 +100,17 @@ SW_MINIMIZE = 6
 SW_MAXIMIZE = 3
 SW_RESTORE = 9
 
+VK_LBUTTON = 0x01
+HWND_TOP = 0
+SM_XVIRTUALSCREEN = 76
+SM_YVIRTUALSCREEN = 77
+SM_CXVIRTUALSCREEN = 78
+SM_CYVIRTUALSCREEN = 79
+
+DRAG_TICK = 0.008        # 拖动循环轮询间隔（秒）≈120Hz，足够跟手
+KEEP_VISIBLE_X = 160     # 水平方向至少保留这么宽在屏幕内，避免窗口"跑丢"
+KEEP_VISIBLE_Y = 48      # 垂直方向至少保留标题栏高度
+
 GWL_STYLE = -16
 WS_THICKFRAME = 0x00040000
 WS_MAXIMIZEBOX = 0x00010000
@@ -158,6 +169,32 @@ def work_area():
     except Exception:
         pass
     return 0, 0, user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+
+
+def virtual_screen():
+    """整个虚拟桌面（多显示器时包含负坐标屏），用于判断窗口是否还在可见范围。"""
+    try:
+        x = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
+        y = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
+        w = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
+        h = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
+        if w > 0 and h > 0:
+            return x, y, x + w, y + h
+    except Exception:
+        pass
+    return work_area()
+
+
+def clamp_main_pos(x, y, w, h):
+    """把主窗位置限制在"还能抓得到"的范围里。
+
+    拖到屏幕外不是致命的，但用户找不回来就只能重启 —— 所以水平方向至少留
+    KEEP_VISIBLE_X 宽、垂直方向保证标题栏（顶部 KEEP_VISIBLE_Y）始终在屏内。
+    """
+    vl, vt, vr, vb = virtual_screen()
+    x = int(max(vl - w + KEEP_VISIBLE_X, min(x, vr - KEEP_VISIBLE_X)))
+    y = int(max(vt, min(y, vb - KEEP_VISIBLE_Y)))
+    return x, y
 
 
 def set_app_id():
@@ -368,6 +405,9 @@ class Desktop:
             user32.BringWindowToTop(hwnd)
             user32.SetForegroundWindow(hwnd)
             self._nudge(hwnd)
+            # 入场动效：窗口本身是"瞬间出现"的，靠页面内的一次位移+淡入补足过渡感
+            self._safe_js(self.popup,
+                          "window.App && (App.beforeShow(), App.playEnter('popup'))")
             self._popup_shown_at = time.time()
             self._fg_at_show = int(user32.GetForegroundWindow() or 0)
         threading.Timer(0.35, self._refresh_popup_layout).start()
@@ -443,6 +483,7 @@ class Desktop:
             if not getattr(self, "resize_frame_on", False):
                 strip_nonclient(hwnd)
                 self.resize_frame_on = True
+            self._ensure_on_screen(hwnd)
             self._nudge(hwnd)
             try:
                 user32.AllowSetForegroundWindow(-1)
@@ -450,8 +491,34 @@ class Desktop:
                 pass
             user32.BringWindowToTop(hwnd)
             user32.SetForegroundWindow(hwnd)
+            self._safe_js(self.main,
+                          "window.App && (App.beforeShow(), App.playEnter('main'))")
         threading.Timer(0.2, lambda: self._safe_js(self.main, "App.refreshLayout()")).start()
         threading.Timer(0.3, set_window_icons).start()
+
+    def _ensure_on_screen(self, hwnd):
+        """主窗只剩一条边留在屏幕外/完全跑丢时，拉回工作区居中。
+
+        "拖没了只能重启软件"是最伤体验的失败模式：这里给它兜底，
+        用户点托盘「打开主界面」就能把窗口找回来。
+        """
+        try:
+            rc = RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(rc))
+            w, h = rc.right - rc.left, rc.bottom - rc.top
+            vl, vt, vr, vb = virtual_screen()
+            lost = (rc.right < vl + 120 or rc.left > vr - 120
+                    or rc.bottom < vt + 60 or rc.top > vb - 60)
+            if not lost:
+                return
+            wa = work_area()
+            nx = wa[0] + max(0, ((wa[2] - wa[0]) - w) // 2)
+            ny = wa[1] + max(0, ((wa[3] - wa[1]) - h) // 2)
+            user32.SetWindowPos(hwnd, None, nx, ny, 0, 0,
+                                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+            log(f"ensure_on_screen: ({rc.left},{rc.top}) -> ({nx},{ny})")
+        except Exception as e:
+            log(f"ensure_on_screen error: {e}")
 
     def hide_main(self):
         try:
@@ -504,19 +571,77 @@ class Desktop:
             return {"ok": False}
 
     def win_move(self, x, y, w=0, h=0):
-        """绝对定位（pywebview 自带的 drag 会把增量叠加，导致窗口越拖越快）。"""
+        """绝对定位（旧路径，保留给没有 win_drag_start 的旧前端）。"""
         hwnd = find_hwnd(MAIN_TITLE)
         try:
             if not hwnd:
                 return {"ok": False}
             if getattr(self, "_maxed", False):      # 拖动即还原
                 self._maxed = False
-            user32.SetWindowPos(hwnd, None, int(x), int(y), int(w or 0), int(h or 0),
+            rc = RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(rc))
+            x, y = clamp_main_pos(int(x), int(y), rc.right - rc.left, rc.bottom - rc.top)
+            user32.SetWindowPos(hwnd, None, x, y, int(w or 0), int(h or 0),
                                 SWP_NOZORDER | SWP_NOACTIVATE | (0 if (w and h) else SWP_NOSIZE))
             return {"ok": True}
         except Exception:
             return {"ok": False}
 
+    def win_drag_start(self):
+        """开始拖动主窗：原生循环（GetCursorPos + SetWindowPos），立刻返回。
+
+        为什么不在前端算位移（旧实现）：
+        1. 光标一旦离开窗口矩形，WebView2 就不再派发 mousemove，窗口停在原地；
+           光标再靠近时按"累计位移"补一次，窗口会瞬移 —— 表现就是"鼠标一靠近窗口，
+           窗口反而跑到后面/跑不见了"，严重时整窗移出屏幕，只能重启。
+        2. 前端 screenX 是 CSS 像素，SetWindowPos 是 Win32 坐标，DPI 缩放不一致时
+           窗口会比鼠标跑得快，越拖越偏。
+        原生循环里两者在同一坐标空间，且窗口 1:1 跟随光标，不会出现上述问题。
+        """
+        hwnd = find_hwnd(MAIN_TITLE)
+        if not hwnd:
+            return {"ok": False}
+        if getattr(self, "_dragging", False):
+            return {"ok": True, "busy": True}
+        self._dragging = True
+        threading.Thread(target=self._drag_loop, args=(hwnd,), daemon=True).start()
+        return {"ok": True}
+
+    def _drag_loop(self, hwnd):
+        pt = wintypes.POINT()
+        rc = RECT()
+        moved = 0
+        deadline = time.time() + 300      # 保险丝：按键状态读不到时不至于永久循环
+        try:
+            user32.GetWindowRect(hwnd, ctypes.byref(rc))
+            user32.GetCursorPos(ctypes.byref(pt))
+            off_x, off_y = pt.x - rc.left, pt.y - rc.top
+            w, h = rc.right - rc.left, rc.bottom - rc.top
+            if getattr(self, "_maxed", False):
+                self._maxed = False
+            # 仅首帧提一次 z-order（等同常规窗口被拖起时的置顶），之后只平移
+            user32.SetWindowPos(hwnd, HWND_TOP, rc.left, rc.top, 0, 0,
+                                SWP_NOSIZE | SWP_NOACTIVATE)
+            while user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000:
+                if self.quitting or not user32.IsWindow(hwnd) or time.time() > deadline:
+                    break
+                if not user32.GetCursorPos(ctypes.byref(pt)):
+                    break
+                x, y = clamp_main_pos(pt.x - off_x, pt.y - off_y, w, h)
+                if x != rc.left or y != rc.top:
+                    user32.SetWindowPos(hwnd, None, x, y, 0, 0,
+                                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+                    rc.left, rc.top = x, y
+                    moved += 1
+                time.sleep(DRAG_TICK)
+        except Exception as e:
+            log(f"drag loop error: {e}")
+        finally:
+            self._dragging = False
+            if moved:
+                log(f"drag end: {moved} steps -> ({rc.left},{rc.top})")
+            # 结束态交回前端：解除拖动光标、补一次窗口状态
+            self._safe_js(self.main, "window.App && App.__dragEnd()")
     def win_min(self):
         """最小化：进入系统最小化，由 _watch_minimize 转成右下角小窗。"""
         hwnd = find_hwnd(MAIN_TITLE)
@@ -795,6 +920,9 @@ class Api:
     def win_move(self, x, y, w=0, h=0):
         return self._desk.win_move(x, y, w, h)
 
+    def win_drag_start(self):
+        return self._desk.win_drag_start()
+
     def win_resize(self, x, y, w, h):
         return self._desk.win_resize(x, y, w, h)
 
@@ -847,6 +975,22 @@ class Api:
             except Exception:
                 pass
         return True
+
+    def sync_prefs(self, payload):
+        """把偏好推给另一个窗口。
+
+        小窗与主界面是两个独立 WebView，各自持有一份 prefs；主界面改了
+        「工作日折算 / 计入签到」后，小窗不会自己知道，额度数字就会停在旧值。
+        这里显式广播一次，另一端合并后立即重算。
+        """
+        try:
+            js = "window.App && App.applyPrefs(%s)" % (payload or "{}")
+            for win in (self._desk.popup, self._desk.main):
+                self._desk._safe_js(win, js)
+            return True
+        except Exception as e:
+            log(f"sync_prefs error: {e}")
+            return False
 
     def set_close_to_tray(self, flag):
         self._desk.close_to_tray = bool(flag)
