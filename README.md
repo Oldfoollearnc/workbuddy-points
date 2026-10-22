@@ -42,6 +42,11 @@ python desktop.py --main    :: 显式指定打开主界面（同默认）
 python desktop.py --debug   :: 打开 devtools
 ```
 
+数据口径单测（无依赖，node 直接跑）：
+```bat
+node tests\metrics.test.js
+```
+
 ### 安装包（零环境）
 ```bat
 :: 1) 打包（产出 dist\WorkBuddyPoints\）
