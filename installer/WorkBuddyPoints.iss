@@ -32,9 +32,23 @@ OutputDir=Output
 OutputBaseFilename=WorkBuddyPoints-Setup-{#MyVersion}
 SetupIconFile=..\assets\icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
-Compression=lzma2/max
+UninstallDisplayName={#MyAppName}
+; ultra64 用 64MB 字典，比 max 再省几个百分点；MinVersion=10.0 保证目标机都是 64 位
+Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
+; 左侧品牌图 164x314（modern 样式），第二份是 200% DPI；右上角 55x55 小图
+WizardImageFile=art\wizard.png,art\wizard@2x.png
+WizardSmallImageFile=art\wizard-small.png,art\wizard-small@2x.png
+WizardImageStretch=no
+; 文件属性里的版本信息，右键"属性 → 详细信息"能看出是什么包
+VersionInfoVersion={#MyVersion}
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyVersion}
+VersionInfoDescription={#MyAppName} 安装程序
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoCopyright=Copyright (C) {#MyAppPublisher}
+ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=admin
 ; 允许在向导里改成"仅为我安装"（公司电脑无管理员权限时也能装）
@@ -215,4 +229,25 @@ begin
               WEBVIEW2_URL, mbConfirmation, MB_YESNO) = IDNO then
       Result := False;
   end;
+end;
+
+{ 欢迎页 / 完成页文案：讲清楚"这是什么、数据在哪、要不要重新登录" }
+procedure InitializeWizard();
+begin
+  WizardForm.WelcomeLabel1.Caption := '欢迎安装 {#MyAppName}';
+  WizardForm.WelcomeLabel2.Caption :=
+    '把本机 WorkBuddy 的额度消耗、调用笔数、模型构成整理成一块看板，' +
+    '连上云端后还能逐笔对账。' + #13#10#13#10 +
+    '安装前请了解三点：' + #13#10 +
+    '· 纯本机运行，无广告与推广组件；' + #13#10 +
+    '· 登录状态与历史数据保存在 %APPDATA%\WorkBuddyPoints，升级、重装、卸载都不会删除；' + #13#10 +
+    '· 依赖 Microsoft Edge WebView2 运行时（Windows 10/11 通常已自带）。';
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID = wpFinished then
+    WizardForm.FinishedLabel.Caption :=
+      '{#MyAppName} {#MyVersion} 安装完成。' + #13#10#13#10 +
+      '原来的登录状态和历史数据仍在，直接打开就能用，不需要重新登录。';
 end;

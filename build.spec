@@ -29,6 +29,40 @@ for pkg in ("webview", "pythonnet", "clr_loader"):
 
 datas += collect_data_files("webview")
 
+
+# ---------------------------------------------------------------------------
+# 体积裁剪：webview 的 collect_all 会把所有平台后端原样塞进产物
+# （gtk/qt/cocoa/cef/mshtml/android，外加 android jar 与 x86/arm64 原生库）。
+# 本程序只出 Windows x64，走 winforms + edgechromium，其余全部剔除。
+# 实测可省 ~330KB 产物，安装包层面等价于去掉一整块无用解压。
+# ---------------------------------------------------------------------------
+_DROP = (
+    "webview/platforms/gtk.py",
+    "webview/platforms/qt.py",
+    "webview/platforms/cocoa.py",
+    "webview/platforms/cef.py",
+    "webview/platforms/mshtml.py",
+    "webview/platforms/win32.py",
+    "webview/platforms/android/",
+    "webview/lib/pywebview-android.jar",
+)
+
+
+def _drop_foreign(items):
+    kept = []
+    for it in items:
+        # datas 输入是 (src, dest)，Analysis 产出的 TOC 是 (name, path, typecode)，
+        # 两种都看一遍，避免漏网
+        head = " ".join(str(x) for x in it[:2]).replace("\\", "/").lower()
+        if any(p in head for p in _DROP):
+            continue
+        kept.append(it)
+    return kept
+
+
+datas = _drop_foreign(datas)
+binaries = _drop_foreign(locals().get("binaries", []))
+
 hiddenimports = locals().get("hiddenimports", []) + [
     "clr",
     "webview.platforms.edgechromium",
@@ -38,15 +72,31 @@ hiddenimports = locals().get("hiddenimports", []) + [
 a = Analysis(
     ["desktop.py"],
     pathex=[],
-    binaries=locals().get("binaries", []),
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter", "matplotlib", "numpy", "pandas", "PIL.ImageQt"],
+    excludes=[
+        # GUI 框架用 pywebview，Tk/Qt 一律不要
+        "tkinter", "_tkinter", "matplotlib", "numpy", "pandas",
+        "PIL", "PIL.ImageQt",
+        # 数据分析/测试/文档/包管理，运行时用不到
+        # 注意：不要把 distutils 写进 excludes —— PyInstaller 的 hook-distutils
+        # 会把它 alias 到自家 vendored 副本，声明排除会直接报
+        # "Target module distutils already imported as ExcludedModule"。
+        "unittest", "doctest", "pydoc", "pydoc_data", "test",
+        "setuptools", "pip", "lib2to3",
+    ],
     noarchive=False,
 )
+
+# PyInstaller 自带的 hook-webview.py 会在 Analysis 内部把整包再收一遍，
+# 所以最终生效的过滤点必须放在 Analysis 之后。
+a.datas = _drop_foreign(a.datas)
+a.binaries = _drop_foreign(a.binaries)
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
