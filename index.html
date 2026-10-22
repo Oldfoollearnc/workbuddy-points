@@ -190,22 +190,39 @@
   <div class="main-shell" id="mainShell">
   <aside class="sidebar">
     <nav class="nav" id="nav" aria-label="主导航">
+      <span class="nav-label">导航</span>
       <span class="nav-indicator" id="navIndicator"></span>
-      <button class="nav-item is-active" data-view="overview"><svg class="i"><use href="#i-grid"/></svg><span>总览</span></button>
-      <button class="nav-item" data-view="analytics"><svg class="i"><use href="#i-chart"/></svg><span>用量分析</span></button>
-      <button class="nav-item" data-view="ledger"><svg class="i"><use href="#i-list"/></svg><span>积分流水</span></button>
-      <button class="nav-item" data-view="settings"><svg class="i"><use href="#i-sliders"/></svg><span>设置</span></button>
+      <button class="nav-item is-active" data-view="overview">
+        <span class="nav-ico"><svg class="i"><use href="#i-grid"/></svg></span>
+        <span class="nav-txt">总览</span>
+      </button>
+      <button class="nav-item" data-view="analytics">
+        <span class="nav-ico"><svg class="i"><use href="#i-chart"/></svg></span>
+        <span class="nav-txt">用量分析</span>
+      </button>
+      <button class="nav-item" data-view="ledger">
+        <span class="nav-ico"><svg class="i"><use href="#i-list"/></svg></span>
+        <span class="nav-txt">积分流水</span>
+      </button>
+      <button class="nav-item" data-view="settings">
+        <span class="nav-ico"><svg class="i"><use href="#i-sliders"/></svg></span>
+        <span class="nav-txt">设置</span>
+      </button>
     </nav>
 
     <div class="side-quota">
       <div class="side-quota-head"><span>本周期额度</span><span class="chip chip-brand" id="sidePlan">专业版</span></div>
       <div class="side-quota-num"><b id="sideLeft">0</b><span>/ 200,000 分</span></div>
       <div class="track track-sm"><i id="sideProgress"></i></div>
-      <div class="side-quota-foot"><span>已用 <b id="sideUsedPct">0%</b></span><span id="sideCycle">—</span></div>
+      <div class="side-quota-foot">
+        <span>已用 <b id="sideUsedPct">0%</b></span>
+        <span class="side-quota-note" id="sideCycle">—</span>
+      </div>
     </div>
 
     <div class="side-foot">
-      <div class="side-version"><span id="sideVersion">v1.0.0</span> · WorkBuddy 积分</div>
+      <span class="side-version" id="sideVersion">v1.0.0</span>
+      <span class="side-badge">本机只读</span>
     </div>
   </aside>
 

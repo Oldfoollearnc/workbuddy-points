@@ -615,8 +615,10 @@
     const to = Number(target) || 0;
     const prev = node.dataset.cv;
     const from = prev != null ? Number(prev) : 0;
+    const first = (prev == null);
     node.dataset.cv = String(to);
-    if (motionOff() || document.hidden || Math.abs(to - from) < 0.005) {
+    // 首屏直接给终值：从 0 滚上去会有一瞬间的"0 分"闪烁，而且窗口若被节流还会停在 0
+    if (first || motionOff() || document.hidden || Math.abs(to - from) < 0.005) {
       node.textContent = format(to);
       return;
     }
