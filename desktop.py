@@ -126,6 +126,11 @@ class POINT(ctypes.Structure):
     _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
 
 
+class MONITORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", RECT),
+                ("rcWork", RECT), ("dwFlags", wintypes.DWORD)]
+
+
 # ---------------- 基础工具 ----------------
 
 def log(msg):
@@ -221,29 +226,46 @@ user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
 user32.GetAsyncKeyState.restype = ctypes.c_short
 user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
 user32.GetCursorPos.restype = wintypes.BOOL
-user32.WindowFromPoint.argtypes = [POINT]
+user32.WindowFromPoint.argtypes = [wintypes.POINT]     # 注意必须用 wintypes.POINT，和调用方一致
 user32.WindowFromPoint.restype = wintypes.HWND
 user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+user32.MonitorFromPoint.restype = wintypes.HANDLE
+user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MONITORINFO)]
 
 
 def on_taskbar(pt):
     """光标是否落在任务栏/通知区域上。
 
-    托盘图标也算"小窗外面的点击"，但它的语义是"我要开关小窗"，不是"点外面收起"。
-    这里按窗口类名判断，把任务栏（含溢出区域）排除掉。
+    托盘图标也算"小窗外面的点击"，但它的语义是"我要看小窗"，不是"点外面收起"。
+    这里两条判断：
+    1) 窗口类名（Shell_TrayWnd / TrayNotifyWnd / 溢出区…）；
+    2) 光标在该显示器的"工作区之外、显示器之内"——任务栏无论放上下左右都能盖住。
     """
     try:
         hwnd = user32.WindowFromPoint(pt)
-        if not hwnd:
-            return False
-        buf = ctypes.create_unicode_buffer(256)
-        user32.GetClassNameW(hwnd, buf, 256)
-        cls = buf.value or ""
-        return cls in ("Shell_TrayWnd", "Shell_SecondaryTrayWnd", "TrayNotifyWnd",
+        if hwnd:
+            buf = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(hwnd, buf, 256)
+            cls = buf.value or ""
+            if cls in ("Shell_TrayWnd", "Shell_SecondaryTrayWnd", "TrayNotifyWnd",
                        "NotifyIconOverflowWindow", "TopLevelWindowForOverflowXamlIsland") \
-            or "Tray" in cls or "Overflow" in cls
+                    or "Tray" in cls or "Overflow" in cls:
+                return True
+        mon = user32.MonitorFromPoint(pt, 2)      # MONITOR_DEFAULTTONEAREST
+        if mon:
+            mi = MONITORINFO()
+            mi.cbSize = ctypes.sizeof(MONITORINFO)
+            if user32.GetMonitorInfoW(mon, ctypes.byref(mi)):
+                in_mon = (mi.rcMonitor.left <= pt.x < mi.rcMonitor.right
+                          and mi.rcMonitor.top <= pt.y < mi.rcMonitor.bottom)
+                in_work = (mi.rcWork.left <= pt.x < mi.rcWork.right
+                           and mi.rcWork.top <= pt.y < mi.rcWork.bottom)
+                if in_mon and not in_work:
+                    return True
     except Exception:
-        return False
+        pass
+    return False
 
 
 def round_corners(hwnd):
@@ -707,46 +729,19 @@ class Desktop:
         return {"ok": True}
 
     def _collapse_to_popup(self, hwnd):
-        rc = RECT()
-        sx = sy = sw = sh = 0
-        was_maxed = bool(getattr(self, "_maxed", False))
-        ok = False
-        try:
-            user32.GetWindowRect(hwnd, ctypes.byref(rc))
-            sx, sy, sw, sh = rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top
-            scale = self.scale or 1.0
-            tw = max(120, int(self.pop_size[0] * scale))
-            th = max(120, int(self.pop_size[1] * scale))
-            tx = int(self.pop_x * scale)
-            ty = int(self.pop_y * scale)
+        """只做"内容淡出 → 换小窗"，不再缩放窗口。
 
-            # 页面先淡出/微缩，避免缩小过程中内容重排得难看
-            self._safe_js(self.main, "window.App && App.playExit('popup')")
-            time.sleep(0.05)
-            frames = 9
-            for i in range(1, frames + 1):
-                t = i / frames
-                e = 1 - (1 - t) ** 3          # ease-out cubic
-                x = int(round(sx + (tx - sx) * e))
-                y = int(round(sy + (ty - sy) * e))
-                w = max(160, int(round(sw + (tw - sw) * e)))
-                h = max(160, int(round(sh + (th - sh) * e)))
-                user32.SetWindowPos(hwnd, HWND_TOP, x, y, w, h, SWP_NOACTIVATE)
-                time.sleep(0.013)
-            ok = True
+        之前的做法是把主窗矩形一路插值到小窗大小，窗口每帧重排，图表和文字全在跳，
+        看起来就是"闪来闪去"。现在不碰窗口几何：内容 150ms 淡出，隐藏后小窗自己入场。
+        """
+        try:
+            self._safe_js(self.main, "window.App && App.playExit()")
+            time.sleep(0.16)
         except Exception as e:
             log(f"collapse error: {e}")
         finally:
             self._collapsing = False
-            self.hide_main()          # 先隐藏，再还原几何，避免"缩成小窗又弹回大窗"的一帧
-            # 窗口尺寸被改小了，必须在隐藏状态下还原，否则下次展开主界面只有小窗那么大
-            if ok and sw and sh:
-                try:
-                    user32.SetWindowPos(hwnd, None, sx, sy, sw, sh,
-                                        SWP_NOZORDER | SWP_NOACTIVATE)
-                    self._maxed = was_maxed
-                except Exception as e:
-                    log(f"collapse restore error: {e}")
+            self.hide_main()
             self.show_popup()
 
     def win_max(self):
@@ -1077,6 +1072,12 @@ class Api:
                     win.evaluate_js(js)
             except Exception:
                 pass
+        # 托盘右键菜单是自绘的，主题要跟着界面一起换
+        try:
+            if self._desk.tray:
+                self._desk.tray.set_theme(theme)
+        except Exception:
+            pass
         return True
 
     def sync_prefs(self, payload):
@@ -1206,6 +1207,25 @@ def main():
             time.sleep(delay)
             set_window_icons()
     threading.Thread(target=_apply_icons, daemon=True).start()
+
+    def _sync_tray_theme():
+        """界面主题存在 localStorage 里，Python 不知道 —— 启动后问一次，菜单配色才不会错。"""
+        for _ in range(6):
+            time.sleep(2.0)
+            for w in (app.popup, app.main):
+                try:
+                    t = w.evaluate_js("(window.App && App.getTheme) ? App.getTheme() : null")
+                except Exception:
+                    t = None
+                if t in ("light", "dark"):
+                    try:
+                        if app.tray:
+                            app.tray.set_theme(t)
+                        log(f"tray theme = {t}")
+                    except Exception:
+                        pass
+                    return
+    threading.Thread(target=_sync_tray_theme, daemon=True).start()
 
     log("webview.start")
     try:
