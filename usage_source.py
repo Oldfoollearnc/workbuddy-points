@@ -19,20 +19,27 @@ WorkBuddy 真实用量数据源
 import datetime as dt
 import json
 import os
-import sqlite3
 import threading
 import time
 from collections import defaultdict
 
 import app_paths
 import data_source
+import logutil
 
 HOME = os.path.expanduser("~")
 # 数据目录不再写死：由 data_source 解析（手动指定 > 环境变量 > 自动探测）
 # 这样在公司电脑上把数据放在 D 盘或网络盘时也能读到，见 docs/本地数据源方案.md
 CONFIG_PATH = app_paths.data_path("points_config.json")
 CACHE_PATH = app_paths.data_path(".cache", "usage.json")
-CACHE_VER = 4          # 数据结构变更时 +1，强制重算（本轮：流水保留条数 120 → 240）
+LOG_PATH = app_paths.data_path("logs", "app.log")
+# v5：缓存从"聚合结果快照"改成"按文件的逐笔记录 + 已读字节偏移"。
+# 这样 refresh 只需要从上次读到的位置往后读新增字节，不用每次重扫全部会话文件。
+CACHE_VER = 5
+
+
+def log(msg):
+    logutil.log(LOG_PATH, msg, "usage")
 
 MODEL_NAMES = {
     "deepseek-v4.1-flash": "DeepSeek-V4.1-Flash",
@@ -123,6 +130,82 @@ def _mix(points_map, total):
     return out
 
 
+def _scan_file(path, offset=0):
+    """从 offset 起增量解析一个 jsonl，返回 (records, 新偏移)。
+
+    只消费到最后一个换行符为止：会话正在写入时最后一行可能只写了一半，
+    留在下一轮再读，避免把半截 JSON 当损坏行永久跳过。
+    """
+    base = max(0, int(offset or 0))
+    try:
+        with open(path, "rb") as f:
+            f.seek(base)
+            buf = f.read()
+    except OSError as e:
+        log(f"read {path} failed: {e}")
+        return [], base
+    if not buf:
+        return [], base
+    end = buf.rfind(b"\n")
+    if end < 0:
+        return [], base                     # 只有半行，等下次
+
+    out = []
+    for raw in buf[:end + 1].split(b"\n"):
+        if not raw or b'"credit"' not in raw:
+            continue
+        try:
+            obj = json.loads(raw.decode("utf-8", "ignore"))
+        except Exception:
+            continue
+        pd = obj.get("providerData") or {}
+        ru = pd.get("rawUsage") or {}
+        if "credit" not in ru:
+            continue
+        ts = obj.get("timestamp")
+        if not ts:
+            continue
+        try:
+            credit = float(ru.get("credit") or 0)
+        except (TypeError, ValueError):
+            credit = 0.0
+        usage = pd.get("usage") or {}
+        tokens = usage.get("totalTokens") or ru.get("total_tokens") or 0
+        model = pd.get("model") or ""
+        tool = obj.get("name") or ""
+        # 去重键：优先 messageId / id，缺失时退回"内容指纹"。
+        # 旧实现 mid 为 None 时，第一条之后的所有无 id 记录都会被判成重复丢掉。
+        mid = pd.get("messageId") or obj.get("id") or "%s|%s|%s|%s" % (ts, model, credit, tool)
+        out.append({
+            "mid": str(mid),
+            "ts": int(ts),
+            "credit": credit,
+            "model": model,
+            "tokens": int(tokens or 0),
+            "cwd": obj.get("cwd") or "",
+            "tool": tool,
+            "type": obj.get("type") or "",
+            "role": obj.get("role") or "",
+        })
+    return out, base + end + 1
+
+
+def _monthday_to_date(md, today):
+    """把 "MM-DD" 还原成日期：跨年时按"不晚于今天"推断年份。"""
+    try:
+        m, d = (int(x) for x in str(md).split("-"))
+    except (TypeError, ValueError):
+        return None
+    for y in (today.year, today.year - 1):
+        try:
+            cand = dt.date(y, m, d)
+        except ValueError:
+            return None
+        if cand <= today:
+            return cand
+    return None
+
+
 class UsageService:
     def __init__(self):
         self._data = None
@@ -151,7 +234,9 @@ class UsageService:
             return self._data or self._empty()
 
     def refresh(self):
-        self._build_safe(force=True)
+        # 不再 force：_build 内部按文件 (mtime,size) 增量读，只有变动的文件才重新解析。
+        # 以前这里强制全量重扫，127MB 会话目录每次约 0.6s，且随历史线性变慢。
+        self._build_safe()
         return self.get(3)
 
     # ---------- 构建 ----------
@@ -188,12 +273,12 @@ class UsageService:
                       "avgPerRequest": 0, "deltaPct": 0},
             "hourly": [{"hour": h, "label": f"{h:02d}:00", "points": 0, "requests": 0,
                         "tokens": 0, "isFuture": h > now.hour, "isNow": h == now.hour} for h in range(24)],
-            "models": [], "models30": [], "tasks": [], "projects": [],
+            "models": [], "models30": [], "tasks": [], "projects": [], "projects7": [],
             "daily": daily,
             "week": [{"date": "", "weekday": "", "total": 0, "values": [0, 0, 0, 0, 0], "isToday": i == 6} for i in range(7)],
             "heat": [], "heatMax": 1, "ledger": [], "recent": [], "insights": [],
             "avg7": 0, "daysLeft": 0, "peakHour": 0, "peakPoints": 0,
-            "modelDefs": [], "runOutDate": now.isoformat(),
+            "modelDefs": [], "taskDefs": [], "runOutDate": now.isoformat(),
             "ledgerTodayTotal": 0, "pctOfQuota": 0,
         }
 
@@ -209,85 +294,103 @@ class UsageService:
                         p = os.path.join(root, n)
                         try:
                             st = os.stat(p)
-                        except OSError:
+                        except OSError as e:
+                            log(f"stat {p} failed: {e}")
                             continue
                         files.append((p, st.st_mtime, st.st_size))
         files.sort()
-        sig = [(os.path.basename(p), round(m, 1), s) for p, m, s in files]
 
-        cached = None
-        if not force and os.path.exists(CACHE_PATH):
-            try:
-                with open(CACHE_PATH, encoding="utf-8") as f:
-                    cached = json.load(f)
-                if (cached.get("ver") == CACHE_VER and cached.get("sig") == sig
-                        and cached.get("home") == self.source["home"]):
-                    data = cached["data"]
-                    data["meta"]["cached"] = True
-                    self._refresh_clock(data)
-                    return data
-            except Exception:
-                cached = None
+        cache = None if force else self._load_cache()
+        if cache is not None and cache.get("home") != self.source["home"]:
+            cache = None                     # 换过数据目录，旧缓存作废
+        prev = (cache or {}).get("files") or {}
+        stats, merged = {}, {}
+        dirty = cache is None
+        tail_reads = 0
 
-        records = self._scan(files)
+        for path, mtime, size in files:
+            ent = prev.get(path)
+            if ent and ent.get("size") == size and abs(float(ent.get("mtime") or 0) - mtime) < 1e-6:
+                # 文件没动过：直接复用上次的逐笔
+                recs, offset = ent.get("records") or [], int(ent.get("offset") or 0)
+            elif (ent and size >= int(ent.get("size") or 0)
+                  and int(ent.get("offset") or 0) <= size
+                  and mtime >= float(ent.get("mtime") or 0)):
+                # 常见路径：会话文件只在末尾追加 → 只读新增的那一段
+                tail, offset = _scan_file(path, int(ent.get("offset") or 0))
+                recs = (ent.get("records") or []) + tail
+                dirty = True
+                tail_reads += 1
+            else:
+                # 被截断 / 被重写 / 首次见：整文件重扫
+                recs, offset = _scan_file(path, 0)
+                dirty = True
+            stats[path] = {"mtime": mtime, "size": size, "offset": offset, "records": recs}
+            for r in recs:
+                merged.setdefault(r["mid"], r)      # 同一 message 可能跨文件重复
+        if set(stats) != set(prev):
+            dirty = True
+
+        records = sorted(merged.values(), key=lambda r: r["ts"])
         if not records and self.source.get("hasDb"):
             # JSONL 完全没有（公司策略清理 / 换机）时，用 workbuddy.db 的会话汇总兜底
             data = self._from_db(data_source.db_summary(self.source))
         else:
             data = self._aggregate(records)
-        data["meta"]["cached"] = False
-        try:
-            os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
-            with open(CACHE_PATH, "w", encoding="utf-8") as f:
-                json.dump({"ver": CACHE_VER, "sig": sig, "home": self.source["home"], "data": data},
-                          f, ensure_ascii=False)
-        except Exception:
-            pass
+        data = self._ensure_shape(data)
+        data["meta"]["cached"] = not dirty
+        if dirty:
+            try:
+                os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
+                with open(CACHE_PATH, "w", encoding="utf-8") as f:
+                    json.dump({"ver": CACHE_VER, "home": self.source["home"], "files": stats},
+                              f, ensure_ascii=False)
+            except Exception as e:
+                log(f"cache write error: {e}")
+        if tail_reads:
+            log(f"incremental scan: {tail_reads} 个文件追加读取，共 {len(records)} 条记录")
         return data
 
-    def _scan(self, files):
-        """逐行读取，只解析含 credit 的记录；按 messageId 去重。"""
-        seen = set()
+    def _load_cache(self):
+        """读缓存；结构/版本不符直接丢弃（返回 None）。损坏的缓存不该让程序起不来。"""
+        try:
+            with open(CACHE_PATH, encoding="utf-8") as f:
+                cache = json.load(f)
+        except FileNotFoundError:
+            return None
+        except Exception as e:
+            log(f"cache read error: {e}")
+            return None
+        if not isinstance(cache, dict) or cache.get("ver") != CACHE_VER:
+            return None
+        if not isinstance(cache.get("files"), dict):
+            return None
+        return cache
+
+    def _ensure_shape(self, data):
+        """把返回值补齐到和 `_empty()` 同一套字段。
+
+        以前 `_empty()` 与 `_aggregate()` 是两份各自维护的结构，漏一个键，
+        前端那个数字就变 undefined。这里以 `_empty()` 当唯一模板补缺，
+        以后新增字段只改一处。
+        """
+        blank = self._empty()
+        for k, v in blank.items():
+            if k == "meta":
+                data.setdefault("meta", {})
+                for mk, mv in v.items():
+                    data["meta"].setdefault(mk, mv)
+            else:
+                data.setdefault(k, v)
+        return data
+
+    @staticmethod
+    def _scan(files):
+        """全量扫描（测试与兜底用；生产路径走 _scan_file 增量读）。"""
         out = []
         for path, _mtime, _size in files:
-            try:
-                with open(path, encoding="utf-8", errors="ignore") as f:
-                    for line in f:
-                        if '"credit"' not in line:
-                            continue
-                        try:
-                            obj = json.loads(line)
-                        except Exception:
-                            continue
-                        pd = obj.get("providerData") or {}
-                        ru = pd.get("rawUsage") or {}
-                        if "credit" not in ru:
-                            continue
-                        mid = pd.get("messageId") or obj.get("id")
-                        if mid in seen:
-                            continue
-                        seen.add(mid)
-                        try:
-                            credit = float(ru.get("credit") or 0)
-                        except (TypeError, ValueError):
-                            credit = 0.0
-                        ts = obj.get("timestamp")
-                        if not ts:
-                            continue
-                        usage = pd.get("usage") or {}
-                        tokens = usage.get("totalTokens") or ru.get("total_tokens") or 0
-                        out.append({
-                            "ts": int(ts),
-                            "credit": credit,
-                            "model": pd.get("model") or "",
-                            "tokens": int(tokens or 0),
-                            "cwd": obj.get("cwd") or "",
-                            "tool": obj.get("name") or "",
-                            "type": obj.get("type") or "",
-                            "role": obj.get("role") or "",
-                        })
-            except Exception:
-                continue
+            recs, _off = _scan_file(path, 0)
+            out.extend(recs)
         out.sort(key=lambda r: r["ts"])
         return out
 
@@ -613,13 +716,6 @@ class UsageService:
             "pctOfQuota": round((today_credit / cfg["total"]), 4) if configured and cfg["total"] else 0,
         }
 
-    @staticmethod
-    def _refresh_clock(data):
-        now = dt.datetime.now()
-        data["meta"]["updated"] = now.strftime("%H:%M")
-        data["meta"]["updatedFull"] = now.strftime("%m-%d %H:%M")
-        data["meta"]["nowHour"] = now.hour
-
     def _from_db(self, summary):
         """JSONL 缺失时的兜底：按 workbuddy.db 的会话汇总折算每日用量。
 
@@ -627,19 +723,22 @@ class UsageService:
         因此结果必须标注为「数据库估算」，不能当作精确流水展示。
         """
         data = self._empty()
-        by_day = {rec["date"]: rec for rec in (summary.get("daily") or [])}
+        by_day = {}
+        for rec in (summary.get("daily") or []):
+            d = _monthday_to_date(rec.get("date"), dt.date.today()) if rec.get("date") else None
+            if d:
+                by_day[d] = rec
         today = dt.date.today()
-        today_key = today.strftime("%Y-%m-%d")
         today_pts, today_calls = 0.0, 0
         for item in data["daily"]:
-            key = "%04d-%s" % (today.year, item["date"])
-            rec = by_day.get(key)
+            d = _monthday_to_date(item["date"], today)
+            rec = by_day.get(d) if d else None
             if not rec:
                 continue
             item["consumed"] = rec["points"]
             item["calls"] = rec["calls"]
             item["tokens"] = 0
-            if key == today_key:
+            if d == today:
                 today_pts, today_calls = rec["points"], rec["calls"]
         data["today"].update({
             "consumed": round(today_pts, 2),
