@@ -48,7 +48,8 @@ python desktop.py --debug   :: 打开 devtools
 .venv\Scripts\python.exe -m PyInstaller --noconfirm --clean build.spec
 
 :: 2) 编译安装包（产出 installer\Output\WorkBuddyPoints-Setup-<版本>.exe）
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyVersion=1.0.3 installer\WorkBuddyPoints.iss
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyVersion=1.1.0 installer\WorkBuddyPoints.iss
+:: 版本号以 version.json 为准（上面这条要与它一致，否则程序内显示和安装包版本会对不上）
 ```
 安装包已内置 Python 解释器与 pywebview/pythonnet 运行时，目标机**不需要装 Python**；
 唯一外部依赖是系统自带的 **WebView2 运行时**（Win10 1803+/Win11 自带，安装时会检测并提示）。
