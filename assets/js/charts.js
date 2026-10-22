@@ -854,10 +854,10 @@
       const base = toneColor(cfg.tone || 'c1');
       const alpha = [.075, .18, .38, .58, .78, 1];   // 0~5 级的底色浓度
       const colors = alpha.map(a => (a >= 1 ? base : hexToRgba(base, a)));   // 无消耗：极淡底色，避免"一片灰墙"
-      // 悬停联动：本体只提亮一档 + 一圈很淡的环境光，邻格轻微带起
-      // （以前本体 ×1.35 + 双 drop-shadow，看起来像"贴了个发光贴纸"，太抢眼）
+      // 悬停联动：以光标所在的格子为圆心，向四周**圆形**衰减地打光，
+      // 而不是固定把上下左右八个邻格一起点亮（那样看着像"方框套方框"）。
       const hotColors = alpha.map((a, i) => hexToRgba(base, Math.min(1, i === 0 ? .24 : a * 1.18 + .05)));
-      const nearColors = alpha.map((a, i) => hexToRgba(base, Math.min(1, a + (i === 0 ? .04 : .07))));
+      const GLOW_R = 2.4;                     // 光斑半径，单位=一个格子
 
       const fmtTokens = v => (v == null ? '—' : shortNum(v) + ' Token');
       const fmtCalls = v => (v == null ? '—' : fmt(v) + ' 次');
@@ -870,9 +870,10 @@
       if (play) container.dataset.played = '1';
       const cells = [];
 
-      /* ---- 悬停：光圈 + 邻格联动提亮 ---- */
+      /* ---- 悬停：以格子为圆心的径向光 ---- */
       let halo = null, hot = null, touched = [];
-      const glowR = Math.max(24, cellH * 2.1);
+      const stepX = cellW + gap, stepY = cellH + gap;
+      const glowR = Math.max(26, Math.round(GLOW_R * (stepX + stepY) / 2));
 
       function unfocus() {
         if (hot) hot.node.classList.remove('is-hot');
@@ -887,14 +888,19 @@
         unfocus();
         hot = c;
         const cx0 = c.x + c.w / 2, cy0 = c.y + c.h / 2;
-        // 邻格按曼哈顿/对角距离逐级提亮，形成"被照亮一圈"的观感
+        // 按真实屏幕距离算衰减：dx / dy 先换算成"格"再取模长，亮区就是个正圆，
+        // 离得越远越淡（平方衰减），而不是"邻格全亮、再远全黑"的硬边。
         for (let i = 0; i < cells.length; i++) {
           const o = cells[i];
           if (o === c) continue;
-          const dx = Math.abs(o.col - c.col), dy = Math.abs(o.row - c.row);
-          if (dx > 1 || dy > 1) continue;
-          if (Math.hypot(dx, dy) > 1.45) continue;
-          o.node.style.fill = nearColors[o.lv];
+          const dx = (o.x - c.x) / stepX;
+          const dy = (o.y - c.y) / stepY;
+          const d = Math.hypot(dx, dy);
+          if (d > GLOW_R) continue;
+          const k = 1 - d / GLOW_R;
+          const e = k * k;
+          const lift = e * (o.lv === 0 ? .10 : .30);
+          o.node.style.fill = hexToRgba(base, Math.min(1, alpha[o.lv] + lift));
           touched.push(o);
         }
         c.node.style.fill = hotColors[c.lv];

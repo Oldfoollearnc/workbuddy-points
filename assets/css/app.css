@@ -562,7 +562,7 @@ body.is-desktop[data-mode="popup"] .popup-card {
   border-radius: 0 3px 3px 0;
   background: var(--brand-gradient);
   transform: translateY(var(--nav-y, 0px));
-  transition: transform var(--dur-3) var(--ease-out);
+  transition: transform 400ms cubic-bezier(.3, 1.28, .45, 1);
   will-change: transform;
 }
 .nav-item {
@@ -656,11 +656,12 @@ body.is-desktop[data-mode="popup"] .popup-card {
 .tb-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: center;      /* 图标+文字在侧栏宽度的这一块里居中 */
+  gap: 9px;
   flex: none;
   width: var(--sidebar-w);
   height: 100%;
-  padding: 0 12px 0 14px;
+  padding: 0 14px;
   border-right: 1px solid var(--border);
   overflow: hidden;
 }
@@ -671,6 +672,7 @@ body.is-desktop[data-mode="popup"] .popup-card {
 
 .topbar-title { min-width: 0; flex: 1 1 auto; max-width: 320px; }
 .topbar-title h1 { font-size: 15px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#pageTitle.is-swap { animation: titleSwap 240ms var(--ease-out); }
 .topbar-title p { font-size: 10.5px; color: var(--text-3); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 顶栏中间：数据来源与延迟提示（原来这里是空白） */
@@ -741,12 +743,13 @@ body.is-dragging .topbar { cursor: default; }
   border: 1px solid var(--border);
   background: var(--surface);
   box-shadow: var(--shadow-1);
-  animation: rise 420ms var(--ease-out) both;
+  animation: rise 420ms var(--ease-out) backwards;
   animation-delay: calc(var(--i, 0) * 45ms);
   transition: border-color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out);
 }
 .view.is-active .card { animation-name: rise; }
-.card:hover { border-color: var(--border-2); box-shadow: var(--shadow-2); }
+/* 悬停轻抬 2px：用 backwards 填充，动画结束后不再锁住 transform，hover 才生效 */
+.card:hover { border-color: var(--border-2); box-shadow: var(--shadow-2); transform: translateY(-2px); }
 
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .card-head h2 { font-size: 13.5px; font-weight: 600; letter-spacing: .005em; }
@@ -1003,36 +1006,59 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
 }
 .table-body { max-height: none; }
 .table-row {
-  padding: 9px 10px;
-  border-bottom: 1px dashed var(--border);
+  position: relative;
+  padding: 10px 10px;
+  border-bottom: 1px solid var(--border);
   font-size: 11.5px;
-  transition: background-color var(--dur-1) var(--ease-out);
+  transition: background-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
   animation: rowIn 320ms var(--ease-out) both;
 }
-.table-row:hover { background: var(--surface-2); }
-.table-row .t { color: var(--text-2); font-variant-numeric: tabular-nums; }
-.table-row .t small { display: block; font-size: 9.5px; color: var(--text-3); }
-.table-row .nm { color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.table-row .nm small { display: block; font-size: 9.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; }
+/* 悬停时左侧浮出一条渐变导轨，比整行变色更克制 */
+.table-row::before {
+  content: "";
+  position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--brand-gradient);
+  opacity: 0;
+  transform: scaleY(.35);
+  transition: opacity 180ms var(--ease-out), transform 220ms var(--ease-spring);
+}
+.table-row:hover { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); }
+.table-row:hover::before { opacity: 1; transform: scaleY(1); }
+.table-row .t { color: var(--text-1); font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -.005em; }
+.table-row .t small { display: block; margin-top: 1px; font-size: 9.5px; font-weight: 400; color: var(--text-3); }
+.table-row .nm { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-1); }
+.table-row .nm .legend-dot { flex: none; }
+.table-row .nm b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.table-row .nm em {
+  flex: none; font-style: normal; font-size: 9px; line-height: 1;
+  padding: 2px 5px; border-radius: 4px;
+  color: var(--text-3); background: var(--surface-3);
+  font-variant-numeric: tabular-nums;
+}
 .table-row .dim { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.table-row .pt { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.table-row .pt { font-size: 13px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; text-align: right; color: var(--text-1); }
 .table-row .pt.is-earn { color: var(--good); }
 /* 同一分钟的合计显示在积分列，时间徽标只保留 ×N */
 .table-row .pt-group { color: var(--text-1); line-height: 1.15; }
-.table-row .pt-group small { display: block; margin-top: 1px; font-size: 8.5px; font-weight: 500; color: var(--brand); letter-spacing: .02em; }
-.table-row .pt.is-sub { color: var(--text-3); font-weight: 500; }
+.table-row .pt-group small { display: block; margin-top: 2px; font-size: 8.5px; font-weight: 500; color: var(--brand); letter-spacing: .02em; }
+.table-row .pt.is-sub { font-size: 11.5px; color: var(--text-3); font-weight: 500; }
 .badge-type {
   display: inline-flex; align-items: center; gap: 4px;
-  height: 20px; padding: 0 7px;
+  height: 19px; padding: 0 7px;
   border-radius: 6px;
-  font-size: 10px; font-weight: 500;
+  font-size: 9.5px; font-weight: 600; letter-spacing: .02em;
 }
 .badge-consume { color: var(--brand); background: var(--brand-soft); }
 .badge-earn { color: var(--good); background: var(--good-soft); }
 .share-cell { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
-.share-bar { width: 46px; height: 5px; border-radius: 99px; background: var(--surface-3); overflow: hidden; flex: none; }
-.share-bar i { display: block; height: 100%; border-radius: 99px; background: var(--brand); transition: width 700ms var(--ease-out); }
-.share-cell span { font-size: 10px; color: var(--text-3); font-variant-numeric: tabular-nums; width: 36px; text-align: right; }
+.share-bar { width: 44px; height: 4px; border-radius: 99px; background: var(--surface-3); overflow: hidden; flex: none; }
+.share-bar i {
+  display: block; height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, var(--brand-light), var(--brand));
+  transition: width 700ms var(--ease-out);
+}
+.share-cell span { font-size: 9.5px; color: var(--text-3); font-variant-numeric: tabular-nums; width: 36px; text-align: right; }
 
 /* 云端口径没有「项目」列（云端不返回 cwd），隐藏该列并把宽度还给模型列 */
 .table.is-cloud .table-head,
@@ -1238,6 +1264,7 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
 
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes viewIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes titleSwap { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: none; } }
 @keyframes rowIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes cellIn { from { opacity: 0; transform: scale(.82); } to { opacity: 1; transform: none; } }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1273,6 +1300,7 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
   animation-delay: 0ms !important;
   transition-duration: .001ms !important;
 }
+[data-motion="off"] .card:hover { transform: none; }
 
 [hidden] { display: none !important; }
 
