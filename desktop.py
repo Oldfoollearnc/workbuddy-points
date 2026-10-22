@@ -31,17 +31,22 @@ import time
 import traceback
 from ctypes import wintypes
 
-# 本机无独立显卡：关闭 WebView2 的 GPU 合成，静态界面 CPU 更稳、显存占用更低
-os.environ.setdefault(
-    "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-    "--disable-gpu --disable-gpu-compositing --remote-debugging-port=9333 --remote-allow-origins=*")
+# 本机无独立显卡：关闭 WebView2 的 GPU 合成，静态界面 CPU 更稳、显存占用更低。
+# 注意这里**不带** --remote-debugging-port —— 那等于给同机任意进程开一个读取
+# WebView2 Cookie 的后门（Network.getAllCookies + Runtime.evaluate）。
+# 开发态确实要 CDP（tools/live.py 截图 / 导出 session.bin）时，显式设 WB_CDP=1，
+# 由 main() 在启动前补参数；正常使用永远不打开。
+_ENV_ARGS = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"
+_BASE_ARGS = "--disable-gpu --disable-gpu-compositing"
+os.environ.setdefault(_ENV_ARGS, _BASE_ARGS)
 
 import webview
 
 import app_paths
 import data_source
+import logutil
 import usage_source
-from account_service import AccountService
+from account_service import AccountService, CDP_PORT, cdp_enabled
 from tray import Tray
 
 # 资源随程序走，数据写到可写目录：安装版在 Program Files 下也能正常读写日志与缓存
@@ -138,16 +143,11 @@ class MONITORINFO(ctypes.Structure):
 # ---------------- 基础工具 ----------------
 
 def log(msg):
-    try:
-        os.makedirs(LOG_DIR, exist_ok=True)
-        with open(LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(f"[{dt.datetime.now():%Y-%m-%d %H:%M:%S}] {msg}\n")
-    except Exception:
-        pass
+    logutil.log(LOG_PATH, msg)
 
 
 def read_version():
-    """读取 version.json（每次 git 提交由 .githooks/pre-commit 自动递增）。"""
+    """读取 version.json（每次提交由 .githooks/commit-msg 按提交信息递增）。"""
     try:
         with open(VERSION_FILE, encoding="utf-8") as f:
             return (json.load(f) or {}).get("version") or "1.0.0"
@@ -351,6 +351,10 @@ class Desktop:
         self._popup_shown_at = 0.0
         self._popup_lock = threading.Lock()   # 串行化 show/hide，连点不会互相踩
         self._collapsing = False
+        # 可见性事件：两个监视线程只在对应窗口可见时才采样；
+        # 隐藏时阻塞在 wait() 上，而不是整夜 22Hz / 3Hz 空转。
+        self._popup_visible = threading.Event()
+        self._main_visible = threading.Event()
         self.usage = usage_source.UsageService()
         self.account = AccountService()
 
@@ -418,11 +422,14 @@ class Desktop:
             zoomable=False,
         )
 
-        # 账号登录窗：常驻在 codebuddy.cn 域内，登录后隐藏，仅供同源取数
+        # 账号登录窗：这个窗口加载的是**远端页面**（workbuddy.cn），
+        # 绝不能把桌面 Api 暴露给它 —— 否则页面上的任何脚本（含第三方脚本、跳转页）
+        # 都能直接调 get_usage / choose_data_dir / account_sync / win_*。
+        # 取数与导航全部由 Python 侧 evaluate_js 完成，这里不需要 js_api。
         self.login_win = webview.create_window(
             "WorkBuddy 账号登录",
             "about:blank",
-            js_api=api,
+            js_api=None,
             width=460,
             height=760,
             min_size=(380, 560),
@@ -445,6 +452,7 @@ class Desktop:
             self._popup_intent = True
             self._popup_shown_at = time.time()
             # 主窗与小窗互斥：同一时间只展示一个
+            self._main_visible.clear()
             try:
                 if self.main:
                     self.main.hide()
@@ -466,6 +474,7 @@ class Desktop:
                 self.popup.show()
             except Exception as e:
                 log(f"popup.show error: {e}")
+            self._popup_visible.set()      # 唤醒"点外收起"监听
             if hwnd:
                 # 置顶 + 前台：否则会被其他窗口遮住，看起来像"没有打开"
                 user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
@@ -500,11 +509,16 @@ class Desktop:
         # None = 还没采样过；第一次只做基线，避免把"弹出前那一下点击的松开"当成外部点击
         prev_down = None
         while not getattr(self, "quitting", False):
+            # 小窗不可见时不采样：以前是整生命周期 45ms 空转，白烧 CPU。
+            if not self._popup_visible.wait(2.0):
+                prev_down = None
+                continue
             time.sleep(0.045)
             try:
                 hwnd = user32.FindWindowW(None, POPUP_TITLE)
                 if not hwnd or not user32.IsWindowVisible(hwnd):
                     prev_down = None
+                    time.sleep(0.25)      # 事件还没清掉的短窗口，退化成低频
                     continue
                 down = bool(user32.GetAsyncKeyState(0x01) & 0x8000)   # VK_LBUTTON
                 if prev_down is None:
@@ -537,6 +551,7 @@ class Desktop:
 
     def hide_popup(self):
         with self._popup_lock:
+            self._popup_visible.clear()    # 隐藏后监听线程阻塞，不再 22Hz 空转
             try:
                 if self.popup:
                     self.popup.hide()
@@ -558,6 +573,7 @@ class Desktop:
             self.main.restore()
         except Exception as e:
             log(f"main.show error: {e}")
+        self._main_visible.set()          # 唤醒"系统最小化 → 收成小窗"监听
         if hwnd:
             user32.ShowWindow(hwnd, 5)
             if not getattr(self, "resize_frame_on", False):
@@ -604,6 +620,7 @@ class Desktop:
             log(f"ensure_on_screen error: {e}")
 
     def hide_main(self):
+        self._main_visible.clear()
         try:
             if self.main:
                 self.main.hide()
@@ -920,11 +937,15 @@ class Desktop:
         """系统最小化按钮 → 收起为右下角小窗（而不是进任务栏）。"""
         hwnd = None
         while not self.quitting:
+            # 主窗不可见时不需要监听（隐藏 = 已经在托盘里了），阻塞等待下次显示。
+            if not self._main_visible.wait(2.0):
+                continue
             time.sleep(0.35)
             try:
                 if not hwnd or not user32.IsWindow(hwnd):
                     hwnd = user32.FindWindowW(None, MAIN_TITLE)
                     if not hwnd:
+                        time.sleep(0.2)
                         continue
                     if not getattr(self, "min_hint_shown", False):
                         self.min_hint_shown = True
@@ -1111,7 +1132,10 @@ class Api:
         这里显式广播一次，另一端合并后立即重算。
         """
         try:
-            js = "window.App && App.applyPrefs(%s)" % (payload or "{}")
+            data = json.loads(payload or "{}")     # 只接受合法 JSON，避免把任意文本注进页面
+            if not isinstance(data, dict):
+                return False
+            js = "window.App && App.applyPrefs(%s)" % json.dumps(data, ensure_ascii=False)
             for win in (self._desk.popup, self._desk.main):
                 self._desk._safe_js(win, js)
             return True
@@ -1125,9 +1149,12 @@ class Api:
 
     def open_data_dir(self):
         try:
-            os.startfile(os.path.join(os.path.expanduser("~"), ".workbuddy"))
+            home = (data_source.resolve() or {}).get("home") \
+                or os.path.join(os.path.expanduser("~"), ".workbuddy")
+            os.startfile(home)
             return True
-        except Exception:
+        except Exception as e:
+            log(f"open_data_dir error: {e}")
             return False
 
 
@@ -1257,6 +1284,11 @@ def main():
     threading.Thread(target=_sync_tray_theme, daemon=True).start()
 
     log("webview.start")
+    # 开发态才开 CDP（WB_CDP=1）：正式使用时不带调试端口
+    if cdp_enabled():
+        os.environ[_ENV_ARGS] = ("%s --remote-debugging-port=%d --remote-allow-origins=*"
+                                 % (os.environ.get(_ENV_ARGS) or "", CDP_PORT)).strip()
+        log(f"CDP enabled on 127.0.0.1:{CDP_PORT} (WB_CDP=1) —— 仅开发态，用完请关")
     try:
         webview.start(_startup_show, debug="--debug" in sys.argv, private_mode=False,
                       storage_path=app_paths.data_path(".webview-profile"),
