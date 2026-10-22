@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="assets/css/tokens.css">
 <link rel="stylesheet" href="assets/css/app.css">
 </head>
-<body data-mode="main">
+<body data-mode="main" class="is-loading">
 
 <!-- ===================== 图标库 ===================== -->
 <svg class="sprite" aria-hidden="true" focusable="false">
@@ -585,7 +585,13 @@
   </div>
 </div>
 <div class="toast-host" id="toastHost"></div>
-<div class="boot-mask"><div class="boot-spin"></div><span>正在读取本机 WorkBuddy 用量…</span></div>
+<div class="boot-mask" id="bootMask">
+  <div class="boot-box">
+    <img class="boot-logo" src="assets/icon.png" alt="">
+    <div class="boot-bar"><i></i></div>
+    <p class="boot-text" id="bootText">正在构建今日用量视图…</p>
+  </div>
+</div>
 
 <script src="assets/js/data.js"></script>
 <script src="assets/js/holidays.js"></script>

@@ -1520,19 +1520,33 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
 .qf-hint { font-size: 10px; color: var(--text-3); }
 
 /* ---- 首屏加载 ---- */
+/* 启动遮罩：窗口先出现，这一层负责"正在加载"的那几百毫秒。
+   动画语言和「刷新本地」一致 —— 同样是品牌色进度条扫过。 */
 .boot-mask {
   position: fixed; inset: 0; z-index: 300;
-  display: none; align-items: center; justify-content: center; flex-direction: column; gap: 10px;
+  display: none; align-items: center; justify-content: center;
   background: var(--bg);
-  color: var(--text-3); font-size: 12px;
+  opacity: 1;
+  transition: opacity 240ms var(--ease-out);
 }
 body.is-loading .boot-mask { display: flex; }
-.boot-spin {
-  width: 26px; height: 26px; border-radius: 50%;
-  border: 2px solid var(--surface-3);
-  border-top-color: var(--brand);
-  animation: spin .8s linear infinite;
+.boot-mask.is-out { opacity: 0; pointer-events: none; }
+.boot-box { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.boot-logo { width: 46px; height: 46px; border-radius: 13px; box-shadow: var(--shadow-2); }
+.boot-bar {
+  position: relative; width: 168px; height: 2px;
+  border-radius: 99px; background: var(--surface-3); overflow: hidden;
 }
+.boot-bar i {
+  position: absolute; top: 0; bottom: 0; width: 55%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, transparent, var(--brand) 40%, var(--brand-light) 66%, transparent);
+  animation: bootSweep 1.15s var(--ease-in-out) infinite;
+}
+@keyframes bootSweep { 0% { transform: translateX(-110%); } 100% { transform: translateX(290%); } }
+.boot-text { height: 17px; font-size: 12px; color: var(--text-3); letter-spacing: .02em; }
+.boot-text.is-in { animation: bootTextIn 320ms var(--ease-out); }
+@keyframes bootTextIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 
 /* ===================== 统一样式：模型 / 项目 行对齐 ===================== */
 

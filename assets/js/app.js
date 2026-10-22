@@ -2336,6 +2336,44 @@
     });
   }
 
+  /* ---------------- 启动遮罩 ---------------- */
+
+  // 加载期间轮播的文案：让等待的那一两秒有点人味，也能说明"在读什么"
+  const BOOT_TEXTS = [
+    '正在构建今日用量视图…',
+    '正在把上千条调用记录排好队…',
+    '正在核对云端余额…',
+    '正在给柱状图浇水…',
+    '正在数你今天花掉的积分…',
+    '正在整理消耗日历…',
+    '马上就好…'
+  ];
+  let bootTextTimer = 0;
+
+  function startBootText() {
+    const el = $('#bootText');
+    if (!el) return;
+    let i = Math.floor(Math.random() * BOOT_TEXTS.length);   // 每次启动从不同句子开始
+    const tick = () => {
+      el.textContent = BOOT_TEXTS[i % BOOT_TEXTS.length];
+      el.classList.remove('is-in');
+      void el.offsetWidth;
+      el.classList.add('is-in');
+      i += 1;
+    };
+    tick();
+    clearInterval(bootTextTimer);
+    bootTextTimer = setInterval(tick, 1200);
+  }
+
+  /** 数据就绪：遮罩淡出（不是硬切），再解除 loading 状态 */
+  function finishBoot() {
+    clearInterval(bootTextTimer);
+    const mask = $('#bootMask');
+    if (mask) mask.classList.add('is-out');
+    setTimeout(() => document.body.classList.remove('is-loading'), 240);
+  }
+
   async function boot() {
     const forced = qs.get('theme');
     if (forced === 'dark' || forced === 'light') prefs.theme = forced;
@@ -2346,22 +2384,22 @@
     document.body.classList.add('is-booting');
     if (HASH_MODE || qs.get('shell') === 'desktop' || window.pywebview) document.body.classList.add('is-desktop');
 
+    startBootText();
     bind();
     $$('#rangeSeg button').forEach(b => b.classList.toggle('is-active', +b.dataset.range === state.range));
     setText('#syncTime', D.meta.updated || '—');
 
     if (HASH_MODE || bridge.has()) {
       document.body.classList.add('is-loading');
-      showLoading('正在读取本机记录…');
+      // 启动阶段只用启动遮罩，不再叠一层 loading-veil（两个转圈会打架）
       await whenBridgeReady();
       await loadUsage();
       await loadAccount();
       await loadVersion();
-      hideLoading();
-      document.body.classList.remove('is-loading');
     }
 
     bootRender();
+    finishBoot();
 
     setTimeout(() => { if (state.mode === 'popup') renderPopup(); }, 260);
     setupLocalRefresh();

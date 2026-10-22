@@ -4,8 +4,9 @@ WorkBuddy 积分观测台 · Windows 桌面启动器
 
 形态
 ----
-1. 启动后常驻系统托盘，不占用屏幕；
-2. 单击托盘图标 → 屏幕右下角弹出快捷面板（无边框、置顶、固定尺寸，严格贴边）；
+1. 启动即打开主界面（窗口先上屏，内容随后加载），同时常驻系统托盘；
+2. 单击托盘图标 → 屏幕右下角弹出快捷面板（无边框、置顶、固定尺寸，严格贴边），
+   已打开时再点只抖一下，不会自动关闭；
 3. 面板「展开完整面板」→ 全尺寸主界面，主界面保留「收起为小窗」；
 4. 关闭任一窗口均收起到托盘，托盘菜单「退出」才结束进程。
 
@@ -15,9 +16,9 @@ WorkBuddy 积分观测台 · Windows 桌面启动器
 
 运行
 ----
-python desktop.py            # 托盘常驻（默认）
-python desktop.py --show     # 启动即弹出小窗
-python desktop.py --main     # 启动即打开主界面
+python desktop.py            # 打开主界面（默认）
+python desktop.py --show     # 启动只弹小窗
+python desktop.py --main     # 同默认（显式写法）
 """
 import ctypes
 import faulthandler
@@ -372,6 +373,28 @@ class Desktop:
         self.pop_x = int(avail_w - pw - MARGIN)
         self.pop_y = int(avail_h - ph - MARGIN)
         api = Api(self)
+
+        # 主窗必须**第一个**创建：窗口是按创建顺序初始化的，主界面先建好就能先出画面，
+        # 小窗/登录窗晚几百毫秒无所谓（它们本来就是隐藏的）。
+        # hidden=False：不等页面加载完，先把窗口框放上屏（底色是界面同款浅蓝），
+        # 首帧由 index.html 里的启动遮罩接管，视觉上就是"窗口立刻出现 → 内容随后加载"。
+        self.main = webview.create_window(
+            MAIN_TITLE,
+            INDEX + "#main",
+            js_api=api,
+            width=main_w,
+            height=main_h,
+            x=main_x,
+            y=main_y,
+            min_size=(1024, 680),
+            frameless=True,          # 自绘标题栏：去掉 Windows 原生标题，避免两套标题重复
+            easy_drag=False,
+            shadow=False,
+            hidden=False,
+            background_color="#EEF3FC",
+        )
+        self.main.events.closing += self._on_main_closing
+
         # 窗口请求尺寸预留不可见边框，展示前会按客户区精确校正
         self.popup = webview.create_window(
             POPUP_TITLE,
@@ -391,22 +414,6 @@ class Desktop:
             text_select=False,
             zoomable=False,
         )
-        self.main = webview.create_window(
-            MAIN_TITLE,
-            INDEX + "#main",
-            js_api=api,
-            width=main_w,
-            height=main_h,
-            x=main_x,
-            y=main_y,
-            min_size=(1024, 680),
-            frameless=True,          # 自绘标题栏：去掉 Windows 原生标题，避免两套标题重复
-            easy_drag=False,
-            shadow=False,
-            hidden=True,
-            background_color="#EEF3FC",
-        )
-        self.main.events.closing += self._on_main_closing
 
         # 账号登录窗：常驻在 codebuddy.cn 域内，登录后隐藏，仅供同源取数
         self.login_win = webview.create_window(
@@ -541,19 +548,23 @@ class Desktop:
     def show_main(self):
         # 小窗让位（同时把小窗状态簿记成"已收起"）
         self.hide_popup()
+        hwnd = find_hwnd(MAIN_TITLE)
+        was_visible = bool(hwnd and user32.IsWindowVisible(hwnd))
         try:
             self.main.show()
             self.main.restore()
         except Exception as e:
             log(f"main.show error: {e}")
-        hwnd = user32.FindWindowW(None, MAIN_TITLE)
         if hwnd:
             user32.ShowWindow(hwnd, 5)
             if not getattr(self, "resize_frame_on", False):
                 strip_nonclient(hwnd)
                 self.resize_frame_on = True
             self._ensure_on_screen(hwnd)
-            self._nudge(hwnd)
+            if not was_visible:
+                # 1px 抖动只在窗口本来隐藏时需要（强制出一帧）；
+                # 启动时窗口已经是可见的，再抖一次反而会闪。
+                self._nudge(hwnd)
             try:
                 user32.AllowSetForegroundWindow(-1)
             except Exception:
@@ -1181,11 +1192,17 @@ def main():
     except Exception as e:
         log(f"tray error: {e}")
 
-    if "--show" in sys.argv:
-        threading.Timer(1.0, app.show_popup).start()
-    elif "--main" in sys.argv:
-        threading.Timer(1.0, app.show_main).start()
-    # 默认托盘常驻：不再弹「已在托盘」的气泡提示（用户明确要求去掉启动弹窗）
+    # 启动即出画面：默认直接上主界面（窗口在 build 时已 hidden=False，这里只做收尾），
+    # --show 仍可改为"只弹小窗"。用 webview.start(func) 而不是 Timer(1.0) —— 少等 1 秒。
+    def _startup_show():
+        try:
+            if "--show" in sys.argv:
+                app.show_popup()
+            else:
+                app.show_main()
+            log("startup window shown")
+        except Exception as e:
+            log(f"startup show error: {e}")
 
     # 启动时尝试回填上次登录态（有存档则无需再次扫码）
     def _auto_restore():
@@ -1229,7 +1246,7 @@ def main():
 
     log("webview.start")
     try:
-        webview.start(debug="--debug" in sys.argv, private_mode=False,
+        webview.start(_startup_show, debug="--debug" in sys.argv, private_mode=False,
                       storage_path=app_paths.data_path(".webview-profile"),
                       icon=ICON if os.path.exists(ICON) else None)
     except Exception:

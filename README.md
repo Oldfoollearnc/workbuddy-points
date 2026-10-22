@@ -32,9 +32,9 @@ Windows 桌面小组件：常驻托盘 → 右下角快捷面板 → 完整数�
 
 ### 开发态
 ```bat
-启动应用.bat                :: 托盘常驻（推荐）
-python desktop.py --show    :: 启动即弹出小窗
-python desktop.py --main    :: 启动即打开主界面
+启动应用.bat                :: 默认直接打开主界面（托盘同时常驻）
+python desktop.py --show    :: 改成启动只弹右下角小窗
+python desktop.py --main    :: 显式指定打开主界面（同默认）
 python desktop.py --debug   :: 打开 devtools
 ```
 
