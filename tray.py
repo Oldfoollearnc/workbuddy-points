@@ -5,6 +5,12 @@ Windows 系统托盘（原生 Win32 实现）
 为什么不用第三方托盘库：本应用要求「单击托盘图标即弹出快捷面板」，
 而多数跨平台托盘库只暴露双击/右键菜单。这里直接走 Shell_NotifyIconW，
 可以精确拿到 WM_LBUTTONUP / WM_RBUTTONUP。
+
+右键菜单
+--------
+系统菜单（TrackPopupMenu）的外框、圆角、阴影都不可控，怎么自绘都有一股
+"XP 时代"的味道。所以这里自己建一个 WS_POPUP 小窗口来画菜单：
+圆角窗口区域 + 系统投影 + 自绘 hover 胶囊，配色跟随应用主题。
 """
 import ctypes
 import os
@@ -18,6 +24,7 @@ gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 
 WM_APP = 0x8000
 WM_TRAY = WM_APP + 1
+WM_MENU_CMD = WM_APP + 2
 WM_COMMAND = 0x0111
 WM_CLOSE = 0x0010
 WM_DESTROY = 0x0002
@@ -25,33 +32,47 @@ WM_NULL = 0x0000
 WM_LBUTTONUP = 0x0202
 WM_RBUTTONUP = 0x0205
 WM_LBUTTONDBLCLK = 0x0203
-WM_MEASUREITEM = 0x002C
-WM_DRAWITEM = 0x002B
+WM_PAINT = 0x000F
+WM_ERASEBKGND = 0x0014
+WM_MOUSEMOVE = 0x0200
+WM_KEYDOWN = 0x0100
+WM_ACTIVATE = 0x0006
+WM_NCHITTEST = 0x0084
+WM_KILLFOCUS = 0x0008
 
 NIM_ADD, NIM_MODIFY, NIM_DELETE = 0, 1, 2
 NIF_MESSAGE, NIF_ICON, NIF_TIP, NIF_INFO = 0x1, 0x2, 0x4, 0x10
 NIIF_INFO = 0x1
 IMAGE_ICON = 1
 LR_LOADFROMFILE, LR_DEFAULTSIZE, LR_SHARED = 0x10, 0x40, 0x8000
-MF_STRING, MF_SEPARATOR, MF_OWNERDRAW = 0, 0x800, 0x0100
+MF_STRING, MF_SEPARATOR = 0, 0x800
 TPM_RETURNCMD, TPM_RIGHTBUTTON, TPM_BOTTOMALIGN = 0x100, 0x2, 0x20
 
-ODS_SELECTED = 0x0001
-ODT_MENU = 1
-MIM_BACKGROUND, MIM_STYLE = 0x00000002, 0x00000010
-MNS_NOCHECK = 0x80000000
 TRANSPARENT_BK = 1
 DT_SINGLELINE, DT_VCENTER, DT_LEFT = 0x20, 0x4, 0x0
 NULL_BRUSH, NULL_PEN = 5, 8
+CS_VREDRAW, CS_HREDRAW, CS_DROPSHADOW = 0x0001, 0x0002, 0x00020000
+WS_POPUP = 0x80000000
+WS_EX_TOOLWINDOW, WS_EX_TOPMOST = 0x00000080, 0x00000008
+SW_SHOW = 5
+HTCLIENT = 1
+VK_ESCAPE = 0x1B
 
 ID_OPEN_POPUP, ID_OPEN_MAIN, ID_REFRESH, ID_EXIT = 1, 2, 3, 4
 
-# 菜单配色（跟随程序主题，取的是界面上同一套色）
+# 菜单尺寸（逻辑像素；进程 DPI 无关，和界面 1:1 对应）
+MENU_W = 176
+ITEM_H = 34
+MENU_PAD = 8
+SEP_H = 9
+MENU_RADIUS = 12
+
+# 配色跟随程序主题
 PALETTE = {
     "light": {"bg": "#FFFFFF", "text": "#122036", "hover_bg": "#EAF1FE",
-              "hover_text": "#1D4ED8", "sep": "#E7EEF9"},
+              "hover_text": "#1D4ED8", "sep": "#E7EEF9", "border": "#DCE5F4"},
     "dark": {"bg": "#101A2B", "text": "#E9EEF8", "hover_bg": "#1B2942",
-             "hover_text": "#74A6FF", "sep": "#22304A"},
+             "hover_text": "#74A6FF", "sep": "#22304A", "border": "#2A3A56"},
 }
 
 
@@ -67,30 +88,11 @@ class RECT(ctypes.Structure):
                 ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
 
 
-class MENUINFO(ctypes.Structure):
+class PAINTSTRUCT(ctypes.Structure):
     _fields_ = [
-        ("cbSize", wintypes.DWORD), ("fMask", wintypes.DWORD),
-        ("dwStyle", wintypes.DWORD), ("cyMax", wintypes.UINT),
-        ("hbrBack", wintypes.HBRUSH), ("dwContextHelpID", wintypes.DWORD),
-        ("dwMenuData", ctypes.c_size_t),
-    ]
-
-
-class MEASUREITEMSTRUCT(ctypes.Structure):
-    _fields_ = [
-        ("CtlType", wintypes.UINT), ("CtlID", wintypes.UINT),
-        ("itemID", wintypes.UINT), ("itemWidth", wintypes.UINT),
-        ("itemHeight", wintypes.UINT), ("itemData", ctypes.c_size_t),
-    ]
-
-
-class DRAWITEMSTRUCT(ctypes.Structure):
-    _fields_ = [
-        ("CtlType", wintypes.UINT), ("CtlID", wintypes.UINT),
-        ("itemID", wintypes.UINT), ("itemAction", wintypes.UINT),
-        ("itemState", wintypes.UINT), ("hwndItem", wintypes.HWND),
-        ("hDC", wintypes.HDC), ("rcItem", RECT),
-        ("itemData", ctypes.c_size_t),
+        ("hdc", wintypes.HDC), ("fErase", wintypes.BOOL), ("rcPaint", RECT),
+        ("fRestore", wintypes.BOOL), ("fIncUpdate", wintypes.BOOL),
+        ("rgbReserved", ctypes.c_byte * 32),
     ]
 
 
@@ -151,8 +153,7 @@ user32.LoadImageW.restype = ctypes.c_void_p
 user32.LoadIconW.argtypes = [wintypes.HINSTANCE, ctypes.c_void_p]
 user32.LoadIconW.restype = ctypes.c_void_p
 user32.CreatePopupMenu.restype = wintypes.HMENU
-user32.AppendMenuW.argtypes = [wintypes.HMENU, wintypes.UINT, wintypes.UINT, ctypes.c_void_p]
-user32.SetMenuInfo.argtypes = [wintypes.HMENU, ctypes.POINTER(MENUINFO)]
+user32.AppendMenuW.argtypes = [wintypes.HMENU, wintypes.UINT, wintypes.UINT, wintypes.LPCWSTR]
 user32.TrackPopupMenu.argtypes = [wintypes.HMENU, wintypes.UINT, ctypes.c_int, ctypes.c_int, ctypes.c_int, wintypes.HWND, ctypes.c_void_p]
 user32.TrackPopupMenu.restype = ctypes.c_int
 user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
@@ -166,34 +167,62 @@ user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
 user32.PostQuitMessage.argtypes = [ctypes.c_int]
 user32.SetMenuDefaultItem.argtypes = [wintypes.HMENU, wintypes.UINT, wintypes.UINT]
 user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
-user32.LoadIconW.argtypes = [wintypes.HINSTANCE, ctypes.c_void_p]
+user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                ctypes.c_int, ctypes.c_int, wintypes.UINT]
+user32.InvalidateRect.argtypes = [wintypes.HWND, ctypes.c_void_p, wintypes.BOOL]
+user32.SetFocus.argtypes = [wintypes.HWND]
+user32.BeginPaint.argtypes = [wintypes.HWND, ctypes.POINTER(PAINTSTRUCT)]
+user32.BeginPaint.restype = wintypes.HDC
+user32.EndPaint.argtypes = [wintypes.HWND, ctypes.POINTER(PAINTSTRUCT)]
+user32.FillRect.argtypes = [wintypes.HDC, ctypes.POINTER(RECT), wintypes.HBRUSH]
+user32.DrawTextW.argtypes = [wintypes.HDC, wintypes.LPCWSTR, ctypes.c_int,
+                             ctypes.POINTER(RECT), wintypes.UINT]
+user32.SetWindowRgn.argtypes = [wintypes.HWND, wintypes.HRGN, wintypes.BOOL]
+user32.SystemParametersInfoW.argtypes = [wintypes.UINT, wintypes.UINT,
+                                         ctypes.c_void_p, wintypes.UINT]
 shell32.Shell_NotifyIconW.argtypes = [wintypes.DWORD, ctypes.POINTER(NOTIFYICONDATAW)]
 shell32.Shell_NotifyIconW.restype = wintypes.BOOL
 
-# ---- 自绘菜单用到的 GDI ----
-user32.FillRect.argtypes = [wintypes.HDC, ctypes.POINTER(RECT), wintypes.HBRUSH]
-gdi32.RoundRect.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int,
-                            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
-user32.DrawTextW.argtypes = [wintypes.HDC, wintypes.LPCWSTR, ctypes.c_int,
-                             ctypes.POINTER(RECT), wintypes.UINT]
-gdi32.GetStockObject.argtypes = [ctypes.c_int]
-gdi32.GetStockObject.restype = ctypes.c_void_p
 gdi32.CreateSolidBrush.argtypes = [wintypes.DWORD]
 gdi32.CreateSolidBrush.restype = wintypes.HBRUSH
+gdi32.CreatePen.argtypes = [ctypes.c_int, ctypes.c_int, wintypes.DWORD]
+gdi32.CreatePen.restype = ctypes.c_void_p
 gdi32.CreateFontW.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
                               ctypes.c_int, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
                               wintypes.DWORD, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD,
                               wintypes.DWORD, wintypes.LPCWSTR]
 gdi32.CreateFontW.restype = wintypes.HANDLE
+gdi32.CreateRoundRectRgn.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                     ctypes.c_int, ctypes.c_int, ctypes.c_int]
+gdi32.CreateRoundRectRgn.restype = wintypes.HRGN
 gdi32.SelectObject.argtypes = [wintypes.HDC, ctypes.c_void_p]
 gdi32.SelectObject.restype = ctypes.c_void_p
 gdi32.DeleteObject.argtypes = [ctypes.c_void_p]
 gdi32.SetBkMode.argtypes = [wintypes.HDC, ctypes.c_int]
 gdi32.SetTextColor.argtypes = [wintypes.HDC, wintypes.DWORD]
+gdi32.RoundRect.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int,
+                            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
+gdi32.Ellipse.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int,
+                          ctypes.c_int, ctypes.c_int]
+gdi32.MoveToEx.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+gdi32.LineTo.argtypes = [wintypes.HDC, ctypes.c_int, ctypes.c_int]
+gdi32.GetStockObject.argtypes = [ctypes.c_int]
+gdi32.GetStockObject.restype = ctypes.c_void_p
+
+
+def _work_area():
+    r = RECT()
+    try:
+        if user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(r), 0):
+            return r.left, r.top, r.right, r.bottom
+    except Exception:
+        pass
+    return 0, 0, user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
 
 
 class Tray:
-    """系统托盘图标：左键单击 → 快捷面板开/关；右键菜单 → 主界面、刷新、退出。"""
+    """系统托盘图标：左键单击 → 快捷面板；右键 → 自绘菜单。"""
 
     def __init__(self, icon_path, on_click=None, on_open_main=None, on_refresh=None, on_exit=None,
                  tooltip="WorkBuddy 积分观测台 · 单击查看今日积分", logger=None):
@@ -212,13 +241,18 @@ class Tray:
         self._thread = None
         self._cls = "PointsInsightTrayWnd"
 
-        # 自绘菜单状态
+        # 菜单状态
         self.theme = "light"
-        self._menu_items = []      # [(id, label, color|None)]
+        self._menu_hwnd = None
+        self._menu_proc = WNDPROC(self._menu_wndproc)
+        self._menu_items = []
+        self._menu_hit = []          # [(cmd, y0, y1)]
+        self._menu_hover = -1
+        self._menu_w = MENU_W
+        self._menu_h = 0
         self._font = None
-        self._bg_brush = None
-        self._hover_brush = None
-        self._accent_brushes = {}
+
+    # ---------- 主题 / 字体 ----------
 
     def set_theme(self, theme):
         self.theme = "dark" if theme == "dark" else "light"
@@ -229,9 +263,7 @@ class Tray:
     def _ensure_font(self):
         if self._font:
             return self._font
-        # 进程是 DPI 无关的，这里的 -17 ≈ 12.7px 字号，和界面里的 12.5px 对齐。
-        # 参数：高,宽,倾角,角度,字重,斜体,下划线,删除线,字符集(1=DEFAULT),
-        #      输出精度(4=TT),裁剪(0),质量(5=CLEARTYPE),字族(0)
+        # 进程 DPI 无关：-17 ≈ 12.7px，和界面 12.5px 字号对齐
         self._font = gdi32.CreateFontW(
             -17, 0, 0, 0, 400, 0, 0, 0, 1, 4, 0, 5, 0, "Microsoft YaHei UI")
         if not self._font:
@@ -297,12 +329,15 @@ class Tray:
         try:
             if self._nid:
                 shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(self._nid))
+            if self._menu_hwnd:
+                user32.DestroyWindow(self._menu_hwnd)
+                self._menu_hwnd = None
             if self.hwnd:
                 user32.PostMessageW(self.hwnd, WM_CLOSE, 0, 0)
         except Exception:
             pass
 
-    # ---------- 消息处理 ----------
+    # ---------- 托盘消息 ----------
 
     def _wndproc(self, hwnd, msg, wparam, lparam):
         try:
@@ -312,28 +347,13 @@ class Tray:
                 elif lparam in (WM_RBUTTONUP,):
                     self._popup_menu()
                 elif lparam == WM_LBUTTONDBLCLK:
-                    # 双击**不能**再开主界面：一次双击本来就产生了两次 WM_LBUTTONUP
-                    # （开一次、关一次），再叠一个 open_main 就会让主界面闪一下又消失，
-                    # 用户看到的就是"连点几下，主界面闪出来了"。
-                    # 进主界面只走小窗里的「展开完整面板」或右键菜单。
+                    # 双击已经产生两次 WM_LBUTTONUP（开一次、关一次），这里再开主界面
+                    # 会闪一下；主界面只走小窗里的「展开完整面板」或右键菜单。
                     return 0
                 return 0
-            if msg == WM_MEASUREITEM:
-                mis = ctypes.cast(ctypes.c_void_p(lparam),
-                                  ctypes.POINTER(MEASUREITEMSTRUCT)).contents
-                if self._measure_item(mis):
-                    return 1
-                return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
-            if msg == WM_DRAWITEM:
-                dis = ctypes.cast(ctypes.c_void_p(lparam),
-                                  ctypes.POINTER(DRAWITEMSTRUCT)).contents
-                if dis.CtlType == ODT_MENU:
-                    try:
-                        self._draw_item(dis)
-                    except Exception as e:
-                        self.log(f"menu draw error: {e}")
-                    return 1
-                return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+            if msg == WM_MENU_CMD:
+                self._dispatch(int(wparam or 0))
+                return 0
             if msg == WM_CLOSE:
                 user32.DestroyWindow(hwnd)
                 return 0
@@ -344,8 +364,44 @@ class Tray:
             pass
         return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
 
+    # ---------- 菜单 ----------
+
+    def _menu_layout(self):
+        """算出每个可见项的位置；切换/分隔线都参与布局。"""
+        self._menu_hit = []
+        y = MENU_PAD
+        for mid, label, _accent in self._menu_items:
+            if label is None:
+                self._menu_hit.append((0, y, y + SEP_H))
+                y += SEP_H
+            else:
+                self._menu_hit.append((mid, y, y + ITEM_H))
+                y += ITEM_H
+        self._menu_h = y + MENU_PAD
+
+    def _ensure_menu_window(self):
+        if self._menu_hwnd:
+            return self._menu_hwnd
+        hinst = kernel32.GetModuleHandleW(None)
+        wc = WNDCLASSW()
+        wc.style = CS_HREDRAW | CS_VREDRAW | CS_DROPSHADOW
+        wc.lpfnWndProc = ctypes.cast(self._menu_proc, ctypes.c_void_p)
+        wc.hInstance = hinst
+        wc.lpszClassName = "PointsInsightMenuWnd"
+        user32.RegisterClassW(ctypes.byref(wc))       # 已注册会失败，忽略
+        hwnd = user32.CreateWindowExW(
+            WS_EX_TOOLWINDOW | WS_EX_TOPMOST, "PointsInsightMenuWnd", "",
+            WS_POPUP, 0, 0, MENU_W, 200, None, None, hinst, None)
+        if not hwnd:
+            self.log("create menu window failed: %s" % ctypes.get_last_error())
+            return None
+        # 圆角窗口区域：系统接管这块 HRGN，之后不能再删
+        user32.SetWindowRgn(hwnd, gdi32.CreateRoundRectRgn(
+            0, 0, self._menu_w + 1, self._menu_h + 1, MENU_RADIUS, MENU_RADIUS), True)
+        self._menu_hwnd = hwnd
+        return hwnd
+
     def _popup_menu(self):
-        """自绘右键菜单：跟随程序主题，深色/浅色都是一套自己的观感。"""
         self._menu_items = [
             (ID_OPEN_POPUP, "打开快捷面板", "#2563EB"),
             (ID_OPEN_MAIN, "展开完整主界面", "#06B6D4"),
@@ -353,46 +409,167 @@ class Tray:
             (0, None, None),
             (ID_EXIT, "退出", "#DC2626"),
         ]
+        self._menu_layout()
+        hwnd = self._ensure_menu_window()
+        if not hwnd:
+            self._popup_menu_native()      # 兜底：自建窗口失败才用系统菜单
+            return
+        try:
+            pt = wintypes.POINT()
+            user32.GetCursorPos(ctypes.byref(pt))
+            w, h = self._menu_w, self._menu_h
+            wl, wt, wr, wb = _work_area()
+            x = max(wl + 6, min(pt.x - w + 22, wr - w - 6))
+            y = pt.y - h - 8
+            if y < wt + 6:
+                y = pt.y + 8
+            y = max(wt + 6, min(y, wb - h - 6))
+            self._menu_hover = -1
+            user32.SetWindowPos(hwnd, wintypes.HWND(-1), x, y, w, h, 0x0040)   # SWP_SHOWWINDOW
+            user32.ShowWindow(hwnd, SW_SHOW)
+            user32.SetForegroundWindow(hwnd)
+            user32.SetFocus(hwnd)
+            user32.InvalidateRect(hwnd, None, True)
+        except Exception as e:
+            self.log(f"menu show error: {e}")
+
+    def _hide_menu(self):
+        if self._menu_hwnd:
+            user32.ShowWindow(self._menu_hwnd, 0)
+            self._menu_hover = -1
+
+    def _menu_wndproc(self, hwnd, msg, wparam, lparam):
+        try:
+            if msg == WM_PAINT:
+                self._paint_menu(hwnd)
+                return 0
+            if msg == WM_ERASEBKGND:
+                return 1                      # 全部由 _paint_menu 画，避免闪烁
+            if msg == WM_MOUSEMOVE:
+                y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
+                idx = self._hit(y)
+                if idx != self._menu_hover:
+                    self._menu_hover = idx
+                    user32.InvalidateRect(hwnd, None, False)
+                return 0
+            if msg == WM_LBUTTONUP:
+                y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
+                idx = self._hit(y)
+                cmd = self._menu_hit[idx][0] if idx >= 0 else 0
+                self._hide_menu()
+                if cmd:
+                    user32.PostMessageW(self.hwnd, WM_MENU_CMD, cmd, 0)
+                return 0
+            if msg == WM_KEYDOWN and wparam == VK_ESCAPE:
+                self._hide_menu()
+                return 0
+            if msg == WM_KILLFOCUS:
+                self._hide_menu()
+                return 0
+            if msg == WM_ACTIVATE:
+                if (int(wparam) & 0xFFFF) == 0:      # WA_INACTIVE
+                    self._hide_menu()
+                return 0
+            if msg == WM_NCHITTEST:
+                return HTCLIENT
+        except Exception as e:
+            self.log(f"menu wndproc error: {e}")
+        return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+
+    def _hit(self, y):
+        for i, (_cmd, y0, y1) in enumerate(self._menu_hit):
+            if y0 <= y < y1:
+                return i
+        return -1
+
+    def _paint_menu(self, hwnd):
+        ps = PAINTSTRUCT()
+        hdc = user32.BeginPaint(hwnd, ctypes.byref(ps))
+        if not hdc:
+            return
         pal = self._pal()
+        w, hh = self._menu_w, self._menu_h
+        try:
+            whole = RECT(0, 0, w, hh)
+            bg = gdi32.CreateSolidBrush(_rgb(pal["bg"]))
+            user32.FillRect(hdc, ctypes.byref(whole), bg)
+            gdi32.DeleteObject(bg)
+
+            # 1px 描边：窗口有圆角区域，边框跟着圆弧走
+            pen = gdi32.CreatePen(0, 1, _rgb(pal["border"]))
+            old_pen = gdi32.SelectObject(hdc, pen)
+            old_brush = gdi32.SelectObject(hdc, gdi32.GetStockObject(NULL_BRUSH))
+            gdi32.RoundRect(hdc, 0, 0, w, hh, MENU_RADIUS, MENU_RADIUS)
+            gdi32.SelectObject(hdc, old_brush)
+            gdi32.SelectObject(hdc, old_pen)
+            gdi32.DeleteObject(pen)
+
+            null_pen = gdi32.GetStockObject(NULL_PEN)
+            font = self._ensure_font()
+            old_font = gdi32.SelectObject(hdc, font) if font else None
+            gdi32.SetBkMode(hdc, TRANSPARENT_BK)
+
+            for i, (mid, label, accent) in enumerate(self._menu_items):
+                y0, y1 = self._menu_hit[i][1], self._menu_hit[i][2]
+                if label is None:
+                    # 分隔线：短一点、淡一点，比系统那条通栏线克制
+                    sp = gdi32.CreatePen(0, 1, _rgb(pal["sep"]))
+                    op = gdi32.SelectObject(hdc, sp)
+                    cy = (y0 + y1) // 2
+                    gdi32.MoveToEx(hdc, 14, cy, None)
+                    gdi32.LineTo(hdc, w - 14, cy)
+                    gdi32.SelectObject(hdc, op)
+                    gdi32.DeleteObject(sp)
+                    continue
+
+                hovered = (i == self._menu_hover)
+                if hovered:
+                    hb = gdi32.CreateSolidBrush(_rgb(pal["hover_bg"]))
+                    ob = gdi32.SelectObject(hdc, hb)
+                    op = gdi32.SelectObject(hdc, null_pen)
+                    gdi32.RoundRect(hdc, 6, y0 + 2, w - 6, y1 - 2, 9, 9)
+                    gdi32.SelectObject(hdc, ob)
+                    gdi32.SelectObject(hdc, op)
+                    gdi32.DeleteObject(hb)
+
+                if hovered:
+                    color = pal["hover_text"]
+                elif mid == ID_EXIT:
+                    color = accent
+                else:
+                    color = pal["text"]
+                gdi32.SetTextColor(hdc, _rgb(color))
+                tr = RECT(18, y0, w - 12, y1)
+                user32.DrawTextW(hdc, label, -1, ctypes.byref(tr),
+                                 DT_SINGLELINE | DT_VCENTER | DT_LEFT)
+            if old_font:
+                gdi32.SelectObject(hdc, old_font)
+        finally:
+            user32.EndPaint(hwnd, ctypes.byref(ps))
+
+    def _popup_menu_native(self):
+        """兜底：自建菜单窗口创建失败时，退回系统菜单（能用就行）。"""
         menu = user32.CreatePopupMenu()
         if not menu:
             return
-        cmd = 0
-        try:
-            for idx, (mid, label, _accent) in enumerate(self._menu_items):
-                if label is None:
-                    user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
-                else:
-                    # itemData 传下标，绘制时按下标取标题/颜色
-                    user32.AppendMenuW(menu, MF_OWNERDRAW, mid, ctypes.c_void_p(idx))
+        user32.AppendMenuW(menu, MF_STRING, ID_OPEN_POPUP, "打开快捷面板")
+        user32.AppendMenuW(menu, MF_STRING, ID_OPEN_MAIN, "展开完整主界面")
+        user32.AppendMenuW(menu, MF_STRING, ID_REFRESH, "刷新数据")
+        user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
+        user32.AppendMenuW(menu, MF_STRING, ID_EXIT, "退出")
+        user32.SetMenuDefaultItem(menu, ID_OPEN_POPUP, 0)
+        pt = wintypes.POINT()
+        user32.GetCursorPos(ctypes.byref(pt))
+        user32.SetForegroundWindow(self.hwnd)
+        cmd = user32.TrackPopupMenu(
+            menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN,
+            pt.x, pt.y, 0, self.hwnd, None,
+        )
+        user32.PostMessageW(self.hwnd, WM_NULL, 0, 0)
+        user32.DestroyMenu(menu)
+        self._dispatch(cmd)
 
-            mi = MENUINFO()
-            mi.cbSize = ctypes.sizeof(MENUINFO)
-            mi.fMask = MIM_BACKGROUND | MIM_STYLE
-            mi.dwStyle = MNS_NOCHECK
-            mi.hbrBack = gdi32.CreateSolidBrush(_rgb(pal["bg"]))
-            user32.SetMenuInfo(menu, ctypes.byref(mi))
-            self._bg_brush = mi.hbrBack
-            self._hover_brush = gdi32.CreateSolidBrush(_rgb(pal["hover_bg"]))
-            self._ensure_font()
-
-            pt = wintypes.POINT()
-            user32.GetCursorPos(ctypes.byref(pt))
-            user32.SetForegroundWindow(self.hwnd)
-            cmd = user32.TrackPopupMenu(
-                menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_BOTTOMALIGN,
-                pt.x, pt.y, 0, self.hwnd, None,
-            )
-            user32.PostMessageW(self.hwnd, WM_NULL, 0, 0)
-        except Exception as e:
-            self.log(f"menu error: {e}")
-        finally:
-            for b in (self._bg_brush, self._hover_brush):
-                if b:
-                    gdi32.DeleteObject(ctypes.c_void_p(b))
-            self._bg_brush = self._hover_brush = None
-            user32.DestroyMenu(menu)
-
+    def _dispatch(self, cmd):
         if cmd == ID_OPEN_POPUP:
             self._safe(self.on_click)
         elif cmd == ID_OPEN_MAIN:
@@ -401,65 +578,6 @@ class Tray:
             self._safe(self.on_refresh)
         elif cmd == ID_EXIT:
             self._safe(self.on_exit)
-
-    def _measure_item(self, mis):
-        if mis.CtlType != ODT_MENU:
-            return False
-        mis.itemHeight = 34
-        mis.itemWidth = 212
-        return True
-
-    def _draw_item(self, dis):
-        idx = int(dis.itemData or 0)
-        if idx < 0 or idx >= len(self._menu_items):
-            return
-        mid, label, accent = self._menu_items[idx]
-        if not label or not dis.hDC:
-            return
-        pal = self._pal()
-        hdc = dis.hDC
-        rc = dis.rcItem
-        selected = bool(dis.itemState & ODS_SELECTED)
-
-        if self._bg_brush:
-            user32.FillRect(hdc, ctypes.byref(rc), self._bg_brush)
-
-        null_pen = gdi32.GetStockObject(NULL_PEN)
-        # 选中态：圆角胶囊底
-        if selected and self._hover_brush:
-            r = RECT(rc.left + 6, rc.top + 3, rc.right - 6, rc.bottom - 3)
-            old_b = gdi32.SelectObject(hdc, self._hover_brush)
-            old_p = gdi32.SelectObject(hdc, null_pen)
-            gdi32.RoundRect(hdc, r.left, r.top, r.right, r.bottom, 10, 10)
-            gdi32.SelectObject(hdc, old_b)
-            gdi32.SelectObject(hdc, old_p)
-
-        # 左侧强调圆点
-        dot = gdi32.CreateSolidBrush(_rgb(accent or pal["hover_text"]))
-        if dot:
-            old_b = gdi32.SelectObject(hdc, dot)
-            old_p = gdi32.SelectObject(hdc, null_pen)
-            cy = (rc.top + rc.bottom) // 2
-            gdi32.RoundRect(hdc, rc.left + 16, cy - 3, rc.left + 22, cy + 3, 6, 6)
-            gdi32.SelectObject(hdc, old_b)
-            gdi32.SelectObject(hdc, old_p)
-            gdi32.DeleteObject(dot)
-
-        font = self._ensure_font()
-        old_font = gdi32.SelectObject(hdc, font) if font else None
-        gdi32.SetBkMode(hdc, TRANSPARENT_BK)
-        if selected:
-            color = pal["hover_text"]
-        elif mid == ID_EXIT:
-            color = accent
-        else:
-            color = pal["text"]
-        gdi32.SetTextColor(hdc, _rgb(color))
-        tr = RECT(rc.left + 34, rc.top, rc.right - 14, rc.bottom)
-        user32.DrawTextW(hdc, label, -1, ctypes.byref(tr),
-                         DT_SINGLELINE | DT_VCENTER | DT_LEFT)
-        if old_font:
-            gdi32.SelectObject(hdc, old_font)
 
     @staticmethod
     def _safe(fn):

@@ -581,6 +581,24 @@ body.is-desktop[data-mode="popup"] .popup-card {
 .nav-item.is-active { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
 .nav-item.is-active .i { opacity: 1; }
 
+/* 切到这一页时，左侧小图标先"弹"一下，停留期间极轻地呼吸（幅度很小，不抢注意力） */
+.nav-item.is-active .i {
+  transform-origin: center;
+  animation: navPop 520ms var(--ease-spring) both,
+             navBreathe 4.2s ease-in-out 520ms infinite;
+}
+@keyframes navPop {
+  0% { transform: scale(.74) rotate(-7deg); }
+  58% { transform: scale(1.16) rotate(3deg); }
+  100% { transform: none; }
+}
+@keyframes navBreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.06); }
+}
+[data-motion="reduced"] .nav-item.is-active .i { animation: navPop 240ms var(--ease-out) 1; }
+[data-motion="off"] .nav-item.is-active .i { animation: none; }
+
 .side-quota {
   margin-top: auto;
   padding: 12px;
