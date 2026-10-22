@@ -4,7 +4,11 @@ Windows 桌面小组件：常驻托盘 → 右下角快捷面板 → 完整数�
 读**本机会话记录**（逐笔、实时）+ **账号云端接口**（余额、周期、账号级逐笔），
 零第三方图表库（全部手写 SVG），深浅双主题。
 
-- 版本号：`version.json`，每次 `git commit` 由 `.githooks/pre-commit` 自动递增
+- 版本号：`version.json`，由 `.githooks/commit-msg` 按**提交信息**递增（Conventional Commits → SemVer）：
+  - `feat…` / `fix(x)+feat(y)` → 次版本 +1，修订归零（1.4.7 → 1.5.0）
+  - 含 `!:` 或 `BREAKING CHANGE` → 主版本 +1（1.5.0 → 2.0.0）
+  - 其他（`fix` / `chore` / `docs` / `build`…）→ 修订 +1（1.5.0 → 1.5.1）
+  - 提交信息里写 `[skip version]` 则本次不动版本号
 - 当前形态：主窗 1408×916（可缩放、可最大化）、小窗 424×656 贴右下角
 - 技术栈：Python 3.13 + pywebview(WebView2) + 原生 HTML/CSS/JS
 
