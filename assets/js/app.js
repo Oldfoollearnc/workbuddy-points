@@ -1521,23 +1521,26 @@
         // 首行展示的是该分钟合计，占比必须用合计算，否则会出现"-0.52 / 0.54%"这种对不上的组合
         const shownPts = (isFirst && grouped) ? group.sum : e.points;
         const share = shownPts / dayTotal;
+        // 合并后同一张表里既有云端逐笔也有本机补足的记录，标一下来源，避免误读
+        const srcText = hasCloud ? (e.src === 'cloud' ? '云端' : '本机') : '';
         const timeCell = isFirst
-          ? `<span class="t">${F.dateKey(t)} ${F.clock(t)}${grouped ? `<i class="minute-badge">×${group.list.length}</i>` : ''}<small>周${wd}</small></span>`
+          ? `<span class="t">${F.dateKey(t)} ${F.clock(t)}${grouped ? `<i class="minute-badge">×${group.list.length}</i>` : ''}<small>周${wd}${srcText ? ' · ' + srcText : ''}</small></span>`
           : `<span class="t t--cont"><i class="rail"></i></span>`;
         // 同一分钟的积分合计放到「积分」列；时间徽标只留 ×N
         // 赠送 / 退回类记录（type=earn）不参与消耗占比，正号显示，避免出现 "-1,000 / 657%" 这种怪组合
         const isEarn = e.type === 'earn';
-        const fmtPt = v => (isEarn ? '+' + F.credit(v) : (v > 0 ? '-' + F.credit(v) : '0'));
+        const fmtPt = v => (isEarn ? '+' + F.credit(v) : (v > 0 ? '−' + F.credit(v) : '0'));
         const ptCell = (isFirst && grouped)
           ? `<span class="pt pt-group">${fmtPt(group.sum)}<small>×${group.list.length} 合计</small></span>`
           : `<span class="pt${isFirst ? '' : ' is-sub'}">${fmtPt(e.points)}</span>`;
         const shareCell = isEarn
           ? '<span class="share-cell"><span style="width:auto">—</span></span>'
           : `<span class="share-cell"><i class="share-bar"><i style="width:${Math.max(4, (shownPts / maxPts) * 100).toFixed(1)}%"></i></i><span>${(share * 100) < 1 ? (share * 100).toFixed(2) : (share * 100).toFixed(1)}%</span></span>`;
+        const tokenTxt = e.tokens == null ? '' : `<em title="${F.fmt(e.tokens)} Token">${F.fmtWan(e.tokens)} tok</em>`;
         return `<div class="table-row${isFirst ? '' : ' is-cont'}" style="animation-delay:${Math.min(i, 12) * 18}ms">
           ${timeCell}
           <span><i class="badge-type ${isEarn ? 'badge-earn' : 'badge-consume'}">${isEarn ? '赠送' : '消耗'}</i></span>
-          <span class="nm"><i class="legend-dot" style="display:inline-block;vertical-align:middle;margin-right:5px;background:${C.toneColor(e.tone)}"></i>${e.model}${e.tokens == null ? '' : `<small>${F.fmtWan(e.tokens)} Token</small>`}</span>
+          <span class="nm"><i class="legend-dot" style="background:${C.toneColor(e.tone)}"></i><b title="${e.model}">${e.model}</b>${tokenTxt}</span>
           <span class="dim">${e.task}</span>
           <span class="dim col-project">${e.project}</span>
           ${ptCell}
@@ -1744,6 +1747,12 @@
     const [t, s] = TITLES[view] || ['', ''];
     setText('#pageTitle', t);
     setText('#pageSub', s);
+    const titleEl = $('#pageTitle');
+    if (titleEl) {                       // 标题随页面切换轻轻落下，给"换页"一个落点
+      titleEl.classList.remove('is-swap');
+      void titleEl.offsetWidth;
+      titleEl.classList.add('is-swap');
+    }
     $$('.view').forEach(v => v.classList.toggle('is-active', v.dataset.view === view));
     $('#views').scrollTop = 0;
     // 每次进入用量分析重新播放一次日历「一列推一列」的入场动效

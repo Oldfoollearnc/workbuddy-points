@@ -221,6 +221,29 @@ user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
 user32.GetAsyncKeyState.restype = ctypes.c_short
 user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
 user32.GetCursorPos.restype = wintypes.BOOL
+user32.WindowFromPoint.argtypes = [POINT]
+user32.WindowFromPoint.restype = wintypes.HWND
+user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+
+
+def on_taskbar(pt):
+    """光标是否落在任务栏/通知区域上。
+
+    托盘图标也算"小窗外面的点击"，但它的语义是"我要开关小窗"，不是"点外面收起"。
+    这里按窗口类名判断，把任务栏（含溢出区域）排除掉。
+    """
+    try:
+        hwnd = user32.WindowFromPoint(pt)
+        if not hwnd:
+            return False
+        buf = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(hwnd, buf, 256)
+        cls = buf.value or ""
+        return cls in ("Shell_TrayWnd", "Shell_SecondaryTrayWnd", "TrayNotifyWnd",
+                       "NotifyIconOverflowWindow", "TopLevelWindowForOverflowXamlIsland") \
+            or "Tray" in cls or "Overflow" in cls
+    except Exception:
+        return False
 
 
 def round_corners(hwnd):
@@ -465,6 +488,10 @@ class Desktop:
                     continue
                 pt = wintypes.POINT()
                 if not user32.GetCursorPos(ctypes.byref(pt)):
+                    continue
+                # 点任务栏（托盘图标就在上面）交给 toggle_popup 处理，
+                # 这里不能当成"点外面"收起，否则托盘连点会变成"收起→又弹出"的闪烁。
+                if on_taskbar(pt):
                     continue
                 rc = RECT()
                 user32.GetWindowRect(hwnd, ctypes.byref(rc))
@@ -832,28 +859,19 @@ class Desktop:
     # ---------- 托盘 ----------
 
     def toggle_popup(self):
-        """托盘单击：严格一开一关。
+        """托盘单击：**只负责打开**。
 
-        两个坑：
-        1. 以前双击会额外触发 open_main（托盘 WM_LBUTTONDBLCLK），连点几下主界面就闪出来；
-           现在托盘侧已去掉该分支，主界面只能从「展开完整面板」或右键菜单进入。
-        2. 点托盘图标对"点外部收起"的监听器来说也是一次外部点击，它会先把小窗关掉，
-           如果这里再按可见性取反，就会又把它打开 —— 表现为"点了像没反应"。
-           所以以意图为准，并忽略刚刚被监听器关掉的那一次。
+        已经打开时再点不再关闭（关闭走小窗右上角的 ×，或点小窗以外的空白处），
+        只抖一下作为"我在呢"的反馈。这样连点永远不会出现"开了又关、关了又开"的错乱。
         """
         if not self.popup:
             return
-        now = time.time()
-        if now - getattr(self, "_hidden_by_watcher_at", 0) < 0.45:
-            self._hidden_by_watcher_at = 0
-            log("toggle popup: handled by outside-click watcher")
-            return
         if getattr(self, "_popup_intent", False):
-            log("toggle popup -> hide")
-            self.hide_popup()
-        else:
-            log("toggle popup -> show")
-            self.show_popup()
+            log("toggle popup: already open -> shake")
+            self._safe_js(self.popup, "window.App && App.burstShake()")
+            return
+        log("toggle popup -> show")
+        self.show_popup()
 
     def open_main(self):
         self.hide_popup()
