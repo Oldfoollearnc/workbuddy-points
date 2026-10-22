@@ -622,16 +622,10 @@
     const every = iv === 0 ? '手动' : (iv ? iv + ' 分钟' : '60 分钟');
     let txt;
     if (connected) {
-      const cloudToday = !!(stat && stat.cloud);
       const bucketed = !!(ACCOUNT.cloud && ACCOUNT.cloud.countKind === 'bucket');
-      txt = `云端<b>每 ${every}同步一次</b>（上次 ${sync || '—'}）；`
-          + (cloudToday
-            ? `今日消耗 / 笔数 / 构成取<b>云端${bucketed ? '计费记录' : '逐笔'}</b>（与积分流水逐行相加一致）`
-            : `今日消耗取<b>本机记录</b>（云端${bucketed ? '计费记录' : '逐笔'}尚未返回）`)
-          + `，Token 仍取本机。`;
-      if (bucketed) {
-        txt += ` 云端按 <b>5 分钟 × 模型</b>聚合，<b>一笔 ≠ 一次调用</b>。`;
-      }
+      txt = `云端每 ${every}同步（上次 ${sync || '—'}）：消耗 / 笔数取<b>${bucketed ? '计费记录' : '逐笔'}</b>`
+          + (bucketed ? `（5 分钟 × 模型聚合，一笔 ≠ 一次调用）` : '')
+          + `，Token 取本机。`;
     } else {
       txt = `当前只有<b>本机记录</b>：消耗与 Token 实时，但<b>不含账号余额</b>；`
           + `点右上角头像 → 连接账号（扫码一次），之后自动显示可用积分与周期。`;
@@ -639,12 +633,11 @@
     if (D.meta && D.meta.sourceKind === 'db') {
       txt += ' 未找到会话明细，已按 <b>workbuddy.db</b> 估算。';
     }
-    // 逐笔合计与账号自报"已用"必然有差（去重是启发式的、周期边界也不一定对齐）。
-    // 与其假装一致，不如把差额摆出来：用户才知道这个数字有多可信。
+    // 逐笔合计与账号自报"已用"必然有差（周期边界 + 入账时序）。正常只差 1-2 个批次，
+    // 所以只在 ≥3%（异常）时才占用提示条，避免天天挂一句让人麻木的免责声明。
     const c = ACCOUNT && ACCOUNT.cloud;
-    if (connected && c && c.used > 0 && Math.abs(c.driftPct || 0) >= 0.01) {
-      txt += ` 逐笔合计 <b>${F.credit(c.rowsSum)}</b> / 云端已用 <b>${F.credit(c.used)}</b>，`
-          + `差 <b>${(c.driftPct * 100).toFixed(1)}%</b>（周期边界与入账时序，以云端为准）。`;
+    if (connected && c && c.used > 0 && Math.abs(c.driftPct || 0) >= 0.03) {
+      txt += ` · 逐笔与已用差 <b>${(c.driftPct * 100).toFixed(1)}%</b>（入账时序，以云端为准）`;
     }
     el.innerHTML = txt;
   }
@@ -852,6 +845,10 @@
   /** 今日消耗构成：按「计费笔数 / 调用次数」拆分（云端是计费记录，本机是逐次调用） */
   function renderComposition(items) {
     const list = $('#compList'), donutBox = $('#compDonut');
+    const cloudMode = !!cloudRows();
+    setText('#compSub', cloudMode
+      ? '按模型计费笔数拆分 · 颜色对应下方模型'
+      : '按模型调用次数拆分 · 颜色对应下方模型');
     const rows = (items || []).filter(m => (m.calls || 0) > 0)
       .sort((a, b) => b.calls - a.calls);
     const total = rows.reduce((a, b) => a + b.calls, 0) || 1;
@@ -1170,7 +1167,7 @@
   function renderAnalytics() {
     const cloudMode = !!cloudRows();
     setText('#modelSub', cloudMode
-      ? '近 30 天按模型统计积分与计费笔数（云端按 5 分钟聚合）'
+      ? '近 30 天按模型统计积分与计费笔数'
       : '近 30 天按模型统计积分与调用次数');
     /* ---------- 消耗日历：云端逐笔优先，本机记录补盲区 ---------- */
     const cal = calendarDays();

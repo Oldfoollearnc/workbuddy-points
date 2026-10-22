@@ -676,9 +676,9 @@ class AccountService:
         drift_pct = round(drift / used, 4) if used > 0 else 0.0
 
         # 云端返回的到底是"逐笔调用"还是"聚合后的计费记录"？
-        # 实测近两天全部落在 5 分钟整点上（秒=00 且分钟是 5 的倍数），
-        # 说明它是按"5 分钟 × 模型"聚合的计费批次。此时条数 ≠ 调用次数，
-        # 界面必须按"笔"而不是"次"展示，否则会差一个数量级。
+        # 实测 10-21 起全部落在 5 分钟整点上（秒=00 且分钟是 5 的倍数），
+        # 更早的记录是分钟级 —— 说明服务端已改为按「5 分钟 × 模型」聚合。
+        # 判定只看**今天**：KPI 展示的是今天的笔数，历史混粒度不影响今天的标签。
         def _is_bucket(t):
             s = str(t or "")
             try:
@@ -686,8 +686,10 @@ class AccountService:
             except (ValueError, IndexError):
                 return False
 
-        bucket_n = sum(1 for r in rows_cycle if _is_bucket(r.get("requestTime")))
-        count_kind = "bucket" if rows_cycle and bucket_n / len(rows_cycle) >= 0.8 else "request"
+        today_s = dt.date.today().isoformat()
+        today_rows = [r for r in rows_cycle if str(r.get("requestTime") or "")[:10] == today_s]
+        bucket_n = sum(1 for r in today_rows if _is_bucket(r.get("requestTime")))
+        count_kind = "bucket" if today_rows and bucket_n / len(today_rows) >= 0.8 else "request"
 
         return {
             "user": dict({"plan": sm.get("SubscriptionPackageName") or "",
