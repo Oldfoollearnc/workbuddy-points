@@ -594,15 +594,31 @@
 
   /**
    * 数值落地。
-   * 说明：WebView2 在窗口未获得焦点时可能整体挂起渲染线程，rAF/定时器都不推进，
-   * 数字滚动会永远停在 0。数值正确性优先，因此这里直接写入终值；
-   * 入场动效交给 CSS（卡片位移、图表扫描等合成层动画）。
+   * 现在会从"上一次的值"滚到新值（420ms），既有数字感又不会因为
+   * WebView2 节流卡在中间——末尾有看门狗强制落到终值。
    */
   function countUp(node, target, opts) {
     if (!node) return;
     const o = opts || {};
     const format = o.format || (v => F.fmt(v, o.decimals || 0));
-    node.textContent = format(Number(target) || 0);
+    const to = Number(target) || 0;
+    const prev = node.dataset.cv;
+    const from = prev != null ? Number(prev) : 0;
+    node.dataset.cv = String(to);
+    if (motionOff() || document.hidden || Math.abs(to - from) < 0.005) {
+      node.textContent = format(to);
+      return;
+    }
+    const dur = 420;
+    const t0 = performance.now();
+    const step = t => {
+      const p = Math.min(1, (t - t0) / dur);
+      const e = 1 - Math.pow(1 - p, 3);
+      node.textContent = format(from + (to - from) * e);
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+    setTimeout(() => { node.textContent = format(to); }, dur + 120);   // 看门狗
   }
 
   /* ---------------- 窗口出现时的入场动效 ---------------- */
@@ -1900,6 +1916,15 @@
     if (view === 'ledger') {          // 流水页每次进来重新展开、重新入场
       state.ledgerLimit = 24;
       lastLedgerSig = '';
+    }
+    // 整块内容做一次轻微的"落定"，避免旧页瞬间消失、新页直接怼上来
+    const viewsBox = $('#views');
+    if (viewsBox && !motionOff()) {
+      try {
+        viewsBox.animate(
+          [{ opacity: .35, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }],
+          { duration: 220, easing: 'cubic-bezier(.22,1,.36,1)' });
+      } catch (e) { /* ignore */ }
     }
     const dr = $('.stack-legend');
     if (dr && view !== 'analytics') dr.remove();
