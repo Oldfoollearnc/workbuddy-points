@@ -299,6 +299,8 @@ class Desktop:
         self._popup_intent = False
         self._popup_hidden_at = 0.0
         self._hidden_by_watcher_at = 0.0
+        self._popup_shown_at = 0.0
+        self._popup_lock = threading.Lock()   # 串行化 show/hide，连点不会互相踩
         self._collapsing = False
         self.usage = usage_source.UsageService()
         self.account = AccountService()
@@ -383,47 +385,49 @@ class Desktop:
     def show_popup(self):
         if not self.popup:
             return
-        # 主窗与小窗互斥：同一时间只展示一个
-        try:
-            if self.main:
-                self.main.hide()
-        except Exception:
-            pass
-        mh = user32.FindWindowW(None, MAIN_TITLE)
-        if mh:
-            user32.ShowWindow(mh, 0)
-
-        hwnd = user32.FindWindowW(None, POPUP_TITLE)
-        # 连击判定：刚收起不到 450ms 又打开 → 不播入场动画，否则一开一关会"闪"
-        calm = (time.time() - getattr(self, "_popup_hidden_at", 0)) > 0.45
-        if hwnd:
-            # 关键：尺寸/位置在**隐藏状态**下就校正到位，再显示。
-            # 以前是先 show 再 align + 1px 抖动，用户看到的就是"出现→跳一下"的闪烁。
-            self._align_popup_once(hwnd)
-            self._nudge(hwnd)
-        try:
-            self.popup.show()
-        except Exception as e:
-            log(f"popup.show error: {e}")
-        if hwnd:
-            # 置顶 + 前台：否则会被其他窗口遮住，看起来像"没有打开"
-            user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE)
-            try:
-                user32.AllowSetForegroundWindow(-1)   # ASFW_ANY
-            except Exception:
-                pass
-            user32.BringWindowToTop(hwnd)
-            user32.SetForegroundWindow(hwnd)
-            self._align_popup(hwnd)        # 显示后只校正"确有偏差"的情况，正常情况下不动
-            self._safe_js(self.popup, "window.App && App.beforeShow()")
-            if calm:
-                self._safe_js(self.popup, "window.App && App.playEnter('popup')")
-            else:
-                self._safe_js(self.popup, "window.App && App.burstShake()")
+        with self._popup_lock:
+            # 意图先落地：即使后面 show() 还没返回，下一次单击也能正确判成"该关"
             self._popup_intent = True
             self._popup_shown_at = time.time()
-            self._fg_at_show = int(user32.GetForegroundWindow() or 0)
+            # 主窗与小窗互斥：同一时间只展示一个
+            try:
+                if self.main:
+                    self.main.hide()
+            except Exception:
+                pass
+            mh = user32.FindWindowW(None, MAIN_TITLE)
+            if mh:
+                user32.ShowWindow(mh, 0)
+
+            hwnd = user32.FindWindowW(None, POPUP_TITLE)
+            # 连击判定：刚收起不到 450ms 又打开 → 不播入场动画，否则一开一关会"闪"
+            calm = (self._popup_shown_at - getattr(self, "_popup_hidden_at", 0)) > 0.45
+            if hwnd:
+                # 关键：尺寸/位置在**隐藏状态**下就校正到位，再显示。
+                # 以前是先 show 再 align + 1px 抖动，用户看到的就是"出现→跳一下"的闪烁。
+                self._align_popup_once(hwnd)
+                self._nudge(hwnd)
+            try:
+                self.popup.show()
+            except Exception as e:
+                log(f"popup.show error: {e}")
+            if hwnd:
+                # 置顶 + 前台：否则会被其他窗口遮住，看起来像"没有打开"
+                user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                                    SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE)
+                try:
+                    user32.AllowSetForegroundWindow(-1)   # ASFW_ANY
+                except Exception:
+                    pass
+                user32.BringWindowToTop(hwnd)
+                user32.SetForegroundWindow(hwnd)
+                self._align_popup(hwnd)    # 显示后只校正"确有偏差"的情况，正常情况下不动
+                self._safe_js(self.popup, "window.App && App.beforeShow()")
+                if calm:
+                    self._safe_js(self.popup, "window.App && App.playEnter('popup')")
+                else:
+                    self._safe_js(self.popup, "window.App && App.burstShake()")
+                self._fg_at_show = int(user32.GetForegroundWindow() or 0)
         threading.Timer(0.35, self._refresh_popup_layout).start()
         threading.Timer(0.15, set_window_icons).start()
 
@@ -455,6 +459,10 @@ class Desktop:
                 prev_down = down
                 if not released:
                     continue
+                # 刚弹出的一瞬间，把"打开它的那一下点击"忽略掉，
+                # 否则从托盘点开时，松手早于监听采样就会被判成"点了外面"而立刻收起。
+                if time.time() - getattr(self, "_popup_shown_at", 0) < 0.35:
+                    continue
                 pt = wintypes.POINT()
                 if not user32.GetCursorPos(ctypes.byref(pt)):
                     continue
@@ -469,16 +477,17 @@ class Desktop:
                 log(f"popup click watcher error: {e}")
 
     def hide_popup(self):
-        try:
-            if self.popup:
-                self.popup.hide()
-        except Exception:
-            pass
-        hwnd = user32.FindWindowW(None, POPUP_TITLE)
-        if hwnd:
-            user32.ShowWindow(hwnd, 0)
-        self._popup_intent = False
-        self._popup_hidden_at = time.time()
+        with self._popup_lock:
+            try:
+                if self.popup:
+                    self.popup.hide()
+            except Exception:
+                pass
+            hwnd = user32.FindWindowW(None, POPUP_TITLE)
+            if hwnd:
+                user32.ShowWindow(hwnd, 0)
+            self._popup_intent = False
+            self._popup_hidden_at = time.time()
 
     def show_main(self):
         # 小窗让位（同时把小窗状态簿记成"已收起"）
