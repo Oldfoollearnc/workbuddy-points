@@ -115,14 +115,16 @@
   /**
    * 先绘制终态再做动画：
    * WebView2 在窗口未聚焦/被节流时 rAF 可能不推进，若只依赖动画会停在首帧。
+   *
+   * 曾经这里有一句 `if (is-desktop) return`（桌面壳直接跳过动画），
+   * 结果所有图表的"长起来"在安装版里全被关掉了。现在改成：
+   * 由调用方用 data-anim="0" 声明"这次只要终态"（离屏卡片），其余照常播放；
+   * 万一 rAF 被挂起，tween 里的看门狗会在 1 秒内把图形落到终态。
    */
   function animate(container, duration, onUpdate, delay) {
     onUpdate(1);
-    // 小窗/失焦窗口的 rAF 会被 Chromium 节流，动画会卡在首帧：这类场景只保留终态
-    if (document.hidden || !document.hasFocus() || motionLevel() === 'off') return;
-    // 桌面壳：WebView2 在窗口被遮挡时会挂起渲染线程，入场动画可能卡在中途，
-    // 因此直接呈现终态；浏览器预览仍保留完整动效。
-    if (document.body.classList.contains('is-desktop')) return;
+    if (container.dataset.anim === '0') return;      // 调用方要求只出终态
+    if (document.hidden || motionLevel() === 'off') return;
     addCancel(container, tween(container, duration, onUpdate, delay));
   }
 
@@ -864,10 +866,11 @@
       const glowOn = cfg.glow !== false && motionLevel() !== 'off';
 
       // 入场动效：从左上角起，一列推一列（每列延迟 14ms）。
-      // container.dataset.played 保证同一次进入页面只播一次，resize/切主题不重播。
+      // container.dataset.calPlayed 保证同一次进入页面只播一次，resize/切主题不重播。
       const play = cfg.animate !== false && motionLevel() !== 'off'
-        && container.dataset.played !== '1' && container.clientWidth > 0;
-      if (play) container.dataset.played = '1';
+        && container.dataset.calPlayed !== '1' && container.clientWidth > 0
+        && container.dataset.anim !== '0';        // 离屏时先只出终态，滚进来再播
+      if (play) container.dataset.calPlayed = '1';
       const cells = [];
 
       /* ---- 悬停：以格子为圆心的径向光 ---- */
@@ -982,15 +985,15 @@
       if (play && cells.length) {
         requestAnimationFrame(() => {
           cells.forEach(c => {
-            // 入场：从左往右一列推一列，只用"淡入 + 6px 上浮"，不再做缩放弹跳
-            // （原来 scale(.55)→1.035 的过冲在高密度格子上很像"一片方片在蹦"，不够克制）
-            const dist = Math.pow(c.col * 0.9 + c.row * 0.55, 0.9);
-            const delay = Math.min(380, dist * 9);
+            // 多米诺：一列推一列（列间 55ms），列内再按行错开 10ms；
+            // 每格从上方轻轻落下来，落定时有一点点回弹，像牌被推倒后归位。
+            const delay = Math.min(620, c.col * 55 + c.row * 10);
             const frames = [
-              { opacity: 0, transform: 'translateY(6px) scale(.96)' },
+              { opacity: 0, transform: 'translateY(-9px) scale(.9)' },
+              { opacity: c.op, transform: 'translateY(1px) scale(1.02)', offset: .7 },
               { opacity: c.op, transform: 'none' }
             ];
-            const timing = { duration: 460, delay, easing: 'cubic-bezier(.22,1,.36,1)', fill: 'backwards' };
+            const timing = { duration: 520, delay, easing: 'cubic-bezier(.3,.9,.35,1)', fill: 'backwards' };
             if (c.node.animate) { c.node.animate(frames, timing); return; }
             // 兜底（极老内核）：退回 CSS 过渡
             c.node.style.transformBox = 'fill-box';

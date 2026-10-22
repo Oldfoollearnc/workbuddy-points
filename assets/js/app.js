@@ -404,8 +404,13 @@
     const since = new Date(String(ACCOUNT.lastSync).replace(' ', 'T')).getTime();
     if (!since || isNaN(since)) return 0;
     if (Date.now() - since > PENDING_MAX_H * 3600000) return 0;   // 窗口不全，宁可不补
+    // 优先用服务端带回的 72 小时时间线；万一缓存还是旧结构，就用本机流水兜底，
+    // 保证"同步后已花"这个数不会因为缺字段而恒等于 0。
+    const src = (D.recent && D.recent.length)
+      ? D.recent
+      : (D.ledger || []).map(e => [new Date(e.time).getTime(), Number(e.points) || 0]);
     let sum = 0;
-    (D.recent || []).forEach(r => { if (r[0] > since) sum += Number(r[1]) || 0; });
+    src.forEach(r => { if (r[0] > since) sum += Number(r[1]) || 0; });
     return round2(sum);
   }
 
@@ -674,6 +679,9 @@
         card.appendChild(g);
         setTimeout(() => g.remove(), 900);
       }
+      // 时段柱图跟着一起"长起来"
+      const popChart = $('[data-chart="popHourly"]');
+      if (popChart) replayChart(popChart);
       const total = reduced ? 240 : 620;
       enterUntil = performance.now() + total;
       clearTimeout(enterTimer);
@@ -742,6 +750,47 @@
 
   let lastRender = -1e9;
   let lastCalSig = '';
+
+  /* ---------------- 图表入场：只在"看得见"的时候长起来 ---------------- */
+
+  /** 元素是否大部分落在可视区（#views 是滚动容器） */
+  function mostlyVisible(el) {
+    const box = $('#views');
+    const r = el.getBoundingClientRect();
+    if (!r.height) return false;
+    if (!box) return true;
+    const v = box.getBoundingClientRect();
+    const top = Math.max(r.top, v.top);
+    const bot = Math.min(r.bottom, v.bottom);
+    return (bot - top) / r.height >= 0.55;
+  }
+
+  /** 重绘一张图并播放它的生长动画 */
+  function replayChart(el) {
+    if (!el || typeof el.__draw !== 'function') return;
+    el.dataset.anim = '1';
+    el.dataset.played = '1';
+    el.__draw();
+  }
+
+  /** 扫描当前页：进视野的重绘一次（带动画），没进视野的继续保持"只出终态" */
+  function revealCharts(replayAll) {
+    $$('[data-chart]').forEach(el => {
+      if (typeof el.__draw !== 'function') return;
+      if (!mostlyVisible(el)) return;
+      if (!replayAll && el.dataset.played === '1') return;
+      replayChart(el);
+    });
+  }
+
+  /** 切页时清掉"已播放"，让新页面的图表重新长一次 */
+  function resetChartPlayed() {
+    $$('[data-chart]').forEach(el => { delete el.dataset.played; });
+    const cal = $('[data-chart="calendar"]');
+    if (cal) delete cal.dataset.calPlayed;
+    lastCalSig = '';
+  }
+
   function renderActive(force) {
     // 小窗入场期间不接受外部触发的重绘：可见性变化、定时刷新都会抢主线程，
     // 中途重排一次动画就"卡一下"。动画结束后由 enterPopup 统一补渲染。
@@ -750,11 +799,14 @@
     if (!force && now - lastRender < 250) return;
     lastRender = now;
     if (state.mode === 'popup') { renderPopup(); return; }
+    // 先统一标记"只出终态"，渲染完再把视野内的重绘成带生长动画的版本
+    $$('[data-chart]').forEach(el => { el.dataset.anim = '0'; });
     renderSidebar();
     if (state.view === 'overview') renderOverview();
     else if (state.view === 'analytics') renderAnalytics();
-    else if (state.view === 'ledger') renderLedger(true);
+    else if (state.view === 'ledger') renderLedger();
     else if (state.view === 'settings') renderSettings();
+    revealCharts();
   }
 
   let localTimer = null;
@@ -912,12 +964,19 @@
     setHTML('#popFootToken', F.fmtWan(s.tokens || 0));
     const box = $('[data-chart="popHourly"]');
     if (!box) return;
-    // 小窗只有一屏宽，不摆 24 根柱：滑动窗口 = 最近 12 小时，
-    // 末尾最多留 3 个空白格，整点往后走时窗口自动右移（新数据进来才展示）
     const nowHour = (D.meta && D.meta.nowHour != null) ? D.meta.nowHour : new Date().getHours();
-    const end = Math.min(23, nowHour + 3);
-    const start = Math.max(0, end - 11);
+
+    // 动态窗口：把今天**所有有消耗的时段**都包进来，而不是死板地只看最近 12 小时
+    // （以前早上用过、晚上打开就只剩五六根柱子）。至少 8 格、最多 24 格，
+    // 末尾留 1 格未来，让"现在"这根不贴边。
+    const active = s.hours.filter(h => h.points > 0).map(h => h.hour);
+    let start = active.length ? Math.min.apply(null, active) : Math.max(0, nowHour - 7);
+    let end = Math.max(nowHour + 1, active.length ? Math.max.apply(null, active) : nowHour);
+    if (end - start < 7) { end = Math.min(23, start + 7); start = Math.max(0, end - 7); }
+    if (end - start > 23) { start = 0; end = 23; }
+
     const rows = s.hours.slice(start, end + 1);
+    const xEvery = rows.length > 16 ? 4 : rows.length > 10 ? 3 : 2;
     const paint = () => C.bar(box, {
       data: rows.map(hr => ({
         label: `${F.pad(hr.hour)}:00`, short: F.pad(hr.hour), value: hr.points,
@@ -925,8 +984,10 @@
         tipTitle: `${F.pad(hr.hour)}:00–${F.pad((hr.hour + 1) % 24)}:00`
       })),
       tone: 'c1', valueName: '消耗', sum: s.consumed,
-      nowIndex: nowHour - start, xEvery: 3, showValues: false, maxBarW: 18
+      nowIndex: nowHour - start, xEvery, showValues: false, maxBarW: 18
     });
+    box.__draw = paint;
+    box.dataset.anim = '0';          // 默认只出终态；小窗弹出时由 replayChart 重绘带生长
     // 小窗首帧容器可能还是 0 高（boot 遮罩 / 布局未定型），量到尺寸再画，最多等 3 秒
     let n = 0;
     const wait = () => {
@@ -945,6 +1006,12 @@
     setText('#popAvailLabel', '今日使用积分');
     countUp($('#popTodayUsed'), stat.consumed, { duration: 760, format: F.credit });
     setText('#popAvailable', configured ? F.credit(acc.available) : '—');
+    const popAvailEl = $('#popAvailable');
+    if (popAvailEl) {
+      popAvailEl.title = (acc.source === 'cloud')
+        ? `云端余额 ${F.credit(acc.cloudAvailable)} − 同步后本机已花 ${F.credit(acc.pending)} = ${F.credit(acc.available)}`
+        : '可用积分来自本地记录';
+    }
     setText('#popUsedPct', configured ? (acc.usedPct * 100).toFixed(1) + '%' : '未设置');
 
     // 延迟说明：云端多久之前同步的
@@ -986,7 +1053,11 @@
     const total = rows.reduce((a, b) => a + b.calls, 0) || 1;
 
     if (donutBox) {
-      if (rows.length) {
+      const draw = () => {
+        if (!rows.length) {
+          donutBox.innerHTML = '<div class="comp-empty">今日暂无调用</div>';
+          return;
+        }
         C.donut(donutBox, {
           items: rows.map(m => ({ name: m.name, value: m.calls, tone: m.tone })),
           layout: 'bottom',
@@ -998,9 +1069,9 @@
           centerUnit: '次',
           centerFormat: v => F.fmt(Math.round(v))
         });
-      } else {
-        donutBox.innerHTML = '<div class="comp-empty">今日暂无调用</div>';
-      }
+      };
+      donutBox.__draw = draw;
+      draw();
     }
 
     if (list) {
@@ -1089,15 +1160,19 @@
     setHTML('#footNow', D.meta.updated || '—');
 
     const nowHour = (D.meta && D.meta.nowHour != null) ? D.meta.nowHour : new Date().getHours();
-    C.bar($('[data-chart="hourly"]'), {
-      data: stat.hours.map(hr => ({
-        label: `${F.pad(hr.hour)}:00`, short: F.pad(hr.hour), value: hr.points,
-        isNow: hr.hour === nowHour,
-        tipTitle: `${F.pad(hr.hour)}:00–${F.pad((hr.hour + 1) % 24)}:00`
-      })),
-      tone: 'c1', valueName: '消耗', sum: stat.consumed,
-      nowIndex: nowHour, xEvery: 3, showValues: prefs.labels, maxBarW: 22
-    });
+    const hourlyEl = $('[data-chart="hourly"]');
+    if (hourlyEl) {
+      hourlyEl.__draw = () => C.bar(hourlyEl, {
+        data: stat.hours.map(hr => ({
+          label: `${F.pad(hr.hour)}:00`, short: F.pad(hr.hour), value: hr.points,
+          isNow: hr.hour === nowHour,
+          tipTitle: `${F.pad(hr.hour)}:00–${F.pad((hr.hour + 1) % 24)}:00`
+        })),
+        tone: 'c1', valueName: '消耗', sum: stat.consumed,
+        nowIndex: nowHour, xEvery: 3, showValues: prefs.labels, maxBarW: 22
+      });
+      hourlyEl.__draw();
+    }
 
     // 今日消耗构成：按调用次数拆分（免费模型也计入，只要今天被调用过）
     const compRows = (stat.models || []).filter(m => (m.calls || 0) > 0);
@@ -1176,11 +1251,15 @@
           ? `额度 ${F.credit(budget)} · ${over > 0 ? '超 ' + F.credit(over) : '剩 ' + F.credit(budget - used)}`
           : '额度为 0';
 
-    C.gauge($('[data-chart="gauge"]'), {
-      value: configured ? pct : 0,
-      label: configured ? `${lb}已用` : '未连接云端',
-      sub
-    });
+    const gaugeEl = $('[data-chart="gauge"]');
+    if (gaugeEl) {
+      gaugeEl.__draw = () => C.gauge(gaugeEl, {
+        value: configured ? pct : 0,
+        label: configured ? `${lb}已用` : '未连接云端',
+        sub
+      });
+      gaugeEl.__draw();
+    }
 
     // 三项统计：固定口径，按数值从小到大排序（小的在前）
     const stats = [
@@ -1223,7 +1302,9 @@
       const h2 = card.querySelector('h2');
       if (h2) h2.textContent = `近 ${state.range} 天消耗趋势`;
     }
-    C.combo($('[data-chart="trend"]'), {
+    const el = $('[data-chart="trend"]');
+    if (!el) return;
+    el.__draw = () => C.combo(el, {
       labels: days.map(d => d.date),
       days,
       bars: days.map(d => d.consumed),
@@ -1232,6 +1313,7 @@
       xLabels: state.range <= 7 ? 1 : state.range <= 14 ? 2 : 5,
       dimLast: true
     });
+    el.__draw();
   }
 
   /* =========================================================
@@ -1339,15 +1421,17 @@
       prefs.calIntro !== false ? 1 : 0,
       calDays.map(d => `${d.date}:${d.points}:${d.calls}:${d.tokens}`).join(',')
     ].join('|');
-    if (calBox && calSig !== lastCalSig) {
-      lastCalSig = calSig;
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        C.calendar(calBox, {
-          days: calDays, tone: 'c1',
-          glow: prefs.calGlow !== false,        // 悬停光圈 + 邻格联动
-          animate: prefs.calIntro !== false     // 入场对角波
-        });
-      }));
+    if (calBox) {
+      // 供"进视野才播"的调度器重绘：日历自己的 calPlayed 决定要不要重播那条多米诺
+      calBox.__draw = () => C.calendar(calBox, {
+        days: calDays, tone: 'c1',
+        glow: prefs.calGlow !== false,        // 悬停光圈 + 邻格联动
+        animate: prefs.calIntro !== false     // 入场多米诺
+      });
+      if (calSig !== lastCalSig) {
+        lastCalSig = calSig;
+        calBox.__draw();       // 同步画：视图已经 display 了，量得到宽度；异步会和 replay 抢
+      }
     }
 
     /* ---------- 模型使用量：云端 30 天逐笔优先 ---------- */
@@ -1467,6 +1551,7 @@
 
   let ledgerSource = 'local';
   let ledgerCounts = { cloud: 0, local: 0 };   // 数据源条数（不受筛选影响，用于说明文案）
+  let lastLedgerSig = '';                      // 行内容签名：没变就不重建，避免定时刷新重播动画
 
   function ledgerRows() {
     const q = state.ledgerQuery.trim().toLowerCase();
@@ -1524,7 +1609,20 @@
         <div><span>筛选结果</span><b>${all.length} <small style="font-size:10px;color:var(--text-3)">条</small></b></div>`;
     }
 
-    if (!rows.length) {
+    // 行内容签名：本地刷新每 30 秒会走一次 renderActive，内容没变就不重建 —— 
+    // 否则整张表会被反复替换，入场动画跟着重播，看着一直在闪。
+    const ledgerSig = [
+      state.ledgerLimit,
+      prefs.groupMinute !== false ? 1 : 0,
+      ledgerSource,
+      rows.map(e => `${e.id}|${new Date(e.time).getTime()}|${e.points}`).join(',')
+    ].join('|');
+    const rebuild = ledgerSig !== lastLedgerSig;
+    lastLedgerSig = ledgerSig;
+
+    if (!rebuild) {
+      /* 内容未变：保留现有 DOM */
+    } else if (!rows.length) {
       body.innerHTML = '<div class="pop-empty" style="padding:26px 0">当前筛选条件下没有记录</div>';
     } else {
       // 同一分钟的记录合并展示：首条显示时间与条数，其余用左侧导轨承接
@@ -1573,7 +1671,7 @@
           ? '<span class="share-cell"><span style="width:auto">—</span></span>'
           : `<span class="share-cell"><i class="share-bar"><i style="width:${Math.max(4, (shownPts / maxPts) * 100).toFixed(1)}%"></i></i><span>${(share * 100) < 1 ? (share * 100).toFixed(2) : (share * 100).toFixed(1)}%</span></span>`;
         const tokenTxt = e.tokens == null ? '' : `<em title="${F.fmt(e.tokens)} Token">${F.fmtWan(e.tokens)} tok</em>`;
-        return `<div class="table-row${isFirst ? '' : ' is-cont'}" style="animation-delay:${Math.min(i, 12) * 18}ms">
+        return `<div class="table-row${isFirst ? '' : ' is-cont'}" style="animation-delay:${Math.min(i, 14) * 22}ms">
           ${timeCell}
           <span><i class="badge-type ${isEarn ? 'badge-earn' : 'badge-consume'}">${isEarn ? '赠送' : '消耗'}</i></span>
           <span class="nm"><i class="legend-dot" style="background:${C.toneColor(e.tone)}"></i><b title="${e.model}">${e.model}</b>${tokenTxt}</span>
@@ -1663,6 +1761,12 @@
         : '';
     }
     setText('#cloudUsed', credit(hasCloud ? acc.used : c.used));
+    // 余额条：周期已用占比（和侧边栏、KPI 同一套数）
+    const availBar = $('#apAvailBar');
+    if (availBar) {
+      const pct = (hasCloud && acc.total) ? Math.min(1, Math.max(0, acc.usedPct)) : 0;
+      requestAnimationFrame(() => { availBar.style.width = (pct * 100).toFixed(1) + '%'; });
+    }
     const plan = u.plan || '';
     setText('#cloudCycle', c.cycleStartText ? `${String(c.cycleStartText).slice(5)} 起` : (plan || '—'));
     const cycEl = $('#cloudCycle');
@@ -1791,11 +1895,11 @@
     }
     $$('.view').forEach(v => v.classList.toggle('is-active', v.dataset.view === view));
     $('#views').scrollTop = 0;
-    // 每次进入用量分析重新播放一次日历「一列推一列」的入场动效
-    if (view === 'analytics') {
-      const cal = $('[data-chart="calendar"]');
-      if (cal) delete cal.dataset.played;
-      lastCalSig = '';                       // 强制重绘一次，入场波才会重播
+    // 换页 = 图表重新长一次（进视野的会在 renderActive 末尾被 replay）
+    resetChartPlayed();
+    if (view === 'ledger') {          // 流水页每次进来重新展开、重新入场
+      state.ledgerLimit = 24;
+      lastLedgerSig = '';
     }
     const dr = $('.stack-legend');
     if (dr && view !== 'analytics') dr.remove();
@@ -1968,7 +2072,10 @@
       b.addEventListener('click', () => {
         state.range = +b.dataset.range;
         $$('#rangeSeg button').forEach(x => x.classList.toggle('is-active', x === b));
-        renderTrend();
+        const el = $('[data-chart="trend"]');
+        if (el) el.dataset.anim = '0';
+        renderTrend();                 // 先落终态（数据/刻度已经换好）
+        replayChart(el);               // 再长一次，切换区间有"重新长出来"的反馈
       });
     });
 
@@ -1979,7 +2086,10 @@
         if (state.quotaRange === v) return;
         state.quotaRange = v;
         $$('#quotaSeg button').forEach(x => x.classList.toggle('is-active', x === b));
+        const g = $('[data-chart="gauge"]');
+        if (g) g.dataset.anim = '0';
         renderQuotaCard(effAccount(), hasQuota());
+        replayChart(g);                // 仪表盘从零扫到新值
       });
     });
 
@@ -2096,24 +2206,48 @@
       acctPop.style.right = Math.max(10, Math.round(window.innerWidth - r.right)) + 'px';
     };
 
+    let acctTimer = 0;
+    let acctOpen = false;             // 收起动画期间 hidden 还没生效，用显式状态判断
     const setAccountPop = open => {
       if (!acctPop) return;
-      acctPop.hidden = !open;
-      if (avatarBtn) avatarBtn.setAttribute('aria-expanded', String(open));
+      acctOpen = open;
+      clearTimeout(acctTimer);
+      // 上一次的进出动画可能留了 fill:forwards，先清掉，否则再打开会是透明的
+      try { acctPop.getAnimations().forEach(a => a.cancel()); } catch (e) { /* ignore */ }
       if (open) {
         renderAccountCard();          // 展开时用最新账号数据重绘
         positionAccountPop();
+        acctPop.hidden = false;
+        if (!motionOff()) {
+          try {
+            acctPop.animate(
+              [{ opacity: 0, transform: 'translateY(-8px) scale(.985)' },
+               { opacity: 1, transform: 'none' }],
+              { duration: 190, easing: 'cubic-bezier(.22,1,.36,1)' });
+          } catch (e) { /* ignore */ }
+        }
+      } else if (!motionOff()) {
+        try {
+          acctPop.animate(
+            [{ opacity: 1, transform: 'none' },
+             { opacity: 0, transform: 'translateY(-5px) scale(.99)' }],
+            { duration: 130, easing: 'cubic-bezier(.4,0,.7,.3)', fill: 'forwards' });
+        } catch (e) { /* ignore */ }
+        acctTimer = setTimeout(() => { acctPop.hidden = true; }, 130);
+      } else {
+        acctPop.hidden = true;
       }
+      if (avatarBtn) avatarBtn.setAttribute('aria-expanded', String(open));
     };
 
     if (avatarBtn) avatarBtn.addEventListener('click', e => {
       e.stopPropagation();
-      setAccountPop(acctPop ? acctPop.hidden : false);
+      setAccountPop(!acctOpen);
     });
 
     if (acctPop) acctPop.addEventListener('click', e => e.stopPropagation());
 
-    document.addEventListener('click', () => { if (acctPop && !acctPop.hidden) setAccountPop(false); });
+    document.addEventListener('click', () => { if (acctOpen) setAccountPop(false); });
 
     window.addEventListener('resize', () => { if (acctPop && !acctPop.hidden) positionAccountPop(); });
     const ph = $('#popHide'); if (ph) ph.addEventListener('click', () => bridge.hide());
@@ -2266,7 +2400,7 @@
 
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
-        if (acctPop && !acctPop.hidden) setAccountPop(false);
+        if (acctOpen) setAccountPop(false);
         if (state.mode === 'popup') bridge.hide();
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') { e.preventDefault(); refresh(); }
@@ -2284,6 +2418,16 @@
       clearTimeout(rt);
       rt = setTimeout(() => { moveIndicator(); renderActive(); }, 180);
     });
+
+    // 滚动到视野里再长：首屏看不见的图表（趋势、构成、日历）滚到跟前才播动画
+    const viewsEl = $('#views');
+    if (viewsEl) {
+      let st = 0;
+      viewsEl.addEventListener('scroll', () => {
+        clearTimeout(st);
+        st = setTimeout(() => revealCharts(false), 140);
+      }, { passive: true });
+    }
 
     if (window.matchMedia) {
       const mq = window.matchMedia('(prefers-color-scheme: dark)');

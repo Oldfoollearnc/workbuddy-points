@@ -128,23 +128,36 @@
 
     <!-- 账号悬浮栏：贴着头像下方，只放账号相关内容，点外部/ Esc 关闭 -->
     <div class="acct-pop" id="acctPop" role="dialog" aria-label="账号与云端" hidden>
-      <div class="acct-pop-head">
+      <header class="ap-head">
         <div class="avatar avatar-lg" id="accAvatar">WB</div>
         <div class="acct-name">
           <b id="accName">未连接账号</b>
           <span id="accPlan">扫码后可读取余额与有效期</span>
-          <span class="mono" id="accId">—</span>
         </div>
         <span class="chip" id="cloudChip">未连接</span>
-      </div>
-      <div class="acct-metrics">
-        <div><span>可用积分</span><b id="cloudAvail">—</b></div>
-        <div><span>本周期已用</span><b id="cloudUsed">—</b></div>
+      </header>
+
+      <section class="ap-balance">
+        <div class="ap-balance-top">
+          <span>可用积分</span>
+          <b id="cloudAvail">—</b>
+        </div>
+        <div class="ap-track"><i id="apAvailBar" style="width:0%"></i></div>
+        <div class="ap-balance-foot">
+          <span>本周期已用 <b id="cloudUsed">—</b></span>
+          <span>有效期至 <b id="cloudExpire">—</b></span>
+        </div>
+      </section>
+
+      <div class="ap-meta">
         <div><span>当前周期</span><b id="cloudCycle">—</b></div>
-        <div><span>有效期至</span><b id="cloudExpire">—</b></div>
+        <div><span>账号</span><b class="mono" id="accId">—</b></div>
       </div>
-      <div class="acct-sync"><span>上次同步</span><b id="accLastSync">—</b></div>
+
+      <div class="ap-sync"><span>上次同步</span><b id="accLastSync">—</b></div>
+
       <div class="pkg-list" id="pkgList"></div>
+
       <div class="acct-actions">
         <button class="btn btn-primary btn-sm" id="cloudLogin">连接账号</button>
         <button class="btn btn-ghost btn-sm" id="cloudSync">立即同步</button>
@@ -315,7 +328,7 @@
               <div class="card-tools"><span class="chip" id="compCount">—</span></div>
             </header>
             <div class="comp-wrap">
-              <div class="comp-donut" id="compDonut"></div>
+              <div class="comp-donut" id="compDonut" data-chart="comp"></div>
               <div class="comp-list" id="compList"></div>
             </div>
           </article>

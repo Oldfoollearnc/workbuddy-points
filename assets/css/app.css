@@ -1708,27 +1708,61 @@ body.is-loading .boot-mask { display: flex; }
 .acct-pop {
   position: fixed;
   z-index: 95;
-  width: 318px;
-  padding: 13px 14px 11px;
-  border-radius: 14px;
+  width: 330px;
+  padding: 14px 14px 12px;
+  border-radius: 16px;
   border: 1px solid var(--border-2);
-  background: var(--surface);
+  background:
+    radial-gradient(320px 150px at 92% -22%, var(--brand-soft), transparent 72%),
+    var(--surface);
   box-shadow: var(--shadow-3);
-  animation: popIn 150ms var(--ease-out) both;
 }
 .acct-pop[hidden] { display: none; }
-@keyframes popIn {
-  from { opacity: 0; transform: translateY(-6px) scale(.98); }
-  to { opacity: 1; transform: none; }
+
+/* 头部：头像 + 名字 + 状态 */
+.ap-head { display: flex; align-items: center; gap: 10px; }
+.ap-head .acct-name { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.ap-head .acct-name b { font-size: 13px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ap-head .acct-name span { font-size: 10px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ap-head .chip { flex: none; }
+
+/* 余额块：大数字 + 进度 + 两侧小字 */
+.ap-balance {
+  margin-top: 12px;
+  padding: 11px 12px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: linear-gradient(135deg, var(--brand-soft), var(--brand-softer) 70%, transparent);
 }
-.acct-pop-head { display: flex; align-items: center; gap: 10px; }
-.acct-pop-head .acct-name { flex: 1 1 auto; min-width: 0; }
-.acct-pop-head .chip { flex: none; }
-.acct-pop .acct-metrics { margin-top: 10px; }
-.acct-pop .acct-sync { margin-top: 8px; padding: 8px 0; }
-.acct-pop .pkg-list { margin: 2px 0 0; padding: 0; gap: 5px; }
+.ap-balance-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ap-balance-top span { font-size: 10.5px; color: var(--text-3); }
+.ap-balance-top b { font-size: 20px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.ap-track { margin-top: 8px; height: 5px; border-radius: 99px; background: rgba(255, 255, 255, .6); overflow: hidden; }
+[data-theme="dark"] .ap-track { background: rgba(255, 255, 255, .08); }
+.ap-track i {
+  display: block; height: 100%; border-radius: 99px;
+  background: var(--brand-gradient);
+  transition: width 420ms var(--ease-out);
+}
+.ap-balance-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 7px; font-size: 10px; color: var(--text-3); }
+.ap-balance-foot b { color: var(--text-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.ap-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin-top: 11px; }
+.ap-meta > div { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ap-meta span { font-size: 9.5px; color: var(--text-3); letter-spacing: .02em; }
+.ap-meta b { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.ap-sync {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-top: 11px; padding-top: 9px;
+  border-top: 1px solid var(--border);
+  font-size: 10px; color: var(--text-3);
+}
+.ap-sync b { font-weight: 600; color: var(--text-2); font-variant-numeric: tabular-nums; text-align: right; }
+
+.acct-pop .pkg-list { margin: 6px 0 0; padding: 0; gap: 5px; }
 .acct-pop .acct-actions {
-  margin-top: 10px;
+  margin-top: 11px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
   display: flex;
