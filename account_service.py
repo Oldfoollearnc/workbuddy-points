@@ -27,6 +27,7 @@ import time
 
 import app_paths
 import dpapi
+import logutil
 
 try:
     import urllib.request
@@ -106,13 +107,19 @@ SYNC_JS = r"""
 """
 
 
+def cdp_enabled():
+    """是否允许本进程开 CDP 调试端口。
+
+    默认关闭：`--remote-debugging-port` + `--remote-allow-origins=*` 意味着**同机任意
+    进程**都能连上 WebView2 读走全部 Cookie，生产环境没有任何理由常开。
+    只有开发期需要 tools/live.py 截图、或要导出 session.bin 时，
+    显式设 `WB_CDP=1` 才打开。
+    """
+    return os.environ.get("WB_CDP") == "1"
+
+
 def _log(msg):
-    try:
-        os.makedirs(LOG_DIR, exist_ok=True)
-        with open(PROBE_LOG, "a", encoding="utf-8") as f:
-            f.write(f"[{dt.datetime.now():%Y-%m-%d %H:%M:%S}] {msg}\n")
-    except Exception:
-        pass
+    logutil.log(PROBE_LOG, msg, "api")
 
 
 def _num(v):
@@ -136,6 +143,7 @@ class AccountService:
         self._stop = False
         self._last_check = None
         self._syncing = False
+        self._sync_lock = threading.Lock()   # 定时轮询与手动同步可能撞车，用锁而不是布尔判断
         self.state = {
             "status": "disconnected",   # disconnected | logining | connected | expired | error
             "user": None,
@@ -149,6 +157,9 @@ class AccountService:
             "lastError": None,
             "interval": 60,
             "origin": "",
+            # 用户显式「退出登录」后置 False：下次启动不再自动回填会话。
+            # 没有它的话，退出登录只是清了内存，重启后 try_restore 又把账号连回来了。
+            "autoLogin": True,
         }
         self._load_cache()
 
@@ -158,7 +169,7 @@ class AccountService:
         try:
             with open(CACHE, encoding="utf-8") as f:
                 d = json.load(f)
-            for k in ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "usageRows", "lastSync", "interval", "origin"):
+            for k in ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "usageRows", "lastSync", "interval", "origin", "autoLogin"):
                 if k in d:
                     self.state[k] = d[k]
             self.interval_min = 60 if d.get("interval") is None else max(0, int(d.get("interval")))
@@ -169,7 +180,7 @@ class AccountService:
         try:
             with open(CACHE, "w", encoding="utf-8") as f:
                 json.dump({k: self.state[k] for k in
-                           ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "usageRows", "lastSync", "interval", "origin")},
+                           ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "usageRows", "lastSync", "interval", "origin", "autoLogin")},
                           f, ensure_ascii=False, indent=2)
         except Exception:
             pass
@@ -188,6 +199,7 @@ class AccountService:
             threading.Timer(2.5, self._install_hook).start()
             with self.lock:
                 self.state["status"] = "logining"
+                self.state["autoLogin"] = True     # 用户主动登录 → 恢复开机自动回填
             threading.Thread(target=self._watch_login, daemon=True).start()
             return {"ok": True}
         except Exception as e:
@@ -298,7 +310,7 @@ class AccountService:
     # ---------------- 登录态持久化（CDP） ----------------
 
     def _cdp_tabs(self):
-        if websocket is None:
+        if websocket is None or not cdp_enabled():
             return []
         try:
             with urllib.request.urlopen("http://127.0.0.1:%d/json/list" % CDP_PORT, timeout=3) as r:
@@ -316,7 +328,13 @@ class AccountService:
         return None
 
     def save_session(self):
-        """把登录 Cookie 加密存到本地，供下次启动回填。"""
+        """把登录 Cookie 加密存到本地（仅开发态）。
+
+        生产态不开 CDP，拿不到 Cookie 也没关系：WebView2 profile 本身就是持久化的
+        （private_mode=False + storage_path），Cookie 由浏览器自己落盘。
+        """
+        if not cdp_enabled():
+            return False
         ws = self._cdp_ws()
         if not ws:
             _log("save_session: no cdp tab")
@@ -378,13 +396,18 @@ class AccountService:
                 pass
 
     def try_restore(self):
-        """启动时调用：有存档就回填并尝试同步。"""
-        if not os.path.exists(COOKIE_FILE):
+        """启动时调用：登录态来自 WebView2 持久化 profile，能同步就同步。
+
+        Cookie 本来就跟 profile 一起落盘，所以不再依赖 CDP 回填；
+        只有开发态（WB_CDP=1）才额外把 session.bin 里的 Cookie 灌一次。
+        """
+        if not self.state.get("autoLogin", True):
+            _log("try_restore skipped: 用户已退出登录")
             return False
         time.sleep(2.0)
         self._nav(ORIGINS[0] + "/app", wait=3.5)
-        if not self.restore_session():
-            return False
+        if cdp_enabled() and os.path.exists(COOKIE_FILE):
+            self.restore_session()
         self._nav(ORIGINS[0] + PROFILE_PATH, wait=4.5)
         res = self.sync()
         _log(f"try_restore sync ok={res.get('ok')}")
@@ -395,7 +418,7 @@ class AccountService:
     def sync(self):
         if not self.win:
             return {"ok": False, "error": "no window"}
-        if self._syncing:
+        if not self._sync_lock.acquire(blocking=False):
             return {"ok": False, "state": self.snapshot(), "busy": True}
         self._syncing = True
         try:
@@ -457,14 +480,19 @@ class AccountService:
                  f"groups={len(mapped['packages'])} daily={len(mapped['daily'])}")
             return {"ok": True, "state": self.snapshot()}
         except Exception as e:
+            msg = str(e)
+            # 只有"会话不可用"才算过期。网络抖动 / 接口超时也判成过期的话，
+            # 界面会一直显示"登录已失效"，用户只能重新扫码 —— 这是误判，不是事实。
+            auth_like = any(k in msg for k in ("401", "403", "登录", "会话"))
             with self.lock:
-                self.state["status"] = "expired"
-                self.state["lastError"] = str(e)[:120]
+                self.state["status"] = "expired" if auth_like else "error"
+                self.state["lastError"] = msg[:120]
             self._save_cache()
-            _log(f"sync failed: {e}")
-            return {"ok": False, "error": str(e), "state": self.snapshot()}
+            _log(f"sync failed ({'auth' if auth_like else 'transient'}): {e}")
+            return {"ok": False, "error": msg, "state": self.snapshot()}
         finally:
             self._syncing = False
+            self._sync_lock.release()
 
     def _usage_since(self):
         """增量扫描起点（保护账号，避免每次都全量拉 30 天）。
@@ -559,12 +587,13 @@ class AccountService:
                  str(r.get("agentPurpose") or ""), rid)
 
         cutoff = (dt.date.today() - dt.timedelta(days=29)).isoformat()
-        rows = [v for v in merged.values() if str(v.get("requestTime") or "")[:10] >= cutoff]
-        rows.sort(key=lambda x: x["requestTime"], reverse=True)
-        rows = rows[:1500]
+        rows_all = [v for v in merged.values() if str(v.get("requestTime") or "")[:10] >= cutoff]
+        rows_all.sort(key=lambda x: x["requestTime"], reverse=True)
 
+        # 聚合一律用全量。以前先把 rows 截断到 1500 条再算 daily，
+        # 重度账号第 30 天那一头会被静默砍掉，日历/趋势与"已用"永远对不上。
         daily = {}
-        for r in rows:
+        for r in rows_all:
             t = str(r.get("requestTime") or "")[:10]
             if not t:
                 continue
@@ -572,7 +601,8 @@ class AccountService:
             rec["points"] = round(rec["points"] + _num(r.get("credit")), 2)
             rec["calls"] += 1
 
-        # 逐笔明细（云端口径）：换一台电脑登录同一账号，看到的也是这一份
+        # 逐笔明细（云端口径）：换一台电脑登录同一账号，看到的也是这一份。
+        # 只在这里限量 —— account.json 不能无限长，但统计口径不受这个上限影响。
         usage_rows = []
         for rid, v in merged.items():
             t = v["requestTime"]
@@ -602,7 +632,7 @@ class AccountService:
 
         # 云端按天 × 模型（用于近 7 天堆叠，优先于本地估算）
         by_day_model = {}
-        for r in rows:
+        for r in rows_all:
             t = str(r.get("requestTime") or "")[:10]
             m = str(r.get("model") or "未知模型")
             if not t:
@@ -617,7 +647,7 @@ class AccountService:
 
         # 近 30 天 × 模型（含调用次数）：模型使用量卡片的云端口径
         model_stats = {}
-        for r in rows:
+        for r in rows_all:
             m = str(r.get("model") or "未知模型")
             st = model_stats.setdefault(m, {"points": 0.0, "calls": 0})
             st["points"] += _num(r.get("credit"))
@@ -636,6 +666,13 @@ class AccountService:
                 "isToday": i == 0,
             })
 
+        # 对账：逐笔合计 vs 账号自报"周期已用"。
+        # 两者不可能完全相等（去重是启发式的、周期边界也不一定对齐），
+        # 与其假装一致，不如把差额暴露出来 —— 用户才知道这个数字有多可信。
+        rows_sum = round(sum(_num(r.get("credit")) for r in rows_all), 2)
+        drift = round(rows_sum - used, 2) if used > 0 else 0.0
+        drift_pct = round(drift / used, 4) if used > 0 else 0.0
+
         return {
             "user": dict({"plan": sm.get("SubscriptionPackageName") or "",
                           "paid": bool(sm.get("IsPaidUser"))}, **ident),
@@ -646,6 +683,9 @@ class AccountService:
                 "available": round(available, 2),
                 "total": round(total, 2),
                 "used": round(used, 2),
+                "rowsSum": rows_sum,
+                "drift": drift,
+                "driftPct": drift_pct,
                 "expireAtText": _date(expire_at),
                 "cycleStartText": cycle_start,
                 "cycleEndText": "",
@@ -692,16 +732,54 @@ class AccountService:
         return {"ok": True, "interval": self.interval_min}
 
     def logout(self):
+        """断开账号：清数据、删会话存档、关闭自动回填，并尽力清掉 profile 里的 Cookie。
+
+        以前只清了内存里的 state，session.bin 与 WebView2 profile 里的 Cookie 都还在，
+        重启后 try_restore 直接把账号又连回来了 —— 「退出登录」等于没退。
+        """
         with self.lock:
             self.state.update({"status": "disconnected", "user": None, "cloud": None,
                                "packages": [], "daily": [], "cloudWeek": None, "cloudModels": [],
-                               "lastSync": None, "lastError": None})
+                               "lastSync": None, "lastError": None, "autoLogin": False})
+            keep = {k: self.state[k] for k in ("interval", "autoLogin")}
         try:
-            if os.path.exists(CACHE):
-                os.remove(CACHE)
-        except Exception:
-            pass
+            if os.path.exists(COOKIE_FILE):
+                os.remove(COOKIE_FILE)
+                _log("logout: session.bin removed")
+        except Exception as e:
+            _log(f"logout: remove session failed {e}")
+        # 缓存只留设置项，账号数据不留在磁盘上
+        try:
+            os.makedirs(os.path.dirname(CACHE), exist_ok=True)
+            with open(CACHE, "w", encoding="utf-8") as f:
+                json.dump(keep, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            _log(f"logout: write cache failed {e}")
+        self._clear_profile_cookies()
         return {"ok": True}
+
+    def _clear_profile_cookies(self):
+        """尽力清掉登录窗所在域的 Cookie。
+
+        httpOnly 的 Cookie 由浏览器保护，脚本删不掉（会在过期后自然失效），
+        但至少把可删的都删掉、localStorage 清空，避免下次打开登录窗还是已登录态。
+        """
+        if not self.win:
+            return
+        js = """
+        (() => {
+          document.cookie.split(';').forEach(c => {
+            const n = (c.split('=')[0] || '').trim();
+            if (n) document.cookie = n + '=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/';
+          });
+          try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}
+        })();
+        """
+        try:
+            self.win.evaluate_js(js)
+            _log("logout: profile cookies cleared (best effort)")
+        except Exception as e:
+            _log(f"logout: clear cookies failed {e}")
 
     def probe(self):
         return self.sync()
