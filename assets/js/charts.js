@@ -854,9 +854,10 @@
       const base = toneColor(cfg.tone || 'c1');
       const alpha = [.075, .18, .38, .58, .78, 1];   // 0~5 级的底色浓度
       const colors = alpha.map(a => (a >= 1 ? base : hexToRgba(base, a)));   // 无消耗：极淡底色，避免"一片灰墙"
-      // 悬停联动：本体更亮一档，四周邻格轻微提亮（"被照亮"）
-      const hotColors = alpha.map((a, i) => hexToRgba(base, Math.min(1, i === 0 ? .30 : a * 1.35 + .16)));
-      const nearColors = alpha.map((a, i) => hexToRgba(base, Math.min(1, a + (i === 0 ? .07 : .13))));
+      // 悬停联动：本体只提亮一档 + 一圈很淡的环境光，邻格轻微带起
+      // （以前本体 ×1.35 + 双 drop-shadow，看起来像"贴了个发光贴纸"，太抢眼）
+      const hotColors = alpha.map((a, i) => hexToRgba(base, Math.min(1, i === 0 ? .24 : a * 1.18 + .05)));
+      const nearColors = alpha.map((a, i) => hexToRgba(base, Math.min(1, a + (i === 0 ? .04 : .07))));
 
       const fmtTokens = v => (v == null ? '—' : shortNum(v) + ' Token');
       const fmtCalls = v => (v == null ? '—' : fmt(v) + ' 次');
@@ -871,7 +872,7 @@
 
       /* ---- 悬停：光圈 + 邻格联动提亮 ---- */
       let halo = null, hot = null, touched = [];
-      const glowR = Math.max(28, cellH * 2.8);
+      const glowR = Math.max(24, cellH * 2.1);
 
       function unfocus() {
         if (hot) hot.node.classList.remove('is-hot');
@@ -963,8 +964,8 @@
       const defs = el('defs', null, svg);
       const haloId = 'gh' + (++uid);
       const haloGrad = el('radialGradient', { id: haloId }, defs);
-      el('stop', { offset: '0%', 'stop-color': base, 'stop-opacity': dark ? .46 : .28 }, haloGrad);
-      el('stop', { offset: '46%', 'stop-color': base, 'stop-opacity': dark ? .20 : .12 }, haloGrad);
+      el('stop', { offset: '0%', 'stop-color': base, 'stop-opacity': dark ? .22 : .14 }, haloGrad);
+      el('stop', { offset: '52%', 'stop-color': base, 'stop-opacity': dark ? .09 : .05 }, haloGrad);
       el('stop', { offset: '100%', 'stop-color': base, 'stop-opacity': 0 }, haloGrad);
       const layer = el('g', { 'pointer-events': 'none' }, svg);
       halo = el('circle', {
@@ -975,16 +976,15 @@
       if (play && cells.length) {
         requestAnimationFrame(() => {
           cells.forEach(c => {
-            // 对角波：从左上角（最早一天）逐格推向右下角（今天）。
-            // 延迟用 0.88 次幂压平，靠前的格子间距更匀，波前不会被"拉成台阶"。
-            const dist = Math.pow(c.col * 0.94 + c.row * 0.8, 0.88);
-            const delay = Math.min(680, dist * 13);
+            // 入场：从左往右一列推一列，只用"淡入 + 6px 上浮"，不再做缩放弹跳
+            // （原来 scale(.55)→1.035 的过冲在高密度格子上很像"一片方片在蹦"，不够克制）
+            const dist = Math.pow(c.col * 0.9 + c.row * 0.55, 0.9);
+            const delay = Math.min(380, dist * 9);
             const frames = [
-              { transform: 'scale(.55)', opacity: 0, easing: 'cubic-bezier(.2,.9,.3,1)' },
-              { transform: 'scale(1.035)', opacity: c.op, offset: .74, easing: 'cubic-bezier(.33,0,.2,1)' },
-              { transform: 'scale(1)', opacity: c.op }
+              { opacity: 0, transform: 'translateY(6px) scale(.96)' },
+              { opacity: c.op, transform: 'none' }
             ];
-            const timing = { duration: 640, delay, easing: 'linear', fill: 'backwards' };
+            const timing = { duration: 460, delay, easing: 'cubic-bezier(.22,1,.36,1)', fill: 'backwards' };
             if (c.node.animate) { c.node.animate(frames, timing); return; }
             // 兜底（极老内核）：退回 CSS 过渡
             c.node.style.transformBox = 'fill-box';

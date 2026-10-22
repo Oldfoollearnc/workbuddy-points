@@ -533,7 +533,7 @@ body.is-desktop[data-mode="popup"] .popup-card {
 .main-shell {
   position: relative;
   z-index: 1;
-  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -643,30 +643,33 @@ body.is-desktop[data-mode="popup"] .popup-card {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 0 0 14px;
+  padding: 0;                    /* 左内边距交给 .tb-brand，竖线才能精确落在侧栏边线上 */
   border-bottom: 1px solid var(--border);
   background: var(--surface-glass);
   -webkit-user-select: none;
   user-select: none;
 }
 
-/* 顶栏最左：logo + 名称 + 版本（原先这一整块是空白）
-   注意用 tb- 前缀，避免和小窗的 .brand 冲突 */
+/* 顶栏最左：logo + 名称 + 版本。
+   宽度锁定为侧边栏宽度（--sidebar-w），右描边与侧栏右描边连成一条竖线；
+   文字部分自适应收缩，窗口变窄也不会把右侧按钮挤走。 */
 .tb-brand {
   display: flex;
   align-items: center;
   gap: 8px;
   flex: none;
+  width: var(--sidebar-w);
   height: 100%;
-  padding-right: 12px;
+  padding: 0 12px 0 14px;
   border-right: 1px solid var(--border);
+  overflow: hidden;
 }
-.tb-logo { width: 24px; height: 24px; border-radius: 7px; box-shadow: var(--shadow-1); }
-.tb-text { display: flex; flex-direction: column; line-height: 1.25; }
-.tb-text b { font-size: 12px; font-weight: 650; letter-spacing: -.01em; }
-.tb-text em { font-style: normal; font-size: 9px; color: var(--text-3); white-space: nowrap; }
+.tb-logo { width: 24px; height: 24px; border-radius: 7px; box-shadow: var(--shadow-1); flex: none; }
+.tb-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.tb-text b { font-size: 12px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tb-text em { font-style: normal; font-size: 9px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.topbar-title { min-width: 0; flex: none; max-width: 210px; }
+.topbar-title { min-width: 0; flex: 1 1 auto; max-width: 320px; }
 .topbar-title h1 { font-size: 15px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topbar-title p { font-size: 10.5px; color: var(--text-3); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -840,19 +843,23 @@ body.is-dragging .topbar { cursor: default; }
 .chart svg { display: block; overflow: visible; }
 .chart text { font-family: var(--font-sans); }
 
-/* 日历热力格：悬停时本体放大 + 外发光，邻格联动提亮，另有一圈向外扩散的光圈 */
+/* 日历热力格：悬停只做两件事 —— 一格很淡的提亮 + 一圈细描边。
+   以前是放大 16% 加双层外发光，太抢眼，也把相邻格子的信息盖住了。 */
 .cal-cell {
   transform-box: fill-box;
   transform-origin: center;
-  transition: fill 170ms var(--ease-out), transform 200ms var(--ease-out),
-              opacity 200ms linear, filter 200ms var(--ease-out);
+  stroke: var(--brand);
+  stroke-width: 1;
+  stroke-opacity: 0;
+  transition: fill 170ms var(--ease-out), transform 220ms var(--ease-out),
+              opacity 200ms linear, stroke-opacity 170ms var(--ease-out);
   cursor: default;
 }
 .cal-cell.is-hot {
-  transform: scale(1.16);
-  filter: drop-shadow(0 0 3px var(--brand)) drop-shadow(0 0 9px var(--brand));
+  transform: scale(1.04);
+  stroke-opacity: .45;
 }
-.cal-halo { transition: opacity 190ms var(--ease-out); }
+.cal-halo { transition: opacity 220ms var(--ease-out); }
 html[data-motion="off"] .cal-cell { transition: none; }
 html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
 

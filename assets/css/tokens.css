@@ -9,6 +9,9 @@
   --font-sans: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, -apple-system, sans-serif;
   --font-mono: "Cascadia Mono", "Consolas", "SFMono-Regular", ui-monospace, monospace;
 
+  /* 侧边栏宽度：顶栏左上角的分隔竖线必须落在同一条线上，两处共用这个值 */
+  --sidebar-w: 232px;
+
   /* 画布 */
   --bg: #eef3fc;
   --bg-soft: #f7faff;
