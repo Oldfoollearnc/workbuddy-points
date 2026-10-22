@@ -1014,12 +1014,7 @@
     }
     setText('#popUsedPct', configured ? (acc.usedPct * 100).toFixed(1) + '%' : '未设置');
 
-    // 延迟说明：云端多久之前同步的
-    const syncAt = ACCOUNT && ACCOUNT.lastSync ? new Date(String(ACCOUNT.lastSync).replace(' ', 'T')) : null;
-    const mins = syncAt && !isNaN(syncAt.getTime()) ? Math.max(0, Math.round((Date.now() - syncAt.getTime()) / 60000)) : null;
-    setText('#popSyncAt', mins == null ? '尚未同步'
-      : mins < 1 ? '刚刚' : mins < 60 ? `${mins} 分钟前` : `${Math.floor(mins / 60)} 小时前`);
-
+    // 同步时间不再单独占一行（小窗要留给数字和图表），只在"同步云端"按钮上体现
     const al = allowance(acc);
     setText('#popCycle', configured
       ? `剩 ${leftDaysText(al)} · 每日约 ${F.credit(al.perDay)}`
@@ -1243,7 +1238,10 @@
     else if (kind === 'cycle') { used = cycleUsed; budget = Math.max(1, cycleUsed + cycleLeft); }
     else { used = quotaWindow('week').sum; budget = al.perWeek; }
 
-    const pct = budget > 0 ? Math.min(1, used / budget) : 0;
+    const rawPct = budget > 0 ? used / budget : 0;
+    const pct = Math.min(1, rawPct);
+    // 超支/接近上限时，仪表盘换色（蓝 → 琥珀 → 红），不再"用超了还是一片安心绿"
+    const tone = rawPct >= 1 ? 'over' : rawPct >= 0.85 ? 'warn' : 'ok';
     const over = Math.max(0, used - budget);
     const sub = !configured ? '点头像连接账号'
       : kind === 'cycle' ? `周期剩余 ${F.credit(cycleLeft)} · 已用 ${F.credit(cycleUsed)}`
@@ -1255,6 +1253,8 @@
     if (gaugeEl) {
       gaugeEl.__draw = () => C.gauge(gaugeEl, {
         value: configured ? pct : 0,
+        countTo: configured ? rawPct : 0,
+        tone: configured ? tone : 'ok',
         label: configured ? `${lb}已用` : '未连接云端',
         sub
       });

@@ -720,9 +720,14 @@
 
       const gid = 'gg' + (++uid);
       const grad = el('linearGradient', { id: gid, x1: 0, y1: 1, x2: 1, y2: 0 }, el('defs', null, svg));
-      el('stop', { offset: '0%', 'stop-color': token('--brand', '#2563eb') }, grad);
-      el('stop', { offset: '60%', 'stop-color': token('--c2', '#22d3ee') }, grad);
-      el('stop', { offset: '100%', 'stop-color': token('--c4', '#f59e0b') }, grad);
+      // 弧线颜色跟着用量走：够用=蓝，接近=琥珀，超了=红
+      const TONE = {
+        ok: [token('--brand', '#2563eb'), token('--c2', '#22d3ee')],
+        warn: [token('--c4', '#f59e0b'), '#f97316'],
+        over: [token('--bad', '#dc2626'), '#ef4444']
+      }[cfg.tone || 'ok'];
+      el('stop', { offset: '0%', 'stop-color': TONE[0] }, grad);
+      el('stop', { offset: '100%', 'stop-color': TONE[1] }, grad);
 
       const valPath = el('path', { d: arc(start, start + 0.001), fill: 'none', stroke: `url(#${gid})`, 'stroke-width': 11, 'stroke-linecap': 'round' }, svg);
 
@@ -730,7 +735,10 @@
       txt(svg, cx, cy - r * 0.34, cfg.label || '本周期已用', 'center-sub');
       const big = txt(svg, cx, cy + r * 0.14, '0%', 'center-main');
       big.style.fontSize = Math.max(22, Math.min(34, r * 0.42)) + 'px';
-      txt(svg, cx, cy + r * 0.14 + Math.max(14, r * 0.16), cfg.sub !== undefined ? cfg.sub : `余 ${cfg.remain !== undefined ? cfg.remain : '—'} 天`, 'center-unit');
+      if (cfg.tone === 'over') big.style.fill = token('--bad', '#dc2626');
+      else if (cfg.tone === 'warn') big.style.fill = token('--warn', '#d97706');
+      const subNode = txt(svg, cx, cy + r * 0.14 + Math.max(14, r * 0.16), cfg.sub !== undefined ? cfg.sub : `余 ${cfg.remain !== undefined ? cfg.remain : '—'} 天`, 'center-unit');
+      if (cfg.tone === 'over') subNode.style.fill = token('--bad', '#dc2626');
 
       // 端点刻度
       txt(svg, cx + Math.cos(start) * (r + 2), cy + Math.sin(start) * (r + 2) + 15, '0%', 'ax-label');
@@ -740,7 +748,9 @@
         const e = easeOut(p);
         const v = pctVal * e;
         valPath.setAttribute('d', v <= 0.001 ? arc(start, start + 0.001) : arc(start, start + sweep * v));
-        big.textContent = (v * 100).toFixed(1) + '%';
+        // 弧长封顶在 100%，但数字照实显示（超支时能看到 118%）
+        const shown = (cfg.countTo != null ? cfg.countTo : pctVal) * e;
+        big.textContent = (shown * 100).toFixed(shown > 1 ? 0 : 1) + '%';
       }, 60);
     });
   }
@@ -984,10 +994,12 @@
 
       if (play && cells.length) {
         requestAnimationFrame(() => {
+          // 多米诺：整条波按"总时长"分摊到每一列，而不是给每列一个固定步长再封顶 ——
+          // 之前封顶 620ms，列数一多后半段全挤在 620ms 同时出现，看起来就是"推一半瞬间全亮"。
+          const colStep = Math.min(58, 820 / Math.max(1, weeks - 1));
+          const rowStep = colStep * 0.16;
           cells.forEach(c => {
-            // 多米诺：一列推一列（列间 55ms），列内再按行错开 10ms；
-            // 每格从上方轻轻落下来，落定时有一点点回弹，像牌被推倒后归位。
-            const delay = Math.min(620, c.col * 55 + c.row * 10);
+            const delay = c.col * colStep + c.row * rowStep;   // 左上角第一张牌 = 0ms
             const frames = [
               { opacity: 0, transform: 'translateY(-9px) scale(.9)' },
               { opacity: c.op, transform: 'translateY(1px) scale(1.02)', offset: .7 },
