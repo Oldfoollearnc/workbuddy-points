@@ -84,6 +84,9 @@ user32.GetWindowLongW.restype = ctypes.c_long
 user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
 user32.SetWindowLongW.restype = ctypes.c_long
 
+# 同一个前端脚本只记录一次失败，避免启动阶段刷屏
+_js_fail_seen = set()
+
 LOGIN_TITLE = "WorkBuddy 账号登录"
 WM_SETICON = 0x0080
 IMAGE_ICON = 1
@@ -856,11 +859,20 @@ class Desktop:
 
     @staticmethod
     def _safe_js(win, code):
+        """执行前端脚本，失败不再静默。
+
+        以前这里 except 之后什么都不做，结果"图表动画被关掉""钩子没生效"这类问题
+        在日志里一点痕迹都没有，只能靠肉眼发现。现在第一次失败会落一条日志
+        （同一个脚本只记一次，避免启动阶段刷屏）。
+        """
         try:
             if win:
                 win.evaluate_js(code)
-        except Exception:
-            pass
+        except Exception as e:
+            key = str(code)[:60]
+            if key not in _js_fail_seen:
+                _js_fail_seen.add(key)
+                log(f"js eval failed: {e} | {key}")
 
     # ---------- 托盘 ----------
 

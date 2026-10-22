@@ -87,6 +87,18 @@
     try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) { /* file:// 忽略 */ }
   }
 
+  /* 界面运行态集中在这里。
+     以前是 6 个散落的 let（主题、日历签名、流水签名、入场屏蔽…），
+     查一个问题要在两千行里来回翻，还容易漏改。 */
+  const ui = {
+    lastPainted: null,     // 上次真正落地的主题
+    themeTimer: null,
+    lastCalSig: '',        // 日历重绘签名
+    lastLedgerSig: '',     // 流水行内容签名
+    enterUntil: 0,         // 小窗入场期间屏蔽重绘的截止时刻
+    enterTimer: 0
+  };
+
   const systemDark = () => window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
   const resolved = () => (prefs.theme === 'system' ? (systemDark() ? 'dark' : 'light') : prefs.theme);
   const motionOff = () => prefs.motion === 'off';
@@ -123,6 +135,21 @@
   let source = 'demo';
   let ready = false;
   let ACCOUNT = { status: 'disconnected', cloud: null, interval: 60 };
+
+  /* 口径计算全部在 metrics.js（纯函数、可单测）；这里注入实时数据源。
+     下面按原名绑定，调用点一行都不用改。 */
+  const Metrics = window.Metrics;
+  Metrics.configure({
+    data: () => D,
+    account: () => ACCOUNT,
+    prefs: () => prefs
+  });
+  const {
+    startOfDay, addDays, diffDays, parseDate, dayKeyOf, round2,
+    isWorkday, countWorkdays, allowance, leftDaysText,
+    cloudRows, rowTime, lastSyncMs, localTail,
+    todayStat, dailySeries, pendingSinceSync, effAccount, quotaWindow
+  } = Metrics;
 
   function normalize(raw) {
     const d = raw || {};
@@ -192,271 +219,8 @@
 
   /* ---------------- 可用额度折算（工作日 / 签到） ---------------- */
 
-  function startOfDay(d) { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
-  function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
-  function diffDays(a, b) { return Math.round((startOfDay(b) - startOfDay(a)) / 86400000); }
-  function parseDate(v) {
-    if (!v) return null;
-    const s = String(v).trim();
-    let m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
-    if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
-    // 云端返回的有效期是 "11-19" 这种不带年份的格式（_date() 只取 MM-DD）。
-    // 以前只认 yyyy-mm-dd，于是永远解析失败、回退成"今天 +30 天"，
-    // 折算天数偏大、每日可用被压低，才会出现"明明够用却显示超支"。
-    m = s.match(/^(\d{1,2})-(\d{1,2})$/);
-    if (m) {
-      const now = new Date();
-      let d = new Date(now.getFullYear(), +m[1] - 1, +m[2]);
-      if (d < startOfDay(now)) d = new Date(now.getFullYear() + 1, +m[1] - 1, +m[2]);
-      return d;
-    }
-    return null;
-  }
-  /** 折算日判定。
-   *  「工作日折算」开 = 只算工作日（剔除周末与法定节假日）；
-   *  关 = 按自然日算（每天都可花），这样才能看出开关的差别 ——
-   *  以前关掉只是"不剔除法定节假日"，遇到没有节假日的月份就跟开着完全一样。 */
-  function isWorkday(d, useHoliday) {
-    if (!useHoliday) return true;
-    const w = d.getDay();
-    if (w === 0 || w === 6) return false;
-    if (window.HOLIDAYS && HOLIDAYS.has(d)) return false;
-    return true;
-  }
-  function countWorkdays(from, to, useHoliday) {
-    let n = 0;
-    for (let d = startOfDay(from); d <= startOfDay(to); d = addDays(d, 1)) {
-      if (isWorkday(d, useHoliday)) n++;
-    }
-    return n;
-  }
-
-  /** 按"剩余工作日"折算每天/每周可用积分 */
-  function allowance(acc) {
-    const total = acc.total || 0;
-    const available = acc.available || 0;
-    const end = parseDate(acc.expireAt) || addDays(new Date(), 30);
-    const today = startOfDay(new Date());
-    const leftDays = Math.max(1, diffDays(today, end) + 1);
-    const holidayOn = prefs.holiday !== false;
-    // 关闭折算时"可花天数"就是自然日数
-    const spendDays = Math.max(1, countWorkdays(today, end, holidayOn));
-    const signinOn = prefs.signin !== false;
-    // 签到每天都有（含周末），所以按自然日累加
-    const signin = signinOn ? Math.max(0, 100 * leftDays) : 0;
-    const pool = available + signin;
-    const perDay = pool / spendDays;
-    const weekSpan = holidayOn ? 5 : 7;
-    const perWeek = perDay * Math.min(weekSpan, spendDays);
-    return {
-      perDay, perWeek, leftDays, spendDays, holidayOn,
-      leftWorkdays: spendDays,          // 兼容旧字段名（旧代码按"工作日"理解）
-      pool, signin, end, total, available
-    };
-  }
-
-  /** "剩余 22 个工作日" / "剩余 31 天" 的统一说法 */
-  const leftDaysText = al => (al.holidayOn ? `${al.spendDays} 个工作日` : `${al.spendDays} 天`);
-
-  /* ---------------- 今日口径：统一以云端流水为准 ---------------- */
-
-  const round2 = v => Math.round((Number(v) || 0) * 100) / 100;
-  const dayKeyOf = d => `${d.getFullYear()}-${F.pad(d.getMonth() + 1)}-${F.pad(d.getDate())}`;
-
-  /** 可用的云端逐笔（积分流水）。没有它就退回本机记录。 */
-  function cloudRows() {
-    const a = ACCOUNT || {};
-    return (a.status === 'connected' && Array.isArray(a.usageRows) && a.usageRows.length) ? a.usageRows : null;
-  }
-
-  const rowTime = r => new Date(String((r && r.t) || '').replace(' ', 'T'));
-
-  /** 上次云端同步的时刻（毫秒）；没同步过返回 0 */
-  function lastSyncMs() {
-    const s = ACCOUNT && ACCOUNT.lastSync;
-    if (!s) return 0;
-    const t = new Date(String(s).replace(' ', 'T')).getTime();
-    return isNaN(t) ? 0 : t;
-  }
-
-  /**
-   * 上次同步之后、本机新增的逐笔。
-   * 云端一小时才拉一次，这段时间花的积分云端还没有，界面必须靠本机补上，
-   * 否则流水表和今日消耗会一直停在同步那一刻（用户看到的就是"刷新没反应"）。
-   */
-  function localTail() {
-    const since = lastSyncMs();
-    const src = D.ledger || [];
-    if (!since) return src.slice();
-    return src.filter(e => {
-      const t = (e.time instanceof Date ? e.time : new Date(e.time)).getTime();
-      return !isNaN(t) && t > since;
-    });
-  }
-
-  /**
-   * 今日消耗/调用/时段/模型构成：**一个数据源**。
-   *
-   * 之前总览与小窗用本机 JSONL 求和、积分流水页用云端逐笔求和，分母不同，
-   * 用户看到的就是"今日消耗 ≠ 流水合计"。这里统一成：连上云端就全部取云端
-   * 逐笔（与积分流水页逐行相加完全相等），未连接才退回本机记录。
-   * Token 云端不返回，只能仍取本机，界面上单独标注。
-   */
-  function todayStat() {
-    const rows = cloudRows();
-    if (rows) {
-      const now = new Date();
-      const todayKey = dayKeyOf(now);
-      const yestKey = dayKeyOf(addDays(now, -1));
-      const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h, points: 0, requests: 0 }));
-      const map = new Map();
-      let sum = 0, calls = 0, yday = 0;
-      const fold = (d, credit, model) => {
-        const hb = hours[d.getHours()];
-        hb.points += credit; hb.requests += 1;
-        const name = model || '未知模型';
-        const m = map.get(name) || { name, points: 0, calls: 0 };
-        m.points += credit; m.calls += 1;
-        map.set(name, m);
-        sum += credit; calls += 1;
-      };
-      rows.forEach(r => {
-        const d = rowTime(r);
-        if (isNaN(d.getTime())) return;
-        const credit = Number(r.credit) || 0;
-        const key = dayKeyOf(d);
-        if (key === yestKey) yday += credit;
-        if (key !== todayKey) return;
-        fold(d, credit, r.model);
-      });
-      // 同步之后本机又花的：云端没有，但积分确实扣了 —— 必须补进来，
-      // 这样"今日消耗"才等于流水表里今天各行的合计（表里同样包含这一截）。
-      localTail().forEach(e => {
-        const d = e.time instanceof Date ? e.time : new Date(e.time);
-        if (isNaN(d.getTime())) return;
-        const key = dayKeyOf(d);
-        const credit = Number(e.points) || 0;
-        if (key === yestKey) { yday += credit; return; }
-        if (key !== todayKey) return;
-        fold(d, credit, e.model);
-      });
-      const models = Array.from(map.values()).sort((a, b) => b.points - a.points);
-      models.forEach((m, i) => { m.points = round2(m.points); m.tone = 'c' + ((i % 6) + 1); });
-      hours.forEach(h => { h.points = round2(h.points); });
-      const peak = hours.reduce((a, b) => (b.points > a.points ? b : a), hours[0]);
-      return {
-        cloud: true,
-        consumed: round2(sum),
-        requests: calls,
-        tokens: (D.today && D.today.tokens) || 0,   // 云端逐笔不含 Token，仍取本机
-        avgPerRequest: calls ? sum / calls : 0,
-        deltaPct: yday ? (sum / yday - 1) * 100 : 0,
-        hours, models,
-        peakHour: peak ? peak.hour : 0,
-        peakPoints: peak ? peak.points : 0
-      };
-    }
-
-    const t = D.today || {};
-    const hours = Array.from({ length: 24 }, (_, h) => {
-      const src = (D.hourly || []).find(x => x.hour === h) || {};
-      return { hour: h, points: src.points || 0, requests: src.requests || 0 };
-    });
-    return {
-      cloud: false,
-      consumed: t.consumed || 0,
-      requests: t.requests || 0,
-      tokens: t.tokens || 0,
-      avgPerRequest: t.avgPerRequest || 0,
-      deltaPct: t.deltaPct || 0,
-      hours,
-      models: (D.models || []).map(m => ({ name: m.name, points: m.points, calls: m.calls, tone: m.tone })),
-      peakHour: D.peakHour || 0,
-      peakPoints: D.peakPoints || 0
-    };
-  }
-
-  /** 近 N 天每日消耗：今天用实时合并值，其余优先云端逐日，云端没有才退本机。
-   *  以前整条趋势只读本机 D.daily，换机或本机记录缺失时就会比云端少一截。 */
-  function dailySeries(n) {
-    const stat = todayStat();
-    const cmap = {};
-    if (ACCOUNT && ACCOUNT.status === 'connected' && Array.isArray(ACCOUNT.daily)) {
-      ACCOUNT.daily.forEach(d => { if (d && d.date) cmap[d.date] = d.points || 0; });
-    }
-    const lmap = {};
-    const year = new Date().getFullYear();
-    (D.daily || []).forEach(d => { if (d.date) lmap[`${year}-${d.date}`] = d.consumed || 0; });
-    const out = [];
-    for (let i = n - 1; i >= 0; i--) {
-      const d = addDays(new Date(), -i);
-      const key = dayKeyOf(d);
-      let v;
-      if (i === 0) v = stat.consumed;                    // 今天：云端 + 同步后本机
-      else if (cmap[key] != null) v = cmap[key];         // 历史：云端逐日为准
-      else v = lmap[key] || 0;
-      out.push({
-        date: key.slice(5),
-        consumed: Math.round(v * 100) / 100,
-        weekday: '日一二三四五六'[d.getDay()]
-      });
-    }
-    return out;
-  }
-
-  const PENDING_MAX_H = 72;   // 服务端只带回最近 72 小时的本地逐笔，超出就不做补偿
-
-  /**
-   * 上次云端同步之后，本机又消耗了多少分（云端还没入账的部分）。
-   * 云端 available 是同步那一刻的快照，扣掉这段增量才是"此刻"的可用积分。
-   */
-  function pendingSinceSync() {
-    if (!ACCOUNT || ACCOUNT.status !== 'connected' || !ACCOUNT.lastSync) return 0;
-    const since = new Date(String(ACCOUNT.lastSync).replace(' ', 'T')).getTime();
-    if (!since || isNaN(since)) return 0;
-    if (Date.now() - since > PENDING_MAX_H * 3600000) return 0;   // 窗口不全，宁可不补
-    // 优先用服务端带回的 72 小时时间线；万一缓存还是旧结构，就用本机流水兜底，
-    // 保证"同步后已花"这个数不会因为缺字段而恒等于 0。
-    const src = (D.recent && D.recent.length)
-      ? D.recent
-      : (D.ledger || []).map(e => [new Date(e.time).getTime(), Number(e.points) || 0]);
-    let sum = 0;
-    src.forEach(r => { if (r[0] > since) sum += Number(r[1]) || 0; });
-    return round2(sum);
-  }
-
-  /** 云端账户优先，本地记录兜底 */
-  function effAccount() {
-    const base = (D && D.account) || {};
-    const c = (ACCOUNT && ACCOUNT.status === 'connected' && ACCOUNT.cloud) ? ACCOUNT.cloud : null;
-    if (!c || (c.total == null && c.available == null && c.used == null)) return base;
-    const total = (c.total != null) ? c.total : base.total;
-    const used = (c.used != null) ? c.used
-      : (total != null && c.available != null ? Math.max(0, total - c.available) : base.used);
-    const available = (c.available != null) ? c.available
-      : Math.max(0, (total || 0) - (used || 0));
-    const configured = !!(total > 0);
-    // 关键修正：余额减去"同步后本地新增消耗"，避免界面上的可用积分一直停在旧快照
-    const pending = pendingSinceSync();
-    const liveAvailable = Math.max(0, available - pending);
-    const liveUsed = Math.max(0, used + pending);
-    return Object.assign({}, base, {
-      total, used: liveUsed, available: liveAvailable, configured,
-      pending,
-      cloudAvailable: available,
-      cloudUsed: used,
-      usedPct: configured ? Math.min(1, liveUsed / total) : 0,
-      cycleStart: c.cycleStartText || base.cycleStart || '',
-      cycleEnd: c.cycleEndText || base.cycleEnd || '',
-      expireAt: c.expireAtText || '',
-      source: 'cloud'
-    });
-  }
-
   /* ---------------- 主题 ---------------- */
 
-  let lastPainted = null;      // 上次真正落地的主题（此前漏声明，strict 模式下 paintTheme 首行即抛错）
-  let themeTimer = null;
 
   /**
    * 主题切换：240ms 纯交叉溶解（View Transitions），不缩放、不扩散。
@@ -471,7 +235,7 @@
     const next = pref === 'system' ? (systemDark() ? 'dark' : 'light') : pref;
     const commit = () => {
       paintTheme(next, true);
-      clearTimeout(themeTimer);
+      clearTimeout(ui.themeTimer);
       renderActive(true);
     };
     if (!animate || motionOff() || typeof document.startViewTransition !== 'function') {
@@ -486,12 +250,12 @@
       if (vt && vt.finished) {
         vt.finished.catch(() => {}).finally(() => {
           once();
-          clearTimeout(themeTimer);
-          themeTimer = setTimeout(() => renderActive(true), 40);
+          clearTimeout(ui.themeTimer);
+          ui.themeTimer = setTimeout(() => renderActive(true), 40);
         });
       }
-      clearTimeout(themeTimer);
-      themeTimer = setTimeout(() => renderActive(true), 320);
+      clearTimeout(ui.themeTimer);
+      ui.themeTimer = setTimeout(() => renderActive(true), 320);
     } catch (e) {
       once();
       setTimeout(() => renderActive(true), 30);
@@ -499,8 +263,8 @@
   }
 
   function paintTheme(theme, skipRender, fromSync) {
-    if (theme === lastPainted && fromSync) return;   // 被动同步且无变化：直接忽略
-    lastPainted = theme;
+    if (theme === ui.lastPainted && fromSync) return;   // 被动同步且无变化：直接忽略
+    ui.lastPainted = theme;
     document.documentElement.setAttribute('data-theme', theme);
     const targetIcon = theme === 'dark' ? '#i-sun' : '#i-moon';
     $$('#themeBtn use, #popTheme use').forEach(u => u.setAttribute('href', targetIcon));
@@ -512,8 +276,8 @@
       card.classList.toggle('is-active', card.dataset.themeChoice === prefs.theme);
     });
     // 图表颜色全部来自 CSS 变量：主题一变必须重绘，否则会出现"深色底 + 浅色旧图"
-    clearTimeout(themeTimer);
-    themeTimer = setTimeout(() => renderActive(true), skipRender ? 90 : 60);
+    clearTimeout(ui.themeTimer);
+    ui.themeTimer = setTimeout(() => renderActive(true), skipRender ? 90 : 60);
     if (!fromSync) bridge.syncTheme(theme);          // 只有主动切换才通知另一端
   }
 
@@ -554,7 +318,7 @@
     });
     savePrefs();
     document.documentElement.setAttribute('data-motion', prefs.motion);
-    if (themeChanged) { lastPainted = null; paintTheme(resolved(), true, true); }
+    if (themeChanged) { ui.lastPainted = null; paintTheme(resolved(), true, true); }
     if (state.mode === 'main') renderSettings();
     renderQuotaSurfaces();
     return true;
@@ -579,7 +343,7 @@
     const changed = prefsFromStore();
     document.documentElement.setAttribute('data-motion', prefs.motion);
     if (changed) {
-      lastPainted = null;
+      ui.lastPainted = null;
       paintTheme(resolved(), true, true);
     }
     // 上次"收成小窗"的退场动画会留下 opacity:0，必须在重新显示前撤销
@@ -676,11 +440,9 @@
    *
    * 两个细节决定"丝不丝滑"：
    * 1) 用双 rAF 把动画推到 beforeShow 的重绘**之后**再起，否则起手就掉一帧；
-   * 2) 动画期间（enterUntil）屏蔽外部触发的重绘——可见性变化、定时刷新都会来抢主线程，
+   * 2) 动画期间（ui.enterUntil）屏蔽外部触发的重绘——可见性变化、定时刷新都会来抢主线程，
    *    中途重排一次，动画就"卡一下"。
    */
-  let enterUntil = 0;
-  let enterTimer = 0;
 
   function enterPopup() {
     const reduced = prefs.motion === 'reduced';
@@ -714,10 +476,10 @@
       const popChart = $('[data-chart="popHourly"]');
       if (popChart) replayChart(popChart);
       const total = reduced ? 240 : 620;
-      enterUntil = performance.now() + total;
-      clearTimeout(enterTimer);
-      enterTimer = setTimeout(() => {
-        enterUntil = 0;
+      ui.enterUntil = performance.now() + total;
+      clearTimeout(ui.enterTimer);
+      ui.enterTimer = setTimeout(() => {
+        ui.enterUntil = 0;
         renderActive(true);      // 动画结束后补一次渲染，把这段时间被挡下的更新落上去
       }, total + 20);
     };
@@ -780,7 +542,6 @@
   }
 
   let lastRender = -1e9;
-  let lastCalSig = '';
 
   /* ---------------- 图表入场：只在"看得见"的时候长起来 ---------------- */
 
@@ -819,13 +580,13 @@
     $$('[data-chart]').forEach(el => { delete el.dataset.played; });
     const cal = $('[data-chart="calendar"]');
     if (cal) delete cal.dataset.calPlayed;
-    lastCalSig = '';
+    ui.lastCalSig = '';
   }
 
   function renderActive(force) {
     // 小窗入场期间不接受外部触发的重绘：可见性变化、定时刷新都会抢主线程，
     // 中途重排一次动画就"卡一下"。动画结束后由 enterPopup 统一补渲染。
-    if (state.mode === 'popup' && performance.now() < enterUntil) return;
+    if (state.mode === 'popup' && performance.now() < ui.enterUntil) return;
     const now = performance.now();
     if (!force && now - lastRender < 250) return;
     lastRender = now;
@@ -1040,7 +801,7 @@
     const popAvailEl = $('#popAvailable');
     if (popAvailEl) {
       popAvailEl.title = (acc.source === 'cloud')
-        ? `云端余额 ${F.credit(acc.cloudAvailable)} − 同步后本机已花 ${F.credit(acc.pending)} = ${F.credit(acc.available)}`
+        ? `云端余额 ${F.credit(acc.cloudAvailable)} − 同步后本机已花 ${F.credit(acc.pending)}（下限）= ${F.credit(acc.available)}`
         : '可用积分来自本地记录';
     }
     setText('#popUsedPct', configured ? (acc.usedPct * 100).toFixed(1) + '%' : '未设置');
@@ -1131,7 +892,7 @@
     const availChip = $('#kpiAvailSub');
     if (availChip) availChip.title = (acc.source === 'cloud')
       ? `可用积分 = 云端余额 ${F.credit(acc.cloudAvailable)} − 上次同步（${syncedAt || '—'}）之后本机已消耗 ${F.credit(acc.pending)}。`
-        + '云端入账有延迟，先扣掉这段才是此刻真实可用。'
+        + '云端入账有延迟，先扣掉这段才接近此刻的真实可用；本机记录可能不全，实际未入账只会更多。'
       : '可用积分来自本地记录（未连接云端）';
 
     countUp($('[data-count="todayUsed"]'), stat.consumed, { format: F.credit });
@@ -1215,46 +976,6 @@
   const QUOTA_LABEL = { day: '今日', week: '本周', cycle: '本期' };
 
   /** 区间内已消耗多少分：云端优先（与流水同源），否则回退 D.daily（只带 MM-DD） */
-  function quotaWindow(kind) {
-    const now = new Date();
-    let from;
-    if (kind === 'day') {
-      from = startOfDay(now);
-    } else if (kind === 'month') {
-      from = new Date(now.getFullYear(), now.getMonth(), 1);
-    } else {
-      const wd = (now.getDay() + 6) % 7;          // 周一为 0
-      from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - wd);
-    }
-
-    const rows = cloudRows();
-    if (rows) {
-      let sum = 0;
-      rows.forEach(r => {
-        const t = rowTime(r);
-        if (!isNaN(t.getTime()) && t >= from && t <= now) sum += Number(r.credit) || 0;
-      });
-      // 同步后的本机逐笔同样要算进来，和总览的今日/本周保持同一口径
-      localTail().forEach(e => {
-        const t = e.time instanceof Date ? e.time : new Date(e.time);
-        if (!isNaN(t.getTime()) && t >= from && t <= now) sum += Number(e.points) || 0;
-      });
-      return { sum: round2(sum), from };
-    }
-
-    const mk = s => {
-      const m = /^(\d{1,2})-(\d{1,2})$/.exec(String(s || ''));
-      return m ? new Date(now.getFullYear(), +m[1] - 1, +m[2]) : null;
-    };
-    let sum = 0;
-    (D.daily || []).forEach(d => {
-      const t = mk(d.date);
-      if (t && t >= from && t <= now) sum += d.consumed;
-    });
-    if (kind === 'day' && !sum) sum = (D.today && D.today.consumed) || 0;
-    return { sum, from };
-  }
-
   /** 环图的"额度"跟着区间走：今日=每日可用，本周=本周可用，本期=总额度（副标题显示周期剩余）
    *  底部三项统计按数值从小到大排列，不随切换变化。 */
   function renderQuotaCard(acc, configured) {
@@ -1459,8 +1180,8 @@
         glow: prefs.calGlow !== false,        // 悬停光圈 + 邻格联动
         animate: prefs.calIntro !== false     // 入场多米诺
       });
-      if (calSig !== lastCalSig) {
-        lastCalSig = calSig;
+      if (calSig !== ui.lastCalSig) {
+        ui.lastCalSig = calSig;
         calBox.__draw();       // 同步画：视图已经 display 了，量得到宽度；异步会和 replay 抢
       }
     }
@@ -1582,7 +1303,6 @@
 
   let ledgerSource = 'local';
   let ledgerCounts = { cloud: 0, local: 0 };   // 数据源条数（不受筛选影响，用于说明文案）
-  let lastLedgerSig = '';                      // 行内容签名：没变就不重建，避免定时刷新重播动画
 
   function ledgerRows() {
     const q = state.ledgerQuery.trim().toLowerCase();
@@ -1648,8 +1368,8 @@
       ledgerSource,
       rows.map(e => `${e.id}|${new Date(e.time).getTime()}|${e.points}`).join(',')
     ].join('|');
-    const rebuild = ledgerSig !== lastLedgerSig;
-    lastLedgerSig = ledgerSig;
+    const rebuild = ledgerSig !== ui.lastLedgerSig;
+    ui.lastLedgerSig = ledgerSig;
 
     if (!rebuild) {
       /* 内容未变：保留现有 DOM */
@@ -1839,7 +1559,7 @@
     }
 
     // 上次同步 / 间隔（渲染只回填值，事件在 bind 里只绑一次）
-    const pendingTxt = (hasCloud && acc.pending > 0.005) ? ` · 同步后已花 ${F.credit(acc.pending)} 分` : '';
+    const pendingTxt = (hasCloud && acc.pending > 0.005) ? ` · 同步后已花 ${F.credit(acc.pending)} 分（下限）` : '';
     setText('#accLastSync', ACCOUNT.lastSync
       ? ACCOUNT.lastSync + pendingTxt + (ACCOUNT.lastError ? ' · 异常：' + ACCOUNT.lastError : '')
       : '尚未同步');
@@ -1938,7 +1658,7 @@
     resetChartPlayed();
     if (view === 'ledger') {          // 流水页每次进来重新展开、重新入场
       state.ledgerLimit = 24;
-      lastLedgerSig = '';
+      ui.lastLedgerSig = '';
     }
     // 整块内容做一次轻微的"落定"，避免旧页瞬间消失、新页直接怼上来
     const viewsBox = $('#views');
