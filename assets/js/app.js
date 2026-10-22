@@ -260,6 +260,29 @@
 
   const rowTime = r => new Date(String((r && r.t) || '').replace(' ', 'T'));
 
+  /** 上次云端同步的时刻（毫秒）；没同步过返回 0 */
+  function lastSyncMs() {
+    const s = ACCOUNT && ACCOUNT.lastSync;
+    if (!s) return 0;
+    const t = new Date(String(s).replace(' ', 'T')).getTime();
+    return isNaN(t) ? 0 : t;
+  }
+
+  /**
+   * 上次同步之后、本机新增的逐笔。
+   * 云端一小时才拉一次，这段时间花的积分云端还没有，界面必须靠本机补上，
+   * 否则流水表和今日消耗会一直停在同步那一刻（用户看到的就是"刷新没反应"）。
+   */
+  function localTail() {
+    const since = lastSyncMs();
+    const src = D.ledger || [];
+    if (!since) return src.slice();
+    return src.filter(e => {
+      const t = (e.time instanceof Date ? e.time : new Date(e.time)).getTime();
+      return !isNaN(t) && t > since;
+    });
+  }
+
   /**
    * 今日消耗/调用/时段/模型构成：**一个数据源**。
    *
@@ -277,6 +300,15 @@
       const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h, points: 0, requests: 0 }));
       const map = new Map();
       let sum = 0, calls = 0, yday = 0;
+      const fold = (d, credit, model) => {
+        const hb = hours[d.getHours()];
+        hb.points += credit; hb.requests += 1;
+        const name = model || '未知模型';
+        const m = map.get(name) || { name, points: 0, calls: 0 };
+        m.points += credit; m.calls += 1;
+        map.set(name, m);
+        sum += credit; calls += 1;
+      };
       rows.forEach(r => {
         const d = rowTime(r);
         if (isNaN(d.getTime())) return;
@@ -284,13 +316,18 @@
         const key = dayKeyOf(d);
         if (key === yestKey) yday += credit;
         if (key !== todayKey) return;
-        sum += credit; calls += 1;
-        const hb = hours[d.getHours()];
-        hb.points += credit; hb.requests += 1;
-        const name = r.model || '未知模型';
-        const m = map.get(name) || { name, points: 0, calls: 0 };
-        m.points += credit; m.calls += 1;
-        map.set(name, m);
+        fold(d, credit, r.model);
+      });
+      // 同步之后本机又花的：云端没有，但积分确实扣了 —— 必须补进来，
+      // 这样"今日消耗"才等于流水表里今天各行的合计（表里同样包含这一截）。
+      localTail().forEach(e => {
+        const d = e.time instanceof Date ? e.time : new Date(e.time);
+        if (isNaN(d.getTime())) return;
+        const key = dayKeyOf(d);
+        const credit = Number(e.points) || 0;
+        if (key === yestKey) { yday += credit; return; }
+        if (key !== todayKey) return;
+        fold(d, credit, e.model);
       });
       const models = Array.from(map.values()).sort((a, b) => b.points - a.points);
       models.forEach((m, i) => { m.points = round2(m.points); m.tone = 'c' + ((i % 6) + 1); });
@@ -567,34 +604,52 @@
   /**
    * 小窗入场：内容分四拍浮起 + 一道斜向高光扫过。
    * 不做整体缩放 —— 窗口底色不透明，卡片一缩就会露出白边，看起来像"闪"。
+   *
+   * 两个细节决定"丝不丝滑"：
+   * 1) 用双 rAF 把动画推到 beforeShow 的重绘**之后**再起，否则起手就掉一帧；
+   * 2) 动画期间（enterUntil）屏蔽外部触发的重绘——可见性变化、定时刷新都会来抢主线程，
+   *    中途重排一次，动画就"卡一下"。
    */
+  let enterUntil = 0;
+  let enterTimer = 0;
+
   function enterPopup() {
     const reduced = prefs.motion === 'reduced';
-    const jobs = [
-      ['.pop-head', 0, -7],
-      ['.pop-hero', 45, 12],
-      ['.pop-latency', 80, 8],
-      ['.pop-block--hours', 110, 10],
-      ['.pop-foot', 145, 8]
-    ];
-    const dur = reduced ? 200 : 440;
-    jobs.forEach(([sel, delay, dy]) => {
-      const el = $(sel);
-      if (!el) return;
-      try {
-        el.animate(
-          [{ opacity: 0, transform: `translateY(${dy}px)` }, { opacity: 1, transform: 'none' }],
-          { duration: dur, delay, easing: 'cubic-bezier(.22,1,.36,1)', fill: 'backwards' }
-        );
-      } catch (e) { /* ignore */ }
-    });
-    const card = $('.popup-card');
-    if (card && !reduced) {
-      const g = document.createElement('i');
-      g.className = 'enter-glow';
-      card.appendChild(g);
-      setTimeout(() => g.remove(), 900);
-    }
+    const start = () => {
+      const jobs = [
+        ['.pop-head', 0, -7],
+        ['.pop-hero', 45, 12],
+        ['.pop-latency', 80, 8],
+        ['.pop-block--hours', 110, 10],
+        ['.pop-foot', 145, 8]
+      ];
+      const dur = reduced ? 200 : 440;
+      jobs.forEach(([sel, delay, dy]) => {
+        const el = $(sel);
+        if (!el) return;
+        try {
+          el.animate(
+            [{ opacity: 0, transform: `translateY(${dy}px)` }, { opacity: 1, transform: 'none' }],
+            { duration: dur, delay, easing: 'cubic-bezier(.22,.9,.28,1)', fill: 'backwards' }
+          );
+        } catch (e) { /* ignore */ }
+      });
+      const card = $('.popup-card');
+      if (card && !reduced) {
+        const g = document.createElement('i');
+        g.className = 'enter-glow';
+        card.appendChild(g);
+        setTimeout(() => g.remove(), 900);
+      }
+      const total = reduced ? 240 : 620;
+      enterUntil = performance.now() + total;
+      clearTimeout(enterTimer);
+      enterTimer = setTimeout(() => {
+        enterUntil = 0;
+        renderActive(true);      // 动画结束后补一次渲染，把这段时间被挡下的更新落上去
+      }, total + 20);
+    };
+    requestAnimationFrame(() => requestAnimationFrame(start));
   }
 
   /** 主窗收成小窗时的退场：内容略微内收 + 淡出，配合 Python 端的窗口几何收拢 */
@@ -655,6 +710,9 @@
   let lastRender = -1e9;
   let lastCalSig = '';
   function renderActive(force) {
+    // 小窗入场期间不接受外部触发的重绘：可见性变化、定时刷新都会抢主线程，
+    // 中途重排一次动画就"卡一下"。动画结束后由 enterPopup 统一补渲染。
+    if (state.mode === 'popup' && performance.now() < enterUntil) return;
     const now = performance.now();
     if (!force && now - lastRender < 250) return;
     lastRender = now;
@@ -968,11 +1026,13 @@
     const reqForToken = (D.today && D.today.requests) || stat.requests;
     setText('#kpiAvg', `${F.fmtWan(tk / Math.max(1, reqForToken))} / 次`);
 
+    // 四张卡各配一条 14 天迷你趋势：可用余额 / 每日消耗 / 每日调用 / 每日 Token
+    const last14 = D.daily.slice(-14);
     const sparks = {
-      available: D.daily.slice(-14).map(d => d.balance),
-      todayUsed: D.daily.slice(-14).map(d => d.consumed),
-      todayReq: D.daily.slice(-14).map(d => d.consumed),
-      todayToken: D.daily.slice(-14).map(d => d.consumed)
+      available: last14.map(d => d.balance),
+      todayUsed: last14.map(d => d.consumed),
+      todayReq: last14.map(d => d.calls || 0),
+      todayToken: last14.map(d => d.tokens || 0)
     };
     $$('[data-spark]').forEach(node => {
       C.sparkline(node, { values: sparks[node.dataset.spark] || [] });
@@ -1039,6 +1099,11 @@
       rows.forEach(r => {
         const t = rowTime(r);
         if (!isNaN(t.getTime()) && t >= from && t <= now) sum += Number(r.credit) || 0;
+      });
+      // 同步后的本机逐笔同样要算进来，和总览的今日/本周保持同一口径
+      localTail().forEach(e => {
+        const t = e.time instanceof Date ? e.time : new Date(e.time);
+        if (!isNaN(t.getTime()) && t >= from && t <= now) sum += Number(e.points) || 0;
       });
       return { sum: round2(sum), from };
     }
@@ -1368,14 +1433,20 @@
   }
 
   let ledgerSource = 'local';
+  let ledgerCounts = { cloud: 0, local: 0 };   // 数据源条数（不受筛选影响，用于说明文案）
 
   function ledgerRows() {
     const q = state.ledgerQuery.trim().toLowerCase();
     const now = new Date();
     const todayKey = `${now.getFullYear()}-${F.pad(now.getMonth() + 1)}-${F.pad(now.getDate())}`;
     const cloud = cloudLedgerRows();
-    const src = cloud || D.ledger;
-    ledgerSource = cloud ? 'cloud' : 'local';
+    // 云端逐笔 + 同步后的本机逐笔：前者是账号级、跨设备一致，后者负责"这一刻"的实时。
+    // 只有本机记录时（未连接）就是全部本机流水。
+    const tail = cloud ? localTail() : [];
+    const src = cloud ? cloud.concat(tail) : (D.ledger || []);
+    ledgerSource = cloud ? 'cloud+local' : 'local';
+    ledgerCounts = { cloud: cloud ? cloud.length : 0, local: cloud ? tail.length : src.length };
+    src.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
     return src.filter(e => {
       const t = e.time instanceof Date ? e.time : new Date(e.time);
       const key = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())}`;
@@ -1401,20 +1472,21 @@
     const stat = todayStat();
     const dayTotal = stat.consumed || 1;
 
-    setHTML('#ledgerSub', ledgerSource === 'cloud'
-      ? `云端逐笔 · ${F.fmt(all.length)} 条（账号级，换电脑登录同一账号看到的是同一份；项目与 Token 云端不返回）`
+    const hasCloud = ledgerSource !== 'local';
+    setHTML('#ledgerSub', hasCloud
+      ? `云端逐笔 ${F.fmt(ledgerCounts.cloud)} 条 + 同步后本机 ${F.fmt(ledgerCounts.local)} 条（账号级 + 本机实时补足；项目与 Token 云端不返回）`
       : `本机记录 · 共 ${F.fmt(D.meta.records || 0)} 次调用，覆盖 ${D.meta.days || 0} 天`);
     const sum = $('#ledgerSummary');
     if (sum) {
-      const cloudSrc = ledgerSource === 'cloud';
+      const cloudSrc = hasCloud;
       // 今日 Token 只可能来自本机：云端 billing 逐笔不返回 token。
       // 之前云端模式下这里直接显示 "—"，与总览的今日 Token 对不上，现统一取本机同日累计并标注来源。
       const tk = stat.tokens || 0;
       const tkText = tk > 0 ? F.fmtWan(tk) : '—';
       const tkTip = '本机会话累计：每次调用的 totalTokens 含整段上下文，逐次相加会重复计入；云端逐笔不返回 Token，所以这一列固定取本机记录';
       sum.innerHTML = `
-        <div><span>今日消耗${cloudSrc ? '（云端）' : ''}</span><b>${F.credit(stat.consumed)} <small style="font-size:10px;color:var(--text-3)">分</small></b></div>
-        <div><span>今日调用${cloudSrc ? '（云端）' : ''}</span><b>${F.fmt(stat.requests)} <small style="font-size:10px;color:var(--text-3)">次</small></b></div>
+        <div><span>今日消耗${cloudSrc ? '<i class="src-tag">云端+本机</i>' : ''}</span><b>${F.credit(stat.consumed)} <small style="font-size:10px;color:var(--text-3)">分</small></b></div>
+        <div><span>今日调用${cloudSrc ? '<i class="src-tag">云端+本机</i>' : ''}</span><b>${F.fmt(stat.requests)} <small style="font-size:10px;color:var(--text-3)">次</small></b></div>
         <div title="${tkTip}"><span>今日 Token${cloudSrc && tk > 0 ? '<i class="src-tag">本机</i>' : ''}</span><b>${tkText}</b></div>
         <div><span>筛选结果</span><b>${all.length} <small style="font-size:10px;color:var(--text-3)">条</small></b></div>`;
     }
@@ -1475,7 +1547,7 @@
     }
 
     const table = $('#ledgerTable');
-    if (table) table.classList.toggle('is-cloud', ledgerSource === 'cloud');
+    if (table) table.classList.toggle('is-cloud', ledgerSource !== 'local');
     setHTML('#ledgerCount', `显示 ${rows.length} / ${all.length} 条`);
     const more = $('#ledgerMore');
     if (more) {

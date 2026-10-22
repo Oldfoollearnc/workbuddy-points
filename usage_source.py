@@ -32,7 +32,7 @@ HOME = os.path.expanduser("~")
 # 这样在公司电脑上把数据放在 D 盘或网络盘时也能读到，见 docs/本地数据源方案.md
 CONFIG_PATH = app_paths.data_path("points_config.json")
 CACHE_PATH = app_paths.data_path(".cache", "usage.json")
-CACHE_VER = 3          # 数据结构变更时 +1，强制重算（本轮：新增 recent 逐笔时间线）
+CACHE_VER = 4          # 数据结构变更时 +1，强制重算（本轮：流水保留条数 120 → 240）
 
 MODEL_NAMES = {
     "deepseek-v4.1-flash": "DeepSeek-V4.1-Flash",
@@ -490,9 +490,11 @@ class UsageService:
             row["tone"] = TONE_ORDER[i % len(TONE_ORDER)]
         heat_max = max([max(r["values"] or [0]) for r in heat] or [1]) or 1
 
-        # 流水（最近 120 条）
+        # 流水（最近 240 条）
+        # 为什么要这么多：云端一小时才同步一次，界面上的"实时"靠"最后 N 条本机逐笔"补足最近这一段，
+        # 条数太少会在高强度使用时补不全（一次对话可能产生几十条模型调用）。
         ledger = []
-        for r in sorted(records, key=lambda x: -x["ts"])[:120]:
+        for r in sorted(records, key=lambda x: -x["ts"])[:240]:
             t = dt.datetime.fromtimestamp(r["ts"] / 1000)
             cwd = r["cwd"].rstrip("\\/")
             ledger.append({
