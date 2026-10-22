@@ -1,0 +1,23 @@
+#!/bin/sh
+# 把 commit-msg 阶段算好的版本号并入刚生成的提交。
+#
+# 为什么需要这一步：git 在运行 commit-msg 之前就已经按当时的索引建好了提交树，
+# 钩子里 `git add version.json` 只改索引、改不到这一次的提交对象，
+# 结果是版本号永远"晚一个提交"。
+# 这里在提交完成后补一次 --amend（只改本地历史，不改提交内容；--no-verify 防递归）。
+set -u
+
+GD=$(git rev-parse --git-dir 2>/dev/null) || exit 0
+
+# 合并 / cherry-pick / revert 过程中不要动历史
+[ -f "$GD/MERGE_HEAD" ] && exit 0
+[ -f "$GD/CHERRY_PICK_HEAD" ] && exit 0
+[ -f "$GD/REVERT_HEAD" ] && exit 0
+
+git add version.json 2>/dev/null || exit 0
+if git diff --cached --quiet -- version.json; then
+  exit 0
+fi
+
+git commit --amend --no-edit --no-verify >/dev/null 2>&1 || exit 0
+echo "[version] 已并入本次提交"
