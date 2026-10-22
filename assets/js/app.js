@@ -2161,6 +2161,17 @@
     const noticeLink = $('#noticeSource');
     if (noticeLink) noticeLink.addEventListener('click', () => go('settings'));
 
+    // 提示条右上角的 ×：点一次就永久收起（偏好走 localStorage，重启仍生效）。
+    // 不是"关掉就再也找不回来"：设置 → 显示与行为 → 数据源提示 还能重新打开。
+    const noticeClose = $('#noticeClose');
+    if (noticeClose) noticeClose.addEventListener('click', () => {
+      prefs.notice = false;
+      savePrefs();
+      renderActive(true);
+      pushPrefs();
+      toast('已隐藏顶部提示，可在「设置 → 显示与行为」重新打开', 'i-check');
+    });
+
     const pickBtn = $('#dbPick');
     if (pickBtn) pickBtn.addEventListener('click', async () => {
       if (!bridge.has()) { toast('浏览器预览无法选择目录', 'i-info'); return; }

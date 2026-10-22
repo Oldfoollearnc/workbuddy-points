@@ -1874,6 +1874,16 @@ body.is-loading .boot-mask { display: flex; }
   transition: background-color var(--dur-1) var(--ease-out);
 }
 .notice-link:hover { background: var(--brand-soft); }
+.notice-close {
+  flex: none;
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  border-radius: 6px;
+  color: var(--text-3);
+  transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.notice-close .i { width: 11px; height: 11px; }
+.notice-close:hover { background: var(--brand-soft); color: var(--brand); }
 
 /* ===================== 设置页：列表分组（竖向） ===================== */
 
