@@ -365,6 +365,34 @@
     };
   }
 
+  /** 近 N 天每日消耗：今天用实时合并值，其余优先云端逐日，云端没有才退本机。
+   *  以前整条趋势只读本机 D.daily，换机或本机记录缺失时就会比云端少一截。 */
+  function dailySeries(n) {
+    const stat = todayStat();
+    const cmap = {};
+    if (ACCOUNT && ACCOUNT.status === 'connected' && Array.isArray(ACCOUNT.daily)) {
+      ACCOUNT.daily.forEach(d => { if (d && d.date) cmap[d.date] = d.points || 0; });
+    }
+    const lmap = {};
+    const year = new Date().getFullYear();
+    (D.daily || []).forEach(d => { if (d.date) lmap[`${year}-${d.date}`] = d.consumed || 0; });
+    const out = [];
+    for (let i = n - 1; i >= 0; i--) {
+      const d = addDays(new Date(), -i);
+      const key = dayKeyOf(d);
+      let v;
+      if (i === 0) v = stat.consumed;                    // 今天：云端 + 同步后本机
+      else if (cmap[key] != null) v = cmap[key];         // 历史：云端逐日为准
+      else v = lmap[key] || 0;
+      out.push({
+        date: key.slice(5),
+        consumed: Math.round(v * 100) / 100,
+        weekday: '日一二三四五六'[d.getDay()]
+      });
+    }
+    return out;
+  }
+
   const PENDING_MAX_H = 72;   // 服务端只带回最近 72 小时的本地逐笔，超出就不做补偿
 
   /**
@@ -415,8 +443,9 @@
   let themeTimer = null;
 
   /**
-   * 主题切换：整页 260ms 交叉淡入淡出（View Transitions），
-   * 不做任何从某点扩散的全屏遮罩，避免"被盖住"的观感。
+   * 主题切换：240ms 纯交叉溶解（View Transitions），不缩放、不扩散。
+   * 切换时同步重绘一次图表——SVG 里的颜色是绘制那一刻取的值，
+   * 不重绘的话，过渡结束会看到图表"跳色"。
    *
    * 注意：View Transitions 的更新回调要等"下一帧"才执行，而 WebView2 在关闭 GPU 合成
    * 或窗口未聚焦时可能长时间不产帧。因此这里加 60ms 看门狗：无论过渡是否真的开始，
@@ -424,7 +453,11 @@
    */
   function applyTheme(pref, animate) {
     const next = pref === 'system' ? (systemDark() ? 'dark' : 'light') : pref;
-    const commit = () => paintTheme(next, true);
+    const commit = () => {
+      paintTheme(next, true);
+      clearTimeout(themeTimer);
+      renderActive(true);
+    };
     if (!animate || motionOff() || typeof document.startViewTransition !== 'function') {
       paintTheme(next);
       return;
@@ -1182,7 +1215,7 @@
   }
 
   function renderTrend() {
-    const days = D.daily.slice(-state.range);
+    const days = dailySeries(state.range);    // 云端优先、缺失退本机，今天用实时合并值
     let run = 0;
     const cumulative = days.map(d => (run += d.consumed));
     const card = $('[data-chart="trend"]') && $('[data-chart="trend"]').closest('.chart-card');
@@ -1530,9 +1563,12 @@
         // 赠送 / 退回类记录（type=earn）不参与消耗占比，正号显示，避免出现 "-1,000 / 657%" 这种怪组合
         const isEarn = e.type === 'earn';
         const fmtPt = v => (isEarn ? '+' + F.credit(v) : (v > 0 ? '−' + F.credit(v) : '0'));
+        // 颜色深浅跟消耗量走（和日历热力一个思路）：扣得越多，蓝得越实；越少越淡。
+        const heat = Math.max(0, Math.min(1, shownPts / maxPts));
+        const heatStyle = isEarn ? '' : ` style="color:${C.hexToRgba(C.toneColor('c1'), 0.5 + heat * 0.5)}"`;
         const ptCell = (isFirst && grouped)
-          ? `<span class="pt pt-group">${fmtPt(group.sum)}<small>×${group.list.length} 合计</small></span>`
-          : `<span class="pt${isFirst ? '' : ' is-sub'}">${fmtPt(e.points)}</span>`;
+          ? `<span class="pt pt-group"${heatStyle}>${fmtPt(group.sum)}<small>×${group.list.length} 合计</small></span>`
+          : `<span class="pt${isFirst ? '' : ' is-sub'}"${isFirst ? heatStyle : ''}>${fmtPt(e.points)}</span>`;
         const shareCell = isEarn
           ? '<span class="share-cell"><span style="width:auto">—</span></span>'
           : `<span class="share-cell"><i class="share-bar"><i style="width:${Math.max(4, (shownPts / maxPts) * 100).toFixed(1)}%"></i></i><span>${(share * 100) < 1 ? (share * 100).toFixed(2) : (share * 100).toFixed(1)}%</span></span>`;
@@ -2360,6 +2396,8 @@
     },
     /** 另一窗口推来的偏好 */
     applyPrefs: raw => applyPrefs(raw),
+    /** 当前实际生效的主题（给托盘自绘菜单取色用） */
+    getTheme: () => resolved(),
     reloadAccount: async () => {
       const ok = await loadAccount();
       if (ok) { renderAccountCard(); renderActive(true); }

@@ -78,17 +78,18 @@ SYNC_JS = r"""
       PageNumber: 1, PageSize: 20, Status: [0, 3], PackageCodes: codes, NeedRenewInfo: true });
     // 增量扫描：起始日由 Python 根据缓存里最新一天推算（见 _usage_since）
     const from = (window.__wbSince) || ds(new Date(now.getTime() - 29 * 86400000));
-    // 逐页取全（此前只取第 1 页，导致日历只剩两天数据）
+    // 逐页取全（此前只取第 1 页，导致日历只剩两天数据）。
+    // 每页 500、最多 8 页：单日调用量再大也能一次拉完，总量仍很小（只读、按天窗口）。
     let page = 1, all = [], total = 0;
     do {
       const r = await post('/billing/meter/get-user-request-usage', {
         startTime: from + ' 00:00:00', endTime: today + ' 23:59:59',
-        pageNum: page, pageSize: 200 });
+        pageNum: page, pageSize: 500 });
       const dd = (r.json && r.json.data) || {};
       total = dd.total || 0;
       all = all.concat(dd.data || []);
       page += 1;
-    } while (all.length < total && page <= 5);
+    } while (all.length < total && page <= 8);
     out.usage = { status: 200, json: { data: { data: all, total: total } } };
     out.usageTotal = total;
     try {
