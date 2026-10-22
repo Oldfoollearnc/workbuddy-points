@@ -524,25 +524,39 @@ class AccountService:
 
         # ---- 逐笔：归一化 + 与缓存合并 ----
         # 增量扫描只拉"上次之后"的窗口，因此必须把新数据并进缓存，否则视图会缺历史。
-        # 去重键优先用 requestId，缺失时退化为「时间|模型|积分」。
+        #
+        # 去重有**两把键**：
+        #   1) requestId —— 同一条记录的重复拉取；
+        #   2) 内容键（秒级时间 + 模型 + 积分 + 用途）—— 云端会把同一笔请求
+        #      在不同次返回里生成不同的 requestId（实测 10-20 整天几乎每笔都成对出现），
+        #      只按 id 去重会让日历/趋势的每日合计凭空多出 60%+。
+        #      校验：周期内逐笔合计 2369.92，账号自报"已用"1416.39；按内容去重后 1453.96。
         raw_rows = ((((bill.get("usage") or {}).get("json") or {}).get("data") or {}).get("data")) or []
         merged = {}
+        seen_content = set()
+
+        def _add(t, credit, model, purpose, rid):
+            key = (t, model, round(credit, 4), purpose)
+            if key in seen_content:
+                return
+            seen_content.add(key)
+            merged[rid] = {"requestTime": t, "credit": credit,
+                           "model": model, "agentPurpose": purpose}
+
         for r in (prev_rows or []):
             t = str(r.get("t") or r.get("requestTime") or "")[:19]
             if not t:
                 continue
             rid = r.get("id") or r.get("requestId") or "%s|%s|%s" % (t, r.get("model"), r.get("credit"))
-            merged[rid] = {"requestTime": t, "credit": _num(r.get("credit")),
-                           "model": str(r.get("model") or ""),
-                           "agentPurpose": str(r.get("purpose") or r.get("agentPurpose") or "")}
+            _add(t, _num(r.get("credit")), str(r.get("model") or ""),
+                 str(r.get("purpose") or r.get("agentPurpose") or ""), rid)
         for r in raw_rows:
             t = str(r.get("requestTime") or "")[:19]
             if not t:
                 continue
             rid = str(r.get("requestId") or "%s|%s|%s" % (t, r.get("model"), r.get("credit")))
-            merged[rid] = {"requestTime": t, "credit": _num(r.get("credit")),
-                           "model": str(r.get("model") or ""),
-                           "agentPurpose": str(r.get("agentPurpose") or "")}
+            _add(t, _num(r.get("credit")), str(r.get("model") or ""),
+                 str(r.get("agentPurpose") or ""), rid)
 
         cutoff = (dt.date.today() - dt.timedelta(days=29)).isoformat()
         rows = [v for v in merged.values() if str(v.get("requestTime") or "")[:10] >= cutoff]
