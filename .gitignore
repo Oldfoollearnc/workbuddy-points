@@ -1,0 +1,36 @@
+# 运行时产物（可写数据目录 / 缓存 / 日志）
+logs/
+.cache/
+.webview-profile/
+.edge-cdp/
+run.out
+
+# 账号凭证与本地私有配置（绝不入库）
+session.bin
+account.json
+points_config.json
+datasource.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# 打包产物
+build/
+dist/
+tmp/
+*.spec.bak
+installer/Output/
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# 项目内部记忆/会话数据
+.workbuddy/
+
+# 开发期截图（含真实余额与项目名，不入公开仓库）
+docs/shots/

@@ -1,0 +1,60 @@
+#!/bin/sh
+# 版本号规则（由提交信息决定，Conventional Commits → SemVer）
+#
+#   feat / feat(scope) / +feat        → MINOR +1，PATCH 归零   例：1.4.7 → 1.5.0
+#   含 “!:” 或 “BREAKING CHANGE”      → MAJOR +1，MINOR/PATCH 归零  例：1.5.0 → 2.0.0
+#   其他（fix/chore/docs/build/…）    → PATCH +1              例：1.5.0 → 1.5.1
+#   提交信息含 [skip version]         → 本次不改版本
+#
+# 为什么放在 commit-msg 而不是 pre-commit：
+# 只有 commit-msg 阶段能读到提交信息，版本号要跟着 “有没有新功能” 走，
+# 放在 pre-commit 只能无脑 +1，于是 1.0 那一位永远不动。
+#
+# 为什么用 set -eu 之外还要小心 grep：本脚本里所有可能返回非零的命令都写在
+# if/条件位里，否则 grep 找不到匹配会让 set -e 直接把提交打断。
+set -eu
+
+MSG_FILE="${1:-}"
+FILE="version.json"
+
+[ -f "$FILE" ] || exit 0
+[ -n "$MSG_FILE" ] && [ -f "$MSG_FILE" ] || exit 0
+
+SUBJECT=$(head -n 1 "$MSG_FILE" 2>/dev/null || true)
+
+# 合并 / 回滚 / rebase 的 fixup 不参与版本递增
+case "$SUBJECT" in
+  Merge*|Revert*|fixup!*|squash!*|amend!*|"") exit 0 ;;
+esac
+
+if grep -q '\[skip version\]' "$MSG_FILE" 2>/dev/null; then
+  exit 0
+fi
+
+CUR=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$FILE" | head -n 1)
+[ -n "$CUR" ] || exit 0
+
+MAJ=$(echo "$CUR" | cut -d. -f1)
+MIN=$(echo "$CUR" | cut -d. -f2)
+PAT=$(echo "$CUR" | cut -d. -f3)
+[ -n "$MAJ" ] || MAJ=1
+[ -n "$MIN" ] || MIN=0
+[ -n "$PAT" ] || PAT=0
+
+BODY=$(cat "$MSG_FILE")
+
+if printf '%s' "$SUBJECT" | grep -q '!:'; then
+  MAJ=$((MAJ + 1)); MIN=0; PAT=0
+elif printf '%s' "$BODY" | grep -q 'BREAKING CHANGE'; then
+  MAJ=$((MAJ + 1)); MIN=0; PAT=0
+elif printf '%s' "$SUBJECT" | grep -Eq '^feat|^feat\(|\+feat'; then
+  MIN=$((MIN + 1)); PAT=0
+else
+  PAT=$((PAT + 1))
+fi
+
+NEW="$MAJ.$MIN.$PAT"
+
+printf '{\n  "version": "%s",\n  "updated": "%s"\n}\n' "$NEW" "$(date +%Y-%m-%d)" > "$FILE"
+git add "$FILE"
+echo "[version] $CUR -> $NEW"
