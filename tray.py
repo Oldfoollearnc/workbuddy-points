@@ -61,13 +61,13 @@ HTCLIENT = 1
 VK_ESCAPE = 0x1B
 
 ID_OPEN_POPUP, ID_OPEN_MAIN, ID_REFRESH, ID_EXIT = 1, 2, 3, 4
-ID_SYNC, ID_AUTOSTART = 5, 6
+ID_SYNC, ID_AUTOSTART, ID_SETTINGS = 5, 6, 7
 
 # 菜单尺寸（逻辑像素；进程 DPI 无关，和界面 1:1 对应）
-MENU_W = 176
-ITEM_H = 34
-MENU_PAD = 8
-SEP_H = 9
+MENU_W = 158        # 比原来小一圈：9 行压到 178px 高（原来 204）
+ITEM_H = 26
+MENU_PAD = 5
+SEP_H = 6
 MENU_RADIUS = 12
 
 # 配色跟随程序主题
@@ -232,7 +232,7 @@ class Tray:
     """系统托盘图标：左键单击 → 快捷面板；右键 → 自绘菜单。"""
 
     def __init__(self, icon_path, on_click=None, on_open_main=None, on_refresh=None, on_exit=None,
-                 on_sync=None, on_autostart=None, autostart_state=None,
+                 on_sync=None, on_autostart=None, autostart_state=None, on_settings=None,
                  tooltip="WorkBuddy 积分观测台 · 单击查看今日积分", logger=None):
         self.log = logger or (lambda msg: None)
         self.icon_path = icon_path
@@ -243,6 +243,7 @@ class Tray:
         self.on_sync = on_sync
         self.on_autostart = on_autostart
         self.autostart_state = autostart_state      # 返回 bool，用来画勾
+        self.on_settings = on_settings
         self.tooltip = tooltip[:120]
 
         self.hwnd = None
@@ -287,10 +288,10 @@ class Tray:
             return self._font
         # 进程 DPI 无关：-17 ≈ 12.7px，和界面 12.5px 字号对齐
         self._font = gdi32.CreateFontW(
-            -17, 0, 0, 0, 400, 0, 0, 0, 1, 4, 0, 5, 0, "Microsoft YaHei UI")
+            -14, 0, 0, 0, 400, 0, 0, 0, 1, 4, 0, 5, 0, "Microsoft YaHei UI")
         if not self._font:
             self._font = gdi32.CreateFontW(
-                -17, 0, 0, 0, 400, 0, 0, 0, 1, 4, 0, 5, 0, "Segoe UI")
+                -14, 0, 0, 0, 400, 0, 0, 0, 1, 4, 0, 5, 0, "Segoe UI")
         return self._font
 
     # ---------- 生命周期 ----------
@@ -435,6 +436,7 @@ class Tray:
             (ID_OPEN_MAIN, "展开完整主界面", "#06B6D4"),
             (ID_REFRESH, "刷新数据", "#10B981"),
             (ID_SYNC, "立即同步云端", "#7C3AED"),
+            (ID_SETTINGS, "设置", "#0EA5E9"),
             (0, None, None),
             (ID_AUTOSTART, ("✓ 开机自启" if auto_on else "开机自启"), "#64748B"),
             (0, None, None),
@@ -592,6 +594,7 @@ class Tray:
         user32.AppendMenuW(menu, MF_STRING, ID_OPEN_MAIN, "展开完整主界面")
         user32.AppendMenuW(menu, MF_STRING, ID_REFRESH, "刷新数据")
         user32.AppendMenuW(menu, MF_STRING, ID_SYNC, "立即同步云端")
+        user32.AppendMenuW(menu, MF_STRING, ID_SETTINGS, "设置")
         user32.AppendMenuW(menu, MF_STRING | MF_SEPARATOR, 0, None)
         user32.AppendMenuW(menu, MF_STRING, ID_AUTOSTART, "开机自启（切换）")
         user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
@@ -619,6 +622,8 @@ class Tray:
             self._safe(self.on_sync)
         elif cmd == ID_AUTOSTART:
             self._safe(self.on_autostart)
+        elif cmd == ID_SETTINGS:
+            self._safe(self.on_settings)
         elif cmd == ID_EXIT:
             self._safe(self.on_exit)
 

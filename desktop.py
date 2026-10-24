@@ -1237,8 +1237,19 @@ def main():
         except Exception as e:
             log(f"tray autostart error: {e}")
 
+    def _open_settings():
+        """托盘菜单「设置」：先把主窗叫出来，再切到设置页。"""
+        try:
+            app.show_main()
+            threading.Timer(
+                0.35, lambda: app._safe_js(app.main, "window.App && App.go && App.go('settings')")
+            ).start()
+        except Exception as e:
+            log(f"tray settings error: {e}")
+
     tray = Tray(
         ICON,
+        on_settings=_open_settings,
         on_click=app.toggle_popup,
         on_open_main=app.open_main,
         on_refresh=app.refresh_all,

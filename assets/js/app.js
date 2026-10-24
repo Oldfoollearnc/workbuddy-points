@@ -2845,6 +2845,8 @@
       return ok;
     },
     /** 由 Python 在后台签到结束后调用：把结论推到结果条上 */
+    /** 供 Python 侧（托盘菜单）切到指定页 */
+    go: v => { try { go(v); } catch (e) { /* ignore */ } },
     /** 供 Python 侧（托盘菜单等）弹一条提示 */
     toast: (msg, icon) => { try { toast(msg, icon); } catch (e) { /* ignore */ } },
     reloadCheckin: async () => {
