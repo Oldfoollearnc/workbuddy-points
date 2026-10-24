@@ -499,7 +499,7 @@ class CheckinService:
         # 没连过账号就没有可用的网页会话：与其让用户看到"页面未就绪"这种技术黑话，
         # 不如直接说清楚该怎么办。
         if self.account.state.get("status") == "disconnected":
-            res["error"] = "还没连接云端账号，签到需要先在右上角头像里连接一次"
+            res["error"] = "还没连接账号。点右上角头像 →「连接账号」，扫一次码就能自动签到"
             res["reason"] = "no_account"
             return res
 
@@ -507,12 +507,12 @@ class CheckinService:
         # 拿不到锁说明正好在同步，宁可让用户点一次「重试」，也不要和导航抢页面。
         got = self.account._sync_lock.acquire(timeout=lock_timeout)
         if not got:
-            res["error"] = "账号正在同步数据，稍等一下再点重试"
+            res["error"] = "正在同步云端数据，几秒后再点「重试」"
             res["reason"] = "busy"
             return res
         try:
             if not self._ensure_page():
-                res["error"] = "打不开签到页面，可能是网络断了或登录状态已失效"
+                res["error"] = "打不开签到页面：多半是网络断了。点「重试」再试一次；一直不行就重新连接账号"
                 res["reason"] = "no_page"
                 return res
 
@@ -592,17 +592,27 @@ class CheckinService:
         return out
 
     def _http_hint(self, resp, prefix):
+        """把接口错误翻译成"用户能懂 + 知道下一步做什么"的话。
+
+        原则：先给结论，再给一个具体动作；不出现 HTTP 状态码当主语，
+        技术细节塞在括号里给懂得人看。
+        """
         st = resp.get("status")
         j = resp.get("json") or {}
         msg = j.get("msg") or j.get("message") or resp.get("error") or ""
         if st in (401, 403):
-            # 别一上来就喊"登录失效"：同会话的其他接口往往还是好的，
-            # 让用户白扫一次码比报个模糊原因更糟。
-            return "请求被服务端拒绝（401），多半是短时风控，点「重试」再来一次；整页都没数据时才需要重新连接账号"
+            return ("登录状态过期了。程序会自己重载页面再试一次；"
+                    "如果还不行，点右上角头像 →「重新连接」扫一次码")
         if st == -2:
-            return "%s：%s" % (prefix, msg or "页面无响应")
+            return ("网络没有响应，可能是断网或代理拦截。"
+                    "点「重试」再来一次；如果一直这样，检查一下网络")
         if st == 200:
-            return "%s：%s" % (prefix, msg or "接口返回异常")
+            return "服务端返回了异常内容（%s）" % (msg or "没有给出原因")
+        if isinstance(st, int) and st >= 500:
+            return ("服务端出错了（%s），这类问题通常是暂时的，"
+                    "过几分钟点「重试」再试" % st)
+        if st == 429:
+            return "请求太频繁被限流了，等几分钟再试"
         return "%s（HTTP %s）%s" % (prefix, st, ("：" + str(msg)) if msg else "")
 
     # ---------------- 派猫猫旅行 ----------------

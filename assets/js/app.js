@@ -618,13 +618,13 @@
     const box = $('#dataNotice');
     if (box) box.hidden = prefs.notice === false;   // 设置里可关掉，把首屏留给数字
     const connected = ACCOUNT && ACCOUNT.status === 'connected';
-    const sync = ACCOUNT && ACCOUNT.lastSync ? String(ACCOUNT.lastSync).slice(5, 16) : '';
+    const sync = ACCOUNT && ACCOUNT.lastSync ? F.relTime(ACCOUNT.lastSync) : '';
     const iv = ACCOUNT && ACCOUNT.interval;
     const every = iv === 0 ? '手动' : (iv ? iv + ' 分钟' : '60 分钟');
     let txt;
     if (connected) {
       const bucketed = !!(ACCOUNT.cloud && ACCOUNT.cloud.countKind === 'bucket');
-      txt = `云端每 ${every}同步（上次 ${sync || '—'}）：消耗 / 笔数取<b>${bucketed ? '计费记录' : '逐笔'}</b>`
+      txt = `云端每 ${every}同步（${sync || '—'}）：消耗 / 笔数取<b>${bucketed ? '计费记录' : '逐笔'}</b>`
           + (bucketed ? `（5 分钟 × 模型聚合，一笔 ≠ 一次调用）` : '')
           + `，Token 取本机。`
           + (ACCOUNT.cloud && ACCOUNT.cloud.stale
@@ -1128,7 +1128,8 @@
     const popCloud = $('#popCloud');
     if (popCloud) {
       const st = (ACCOUNT && ACCOUNT.lastSync) ? String(ACCOUNT.lastSync).slice(11, 16) : '';
-      popCloud.textContent = st ? `云端 ${st}` : '同步云端';
+      popCloud.textContent = ACCOUNT && ACCOUNT.lastSync
+        ? `云端 ${F.relTime(ACCOUNT.lastSync)}` : '同步云端';
       popCloud.title = st ? `云端上次同步 ${ACCOUNT.lastSync}，点击立即同步` : '点击同步云端账号（手动一次，不改变自动间隔）';
     }
 
@@ -1903,10 +1904,7 @@
     const pendingTxt = (hasCloud && acc.pending > 0.005)
       ? ` · 同步后本机已花 ${F.credit(acc.pending)} 分（可用积分按此扣减，属下限）` : '';
     const ls = ACCOUNT.lastSync || '';
-    const todayStr = new Date().toISOString().slice(0, 10);
-    let lsShort = '';
-    if (ls) lsShort = (ls.slice(0, 10) === todayStr) ? ls.slice(11, 19) : ls.slice(5, 16);
-    setText('#accLastSync', ls ? lsShort + (ACCOUNT.lastError ? ' · 异常' : '') : '尚未同步');
+    setText('#accLastSync', ls ? F.relTime(ls) + (ACCOUNT.lastError ? ' · 异常' : '') : '尚未同步');
     const lsEl = $('#accLastSync');
     if (lsEl) lsEl.title = ls ? ls + pendingTxt + (ACCOUNT.lastError ? ' · ' + ACCOUNT.lastError : '') : '';
     const sel = $('#cloudInterval');

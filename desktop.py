@@ -470,6 +470,34 @@ class Desktop:
             self._popup_intent = False
             self._popup_hidden_at = time.time()
 
+    def _window_visible(self, title):
+        hwnd = find_hwnd(title)
+        return bool(hwnd and user32.IsWindowVisible(hwnd))
+
+    def notify(self, msg, level="info"):
+        """把一条结果按"用户此刻能看见什么"投递出去。
+
+        顺序：小窗可见 → 弹在小窗（避免和托盘气泡两个东西叠在右下角）；
+              主窗可见 → 弹在主窗；
+              都不在 → 托盘气泡（系统样式，改不了，但至少不丢消息）。
+        """
+        icon = "i-alert" if level == "warn" else "i-check"
+        try:
+            payload = "window.App && App.toast && App.toast(%s, %s)" % (
+                json.dumps(msg, ensure_ascii=False), json.dumps(icon))
+            if self.popup and self._window_visible(POPUP_TITLE):
+                self._safe_js(self.popup, payload)
+                return "popup"
+            if self.main and self._window_visible(MAIN_TITLE):
+                self._safe_js(self.main, payload)
+                return "main"
+            if self.tray:
+                self.tray.balloon("WorkBuddy 积分观测台", msg, level)
+                return "tray"
+        except Exception as e:
+            log("notify error: %s" % e)
+        return "none"
+
     def show_main(self):
         # 小窗让位（同时把小窗状态簿记成"已收起"）
         self.hide_popup()
@@ -1282,10 +1310,38 @@ def main():
         except Exception as e:
             log(f"startup show error: {e}")
 
+    _last_notify = {"key": ""}
+
     def _push_checkin():
-        """把后台签到/派猫的最新结论推到界面上的结果条。"""
+        """把后台签到/派猫的最新结论推到结果条，并按需发一条通知。"""
         for w in (app.main, app.popup):
             app._safe_js(w, "window.App && App.reloadCheckin && App.reloadCheckin()")
+
+        # 只在"这次确实发生了新事"时通知，避免每轮轮询都弹
+        try:
+            res = (app.checkin.snapshot() or {}).get("result") or {}
+            ck = res.get("checkin") or {}
+            tv = res.get("travel") or {}
+            msg, level = "", "info"
+            if ck.get("error"):
+                msg, level = ck["error"], "warn"
+            elif ck.get("new"):
+                msg = "今日签到成功，+%d 分" % (ck.get("gain") or 0)
+            elif tv.get("claimed"):
+                msg = "猫猫回来了，领到 %d 分" % (tv.get("claimed") or 0)
+            elif tv.get("departed"):
+                msg = "猫猫出发去「%s」了，%d 小时后回来" % (
+                    tv.get("location") or "旅行", tv.get("durationHours") or 1)
+            if not msg:
+                return
+            key = "%s|%s" % (res.get("date") or "", msg)
+            if key == _last_notify["key"]:
+                return
+            _last_notify["key"] = key
+            where = app.notify(msg, level)
+            log("notify -> %s: %s" % (where, msg))
+        except Exception as e:
+            log("push_checkin notify error: %s" % e)
 
     app.checkin.set_notify(_push_checkin)
 

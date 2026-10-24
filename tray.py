@@ -44,6 +44,7 @@ IDC_ARROW = 32512
 
 NIM_ADD, NIM_MODIFY, NIM_DELETE = 0, 1, 2
 NIF_MESSAGE, NIF_ICON, NIF_TIP, NIF_INFO = 0x1, 0x2, 0x4, 0x10
+NIIF_NONE, NIIF_INFO, NIIF_WARNING = 0, 1, 2
 NIIF_INFO = 0x1
 IMAGE_ICON = 1
 LR_LOADFROMFILE, LR_DEFAULTSIZE, LR_SHARED = 0x10, 0x40, 0x8000
@@ -266,6 +267,31 @@ class Tray:
         self._arrow = None
 
     # ---------- 主题 / 字体 ----------
+
+    def balloon(self, title, text, level="info"):
+        """在托盘图标上弹一条系统气泡。
+
+        只在主窗和小窗都不可见时才用 —— 系统气泡的样式改不了，
+        能弹在界面里就弹界面里的 toast。
+        """
+        if not self.hwnd:
+            return False
+        try:
+            nid = NOTIFYICONDATAW()
+            nid.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
+            nid.hWnd = self.hwnd
+            nid.uID = 1
+            nid.uFlags = NIF_INFO
+            nid.szInfoTitle = (title or "")[:63]
+            nid.szInfo = (text or "")[:255]
+            nid.dwInfoFlags = NIIF_WARNING if level == "warn" else NIIF_INFO
+            ok = bool(shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(nid)))
+            if not ok:
+                self.log("balloon: Shell_NotifyIconW 返回 False")
+            return ok
+        except Exception as e:
+            self.log(f"balloon error: {e}")
+            return False
 
     def set_theme(self, theme):
         self.theme = "dark" if theme == "dark" else "light"

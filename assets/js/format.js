@@ -31,6 +31,29 @@
     clock(d) {
       if (!(d instanceof Date)) return '—';
       return `${F.pad(d.getHours())}:${F.pad(d.getMinutes())}`;
+    },
+    /**
+     * 相对时间：「15:07:51」用户还得自己算距今多久，直接说「3 分钟前」。
+     * 超过一周就回退成日期，再远说"几分钟前"就没意义了。
+     * 支持 'YYYY-MM-DD HH:MM:SS' / Date / 毫秒时间戳。
+     */
+    relTime(input) {
+      if (!input) return '—';
+      let t;
+      if (input instanceof Date) t = input.getTime();
+      else if (typeof input === 'number') t = input;
+      else {
+        const s = String(input).trim().replace(' ', 'T');
+        t = new Date(s).getTime();
+      }
+      if (!t || isNaN(t)) return String(input);
+      const diff = (Date.now() - t) / 1000;
+      if (diff < 0) return '刚刚';
+      if (diff < 60) return '刚刚';
+      if (diff < 3600) return Math.floor(diff / 60) + ' 分钟前';
+      if (diff < 86400) return Math.floor(diff / 3600) + ' 小时前';
+      if (diff < 86400 * 7) return Math.floor(diff / 86400) + ' 天前';
+      return String(input).slice(5, 10);
     }
   };
 
