@@ -716,6 +716,16 @@
   }
 
   /** 把界面上的两个开关同步给 Python：它启动时要靠这个决定跑不跑签到。 */
+  /** 开机自启存在注册表里，不走 prefs —— 每次进来都从系统读真实状态。 */
+  async function loadAutostart() {
+    if (!bridge.has() || !bridge.can('get_autostart')) return;
+    try {
+      const r = await bridge.call('get_autostart');
+      const el = $('#optAutostart');
+      if (el && r) el.checked = !!r.on;
+    } catch (e) { /* ignore */ }
+  }
+
   function pushCheckinOptions() {
     if (!bridge.has() || !bridge.can('checkin_options')) return;
     try { bridge.call('checkin_options', prefs.checkinAuto, prefs.checkinTravel); } catch (e) { /* ignore */ }
@@ -2102,6 +2112,27 @@
     });
     bindToggle('#optCheckinTravel', 'checkinTravel', () => pushCheckinOptions());
 
+    const autoEl = $('#optAutostart');
+    if (autoEl) autoEl.addEventListener('change', async () => {
+      const want = autoEl.checked;
+      autoEl.disabled = true;
+      try {
+        const r = await bridge.call('set_autostart', want);
+        if (!r || !r.ok) {
+          autoEl.checked = !want;
+          toast('设置失败：可能被安全软件拦了注册表写入', 'i-alert');
+          return;
+        }
+        autoEl.checked = !!r.on;
+        toast(r.on ? '已开启开机自启（静默到托盘）' : '已关闭开机自启');
+      } catch (e) {
+        autoEl.checked = !want;
+        toast('设置失败', 'i-alert');
+      } finally {
+        autoEl.disabled = false;
+      }
+    });
+
     const ssOpt = $('#optSideSwipe');
     if (ssOpt) ssOpt.addEventListener('change', () => {
       prefs.sideSwipeSec = +ssOpt.value;
@@ -2673,6 +2704,7 @@
       await loadVersion();
       await loadCheckin();
       pushCheckinOptions();   // 让 Python 侧配置与界面开关对齐，避免"界面关了它还在签"
+      loadAutostart();
       // 任务进度不挡首屏：它要打两个网络请求，还可能排在账号同步后面等锁，
       // 放在 boot 里 await 会让启动遮罩多停好几秒。
       setTimeout(() => { loadTasks().then(() => renderSideSwipe()); }, 400);

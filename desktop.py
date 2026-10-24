@@ -43,6 +43,7 @@ os.environ.setdefault(_ENV_ARGS, _BASE_ARGS)
 import webview
 
 import app_paths
+import autostart
 import data_source
 import logutil
 
@@ -300,7 +301,8 @@ class Desktop:
             frameless=True,          # 自绘标题栏：去掉 Windows 原生标题，避免两套标题重复
             easy_drag=False,
             shadow=False,
-            hidden=False,
+            # --tray（开机自启）时窗口一开始就藏着，否则会先闪一下再收进托盘
+            hidden=("--tray" in sys.argv),
             background_color="#EEF3FC",
         )
         self.main.events.closing += self._on_main_closing
@@ -941,6 +943,17 @@ class Api:
         """成长计划任务进度（活动卡第四格用，带 30 分钟缓存）。"""
         return self._desk.checkin.tasks()
 
+    def get_autostart(self):
+        """开机自启：当前是否开启 + 会写进注册表的命令（供设置页展示）。"""
+        return {"on": autostart.is_enabled(), "command": autostart.launch_command()}
+
+    def set_autostart(self, on):
+        try:
+            cmd = autostart.set_enabled(bool(on))
+            return {"ok": True, "on": autostart.is_enabled(), "command": cmd}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:160]}
+
     def refresh_usage(self):
         return self._desk.usage.refresh()
 
@@ -1165,6 +1178,10 @@ def main():
     # --show 仍可改为"只弹小窗"。用 webview.start(func) 而不是 Timer(1.0) —— 少等 1 秒。
     def _startup_show():
         try:
+            if "--tray" in sys.argv:
+                # 开机自启：不打扰，只驻留托盘，签到/派猫照常在后台跑
+                log("startup hidden (--tray)")
+                return
             if "--show" in sys.argv:
                 app.show_popup()
             else:

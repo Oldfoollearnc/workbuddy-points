@@ -91,7 +91,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameter
 Filename: "{app}\{#MyAppExeName}"; Parameters: "--main"; Description: "立即启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 [Registry]
-Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "WorkBuddyPoints"; ValueData: """{app}\WorkBuddyPoints.exe"""; Flags: uninsdeletevalue; Tasks: startupicon
+Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "WorkBuddyPoints"; ValueData: """{app}\WorkBuddyPoints.exe"" --tray"; Flags: uninsdeletevalue; Tasks: startupicon
 
 [UninstallDelete]
 ; 只删程序目录；%APPDATA%\WorkBuddyPoints（登录态/缓存/日志）保留，避免卸载后重装要重新扫码
