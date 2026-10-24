@@ -1,186 +1,201 @@
-# WorkBuddy 积分观测台
+<div align="center">
 
-Windows 桌面小组件：常驻托盘 → 右下角快捷面板 → 完整数据面板。
-读**本机会话记录**（逐笔、实时）+ **账号云端接口**（余额、周期、账号级逐笔），
-零第三方图表库（全部手写 SVG），深浅双主题。
+<img src="assets/icon.png" width="88" alt="WorkBuddy 积分观测台">
 
-- 版本号：`version.json`，由 `.githooks/commit-msg` 按**提交信息**递增（Conventional Commits → SemVer）：
-  - `feat…` / `fix(x)+feat(y)` → 次版本 +1，修订归零（1.4.7 → 1.5.0）
-  - 含 `!:` 或 `BREAKING CHANGE` → 主版本 +1（1.5.0 → 2.0.0）
-  - 其他（`fix` / `chore` / `docs` / `build`…）→ 修订 +1（1.5.0 → 1.5.1）
-  - 提交信息里写 `[skip version]` 则本次不动版本号
-- 当前形态：主窗 1408×916（可缩放、可最大化）、小窗 424×656 贴右下角
-- 技术栈：Python 3.13 + pywebview(WebView2) + 原生 HTML/CSS/JS
+<h1>WorkBuddy 积分观测台</h1>
 
----
+<p>把 WorkBuddy 的积分余额、消耗与逐笔流水，做成一扇常驻托盘的桌面看板。</p>
 
-## 1. 先看这里：数据到底从哪来
+<p>
+  <img src="https://img.shields.io/badge/platform-Windows%2010%20%2F%2011-0078D4" alt="Windows 10 / 11">
+  <img src="https://img.shields.io/badge/python-3.13-3776AB" alt="Python 3.13">
+  <img src="https://img.shields.io/badge/UI-pywebview%20%2B%20WebView2-2F6F4E" alt="pywebview + WebView2">
+  <img src="https://img.shields.io/badge/license-MIT-3DA639" alt="MIT">
+</p>
 
-| 口径 | 来源 | 覆盖范围 | 是否跨设备一致 |
+</div>
+
+[截图](#界面) · [下载安装](#下载安装) · [数据口径](#数据从哪来) · [从源码运行](#从源码运行) · [更新日志](CHANGELOG.md)
+
+![总览](docs/screenshots/overview.png)
+
+## 这是什么
+
+一个只在本机运行的 Windows 桌面小工具。它读两类数据：
+
+- **本机会话记录**：`~/.workbuddy/projects/**/*.jsonl`，逐笔、实时、含项目与 Token；
+- **账号云端接口**：余额、周期、账号级逐笔（只读）。
+
+两者合起来，你能在托盘小窗里瞄一眼今天用了多少积分，也能在完整面板里查这一个月花在了哪个模型、哪个项目、哪个小时。
+
+不需要 Python 环境，安装包 13 MB 左右；不需要服务端，不上传任何数据。
+
+## 功能
+
+- **托盘常驻 + 右下角小窗**：单击托盘弹出小窗，再点收回；小窗显示今日积分、额度与分时柱图。
+- **完整面板四页**：总览 / 用量分析 / 积分流水 / 设置，主窗 1408×916，可缩放。
+- **总览**：可用积分、今日消耗、调用笔数、Token 四张 KPI，今日时段分布、额度仪表、30 天趋势、消耗构成。
+- **用量分析**：整月消耗日历热力图、模型用量排行、项目消耗排行、今日洞察。
+- **积分流水**：云端逐笔与本机记录合并，按分钟聚合，支持类型与关键词筛选。
+- **双主题**：深色 / 浅色，图表颜色跟随主题重绘。
+- **零图表库**：柱状、环图、仪表、日历、迷你趋势全部手写 SVG，没有 ECharts / D3。
+
+## 界面
+
+<p align="center">
+  <img src="docs/screenshots/analytics.png" width="49%" alt="用量分析">
+  <img src="docs/screenshots/ledger.png" width="49%" alt="积分流水">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/popup-light.png" width="300" alt="右下角小窗">
+  <br>
+  <sub>小窗：今日使用积分 / 额度 / 分时分布</sub>
+</p>
+
+## 下载安装
+
+1. 打开 [Releases](../../releases/latest)，下载最新的 `WorkBuddyPoints-Setup-<版本>.exe`。
+2. 双击安装。安装包已内置 Python 运行时，**目标机不需要装 Python**。
+3. 首次启动后，点托盘图标 → 右上角头像 → **连接账号**，扫码登录一次即可同步云端数据。
+
+**系统要求**：Windows 10 1803+ 或 Windows 11，x64。唯一外部依赖是系统自带的 **Microsoft Edge WebView2 运行时**（Win11 自带，Win10 多数已随 Edge 安装；安装向导会检测并提示下载）。
+
+**升级与卸载**：程序目录和用户数据是分开的。登录态、账号缓存、额度配置、日志都在 `%APPDATA%\WorkBuddyPoints`，升级、重装、卸载都不会删除，重装后不用重新扫码。
+
+> 公司电脑没有管理员权限时，在安装向导里选「仅为我安装」。
+
+## 数据从哪来
+
+| 指标 | 来源 | 覆盖范围 | 跨设备一致 |
 |---|---|---|---|
-| **账号额度 / 余额 / 周期 / 有效期** | 云端 `billing/meter/*` | 账号级 | 是 |
-| **今日消耗、模型构成、消耗日历** | 云端计费记录优先，本机 JSONL 兜底 | 账号级（近 30 天） | 是（云端 30 天内） |
-| **计费笔数** | 云端 `get-user-request-usage` 的行数 | 账号级 | 是 |
-| **积分流水** | 同上（按分钟合并展示） | 账号级（近 30 天） | 是 |
-| **项目排行 / 热力图** | 本机会话 `cwd` | **仅这台机器，不完整** | 否（云端不返回项目） |
-| **Token** | 本机 `usage.totalTokens` | **仅这台机器，逐次累加会重复** | 否（云端不返回 Token） |
+| 额度 / 余额 / 周期 / 有效期 | 云端 `billing/meter/*` | 账号级 | 是 |
+| 今日消耗、模型构成、消耗日历 | 云端计费记录优先，本机 JSONL 兜底 | 账号级（近 30 天） | 是（30 天内） |
+| 计费笔数、积分流水 | 云端 `get-user-request-usage` | 账号级（近 30 天） | 是 |
+| 项目排行 / 热力图 | 本机会话的 `cwd` | **仅这台机器** | 否 |
+| Token | 本机 `usage.totalTokens` | **仅这台机器** | 否 |
 
-**两个必须知道的限制**（决定了哪些数字能当账单看）：
+两个必须知道的限制：
 
-1. **云端返回的是"计费记录"，不是"调用次数"。** 实测近两天全部落在 5 分钟整点上
-   （秒=00、分钟是 5 的倍数），即按「5 分钟 × 模型」聚合。所以界面上写的是
-   **计费笔数**，一笔 ≠ 一次调用；真实调用次数只有本机知道。
-2. **金额是准的，笔数只能算"批次"。** 周期内逐笔合计与账号自报"已用"实测相差
-   ≈2.4%（一个批次的入账时序差），差额会显示在顶部提示条，以云端已用为准。
+1. **云端返回的是计费记录，不是调用次数**。实测记录都落在 5 分钟整点上（按「5 分钟 × 模型」聚合），所以界面写的是「计费笔数」，一笔 ≠ 一次调用。
+2. **金额准，笔数只能算批次**。周期内逐笔合计与账号自报「已用」实测相差约 2.4%，≥3% 时会在顶部提示条提示，并以云端已用为准。
 
-**换电脑怎么办？** 登录同一账号即可：余额、日历、模型、流水这些"账号级"数据会自动一致；
-只有"项目"和"Token"两列依赖本机记录，云端行里显示 `—`。
-本地明细**不做跨机同步**（见第 5 节「为什么不合并本地明细」）。
+换电脑登录同一账号，余额、日历、模型、流水会自动一致；「项目」和「Token」两列依赖本机记录，云端行显示 `—`。
 
-界面上凡是混用两种口径的地方都会标注：顶部提示条、日历来源 chip、流水副标题、KPI 脚注。
+## 隐私与安全
 
----
+- **纯本机运行**：没有服务端，不上传使用记录，无广告与统计 SDK。
+- **只读**：云端只调用 4 个 `POST /billing/meter/*` 只读接口和 `GET /console/accounts`，不扣费、不改配置。
+- **凭证加密**：登录 Cookie 用 Windows DPAPI 加密后存本机 `session.bin`，不打印、不外传。
+- **不留后门**：正式运行不开放远程调试端口（开发期需显式设 `WB_CDP=1`）；登录窗加载远端页面，但不挂 `js_api`，页面拿不到任何桌面能力。
+- **退出即清除**：点「退出登录」会删除 `session.bin`、清空缓存，并记住不再自动登录。
 
-## 2. 运行
+## 从源码运行
 
-### 开发态
+需要 Python 3.13（仓库按 3.13 开发，其它版本未做验证）。
+
 ```bat
-启动应用.bat                :: 默认直接打开主界面（托盘同时常驻）
-python desktop.py --show    :: 改成启动只弹右下角小窗
-python desktop.py --main    :: 显式指定打开主界面（同默认）
-python desktop.py --debug   :: 打开 devtools
+git clone https://github.com/Oldfoollearnc/workbuddy-points.git
+cd workbuddy-points
+py -3.13 -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python desktop.py
 ```
 
-数据口径单测（无依赖，node 直接跑）：
+启动参数：
+
+| 参数 | 作用 |
+|---|---|
+| 无 | 打开主界面，托盘同时常驻 |
+| `--show` | 启动只弹右下角小窗 |
+| `--main` | 显式打开主界面（同默认） |
+| `--debug` | 打开 devtools |
+
+只想看界面、不想装桌面依赖时，双击 `以浏览器模式预览.bat`：浏览器里会用一份演示数据渲染同样的页面。
+
+**测试**：
+
 ```bat
 node tests\metrics.test.js
+python -m unittest discover -s tests -v
 ```
 
-### 安装包（零环境）
+## 打包安装包
+
 ```bat
-:: 1) 打包（产出 dist\WorkBuddyPoints\）
+:: 1) PyInstaller，产物在 dist\WorkBuddyPoints\
 .venv\Scripts\python.exe -m PyInstaller --noconfirm --clean build.spec
 
-:: 2) 编译安装包（产出 installer\Output\WorkBuddyPoints-Setup-<版本>.exe）
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyVersion=1.1.0 installer\WorkBuddyPoints.iss
-:: 版本号以 version.json 为准（上面这条要与它一致，否则程序内显示和安装包版本会对不上）
+:: 2) Inno Setup，产物在 installer\Output\WorkBuddyPoints-Setup-<版本>.exe
+"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" /DMyVersion=1.7.1 installer\WorkBuddyPoints.iss
 ```
-安装包已内置 Python 解释器与 pywebview/pythonnet 运行时，目标机**不需要装 Python**；
-唯一外部依赖是系统自带的 **WebView2 运行时**（Win10 1803+/Win11 自带，安装时会检测并提示）。
 
-支持"为所有用户安装"与"仅为我安装"（公司电脑无管理员权限时选后者）。
+Inno Setup 装在「所有用户」下时，把上面路径换成 `C:\Program Files (x86)\Inno Setup 6\ISCC.exe`。
 
-**升级不会丢登录态**：安装/升级只覆盖程序目录（`[UninstallDelete]` 只清 `{app}`），
-登录 Cookie、账号缓存、WebView2 登录档、额度配置、日志全部在
-`%APPDATA%\WorkBuddyPoints`，重装与卸载均不删除。
+版本号以 `version.json` 为准，`/DMyVersion` 要与它一致，否则程序内显示和安装包版本会对不上。发布流程见 [`docs/发布流程.md`](docs/发布流程.md)。
 
-**体积**：安装包约 12MB，大头是 Python 运行时（6MB）、OpenSSL（9MB，HTTPS 必需）、
-sqlite3（1.6MB，读客户端数据库必需）与 WebView2 绑定；`build.spec` 已剔除 pywebview
-的其它平台后端（gtk/qt/cocoa/cef/mshtml/android）与测试/文档类标准库。
-`webview/lib/runtimes` 下的 arm64/x86 目录**不能删**——pywebview 启动时会无条件探测三个架构。
+安装包 13 MB 左右，大头是 Python 运行时、OpenSSL（HTTPS）与 sqlite3（读客户端数据库）；`build.spec` 已剔除 pywebview 的其它平台后端与测试类标准库。
 
-**引导图**：左侧竖图与右上角小图由 `tools\make_installer_art.py` 生成
-（改文案/配色后重跑一次，再编译安装包即可）。
-
----
-
-## 3. 目录结构
+## 目录结构
 
 ```
-desktop.py            窗口/托盘/自绘标题栏/js_api（唯一入口）
-tray.py               原生 Win32 托盘（单击弹出面板）
+desktop.py            窗口 / 托盘 / 自绘标题栏 / js_api（唯一入口）
+tray.py               原生 Win32 托盘
 usage_source.py       本机 JSONL 解析与聚合（只读）
-account_service.py    云端账号：扫码登录、四个只读接口、Cookie 持久化
-data_source.py        本机数据目录解析 + SQLite 快照读取（见 docs/本地数据源方案.md）
-app_paths.py          资源目录 / 可写数据目录分离（安装版写 %APPDATA%）
-dpapi.py              Windows DPAPI 加解密（session.bin）
-logutil.py            日志追加写 + 2MB 轮转（三个模块共用）
+account_service.py    云端账号：扫码登录、只读接口、Cookie 持久化
+data_source.py        本机数据目录解析 + SQLite 快照读取
+app_paths.py          资源目录 / 可写数据目录分离
+dpapi.py              Windows DPAPI 加解密
+logutil.py            日志追加写 + 轮转
 index.html            双形态入口（#main / #popup）
-assets/css/tokens.css 设计令牌（明暗两套）
-assets/css/app.css    布局与组件
-assets/js/charts.js   手写 SVG 图表（柱/环/组合/日历/仪表/迷你线）
-assets/js/app.js      渲染、路由、主题、窗口交互
-assets/js/holidays.js 法定节假日表（工作日折算用）
-tools/live.py         开发期自检：CDP 截图 / 求值 / 切页
+assets/css/           设计令牌与布局
+assets/js/            charts.js（手写 SVG）/ app.js / metrics.js
 build.spec            PyInstaller 配置
-installer/            Inno Setup 脚本与产物
-docs/                 设计说明 / 架构 / 数据源方案 / 截图
+installer/            Inno Setup 脚本与引导图
+docs/                 架构、设计、数据源方案、截图
 ```
 
----
+## 设计取舍
 
-## 4. 界面与交互
+- **不合并本地明细到云端**：本地 JSONL 只描述「这台机器」，上传合并需要服务端且容易重复计费，所以跨设备只保证账号级数据一致。
+- **一个口径**：连上账号后，今日消耗 / 调用 / 时段 / 模型全部由云端逐笔算出，和「积分流水」逐行相加完全相等；未连接才退回本机数据。
+- **可用积分 = 云端余额 − 本地待入账**：云端 `available` 是上次同步的快照，减去之后本机又消耗的量，才是此刻更接近真实的数字。
+- **刷新只读本地**：云端请求只在定时任务或显式点「同步」时发生，避免误触高频请求。
+- **一个视图只用一种可视化**：消耗构成只保留环图，额度只用仪表盘 + 三个数，不叠加横条与列表。
+- **差额要露出来**：逐笔合计与云端「已用」的差额只在同一周期内比较，≥3% 才提示，并注明「周期边界与入账时序」。
 
-| 区域 | 内容 |
-|---|---|
-| 顶栏（自绘） | 左：logo + 版本；中：页面标题；右：刷新本地 / 主题 / 头像（账号悬浮栏）、最小化 / 最大化 / 关闭 |
-| 总览 | 数据来源提示条 → 4 KPI → 洞察条 → 今日时段（8列）｜额度与消耗（4列）→ 近 30 天趋势（8列）｜今日消耗构成（4列） |
-| 用量分析 | 消耗日历（整月对齐、按列推入动画）→ 模型使用量 ｜ 项目消耗排行（同栅格对齐）→ 今日洞察 |
-| 积分流水 | 汇总（云端/本机口径随来源）→ 类型与关键词筛选 → 按分钟合并的逐笔（积分列显示该分钟合计） |
-| 设置 | 列表分组、竖向排列：外观 / 显示与行为 / 数据源 / 关于 |
-| 小窗 | 今日使用积分（大字）+ 可用积分（小字）+ 额度 + 延迟说明 → 消耗构成环图 → 今日时段柱图 |
+更多设计说明见 [`docs/架构说明.md`](docs/架构说明.md) 与 [`docs/设计说明.md`](docs/设计说明.md)。
 
-窗口：无系统边框（避免顶部 8px 黑边），边缘 4px 自绘缩放手柄，顶栏可拖动、双击最大化。
-拖动由 Python 端原生循环实现（`GetCursorPos` + `SetWindowPos`，1:1 跟随光标，且限制在
-屏幕可见范围内），小窗与主界面显示时各播放一次 380ms 入场过渡。
+## 常见问题
 
----
+**启动没反应？** 先看 `logs/app.log`（安装版在 `%APPDATA%\WorkBuddyPoints\logs`）。最常见是已有实例在跑，托盘图标被折叠进了通知区。
 
-## 5. 关键设计取舍
+**闪退？** 看 `logs/crash.log` 与 `app.log` 里的 `webview.exit` 行。
 
-**1）不合并本地明细到云端。**
-本地 JSONL 只描述"这台机器"，把它上传/合并需要服务端，且容易重复计费。
-跨设备只保证账号级数据一致（余额、日历、模型、流水），项目维度天生是机器级的。
+**找不到本机数据？** 设置 → 数据源 → 选择目录，或设环境变量 `WORKBUDDY_HOME`。
 
-**2）环形图数字放环外。**
-曾把数值画在圆心，四位数以上会压到圆环；现在数值固定在环下方，环内只留固定短标签。
+**云端一直「未连接」？** 点头像 → 连接账号重新扫码；日志见 `logs/api-probe.log`。接口属于非公开接口，服务端调整后可能需要更新版本。
 
-**3）一个视图只用一种可视化。**
-"今日消耗构成"只保留环图（不再叠加横条与文字列表），"额度与消耗"只保留仪表盘 + 三个数。
+**为什么项目排行是空的？** 项目来自本机会话的 `cwd`，云端不返回；换一台机器就没有历史项目。
 
-**4）刷新按钮只读本地。**
-云端请求只在"定时任务"或显式点"立即同步/同步云端"时发生，避免误触高频请求。
+**杀软报毒？** PyInstaller 打包的无签名程序常被误报，可自行从源码构建，或对 exe 做校验后加白。
 
-**5）一个口径：今日消耗只认云端流水。**
-连上账号后，"今日消耗 / 今日调用 / 时段分布 / 模型构成"全部由 `usageRows`（云端逐笔）
-算出来，和「积分流水」页逐行相加完全相等；未连接时才退回本机 JSONL。
-Token 云端不返回，仍取本机，界面上单独标注。
+## 参与贡献
 
-**6）可用积分 = 云端余额 − 本地待入账。**
-云端 `available` 只是"上次同步那一刻"的快照。减去同步之后本机又消耗的量
-（`usage_source` 带回最近 72 小时的逐笔时间线 `recent`），得到此刻更接近真实的
-可用积分；KPI 脚注会显示 `云端 5,842 − 待入账 16.28` 的拆解，同步后自动归零。
+Issue 和 PR 都欢迎。提交信息沿用 Conventional Commits（`feat:` / `fix:` / `docs:` / `build:` …），仓库带一个 `commit-msg` 钩子会按提交信息自动递增 `version.json`：
 
-**7）只读、不外传。**
-云端只调用四个 `POST /billing/meter/*` 只读接口 + `GET /console/accounts`；
-登录 Cookie 用 DPAPI 加密存本机 `session.bin`，不打印、不上传。
+```bat
+git config core.hooksPath .githooks
+```
 
-**8）默认不开调试端口。**
-`--remote-debugging-port` + `--remote-allow-origins=*` 会让**同机任意进程**能接管
-WebView2、读走全部 Cookie，所以正式运行时不带这两个参数。开发期要用
-`tools/live.py`（截图 / 求值）时显式设 `WB_CDP=1`，退出即失效。
-登录窗加载的是远端页面，**不挂 js_api**：页面里拿不到任何桌面能力。
+- `feat` → 次版本 +1
+- 含 `!:` 或 `BREAKING CHANGE` → 主版本 +1
+- 其它 → 修订 +1
+- 提交信息里写 `[skip version]` 则不动版本号
 
-**9）「退出登录」就是退出。**
-退出时删除 `session.bin`、清空内存与落盘缓存、并记住 `autoLogin=false`，
-下次启动不再自动回填；主动点「连接账号」才恢复自动登录。
+## 许可
 
-**10）逐笔合计与云端「已用」的差额要露出来，而且只在同一周期内比。**
-29 天窗口里会包含周期开始前的消耗，直接相减会把差额从 2.4% 虚高到 9.4%
-（实测教训）。现在按 `CycleStartTime` 裁剪后再比，差额 ≥1% 才提示，
-并在文案里注明「周期边界与入账时序」，以云端已用为准。
+[MIT](LICENSE) © WorkBuddy Points contributors
 
----
-
-## 6. 排查
-
-- 启动没反应：看 `logs/app.log`（安装版在 `%APPDATA%\WorkBuddyPoints\logs`）；
-  最常见是已有实例在跑（托盘图标可能被折叠进通知区）。
-- 闪退：看 `logs/crash.log`（faulthandler 记录原生崩溃现场）与 `app.log` 的 `webview.exit` 行。
-- 找不到本机数据：设置 → 数据源 → 选择目录，或设环境变量 `WORKBUDDY_HOME`。
-- 云端一直"未连接"：点头像 → 连接账号重新扫码；日志见 `logs/api-probe.log`。
-- 开发期要截图/求值（`tools/live.py`）：先 `set WB_CDP=1` 再启动，用完关掉；
-  默认端口是关闭的，直接跑会连不上 9333，这是设计如此。
-
-更多：`docs/设计说明.md`（界面迭代史）、`docs/架构说明.md`（模块与数据流）、
-`docs/本地数据源方案.md`（公司电脑取数方案对比）。
+本项目是个人开发的第三方工具，与 WorkBuddy、腾讯无隶属关系，也未获得其官方支持。程序依赖的云端接口并非公开 API，可能随服务端调整而失效；请自行评估使用风险。

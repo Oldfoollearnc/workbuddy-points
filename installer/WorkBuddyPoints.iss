@@ -75,7 +75,8 @@ Name: "startupicon"; Description: "开机自动启动（最小化到托盘）"; 
 
 [Files]
 Source: "..\dist\WorkBuddyPoints\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
+; 安装完后在程序目录留一份纯文本说明，记事本直接可读（README 面向 GitHub，不适合放进安装包）
+Source: "安装说明.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--main"

@@ -1,0 +1,6 @@
+-r requirements.txt
+
+# 打包与开发期自检工具
+pyinstaller==6.22.3
+websocket-client==1.9.2
+pillow==13.0.0

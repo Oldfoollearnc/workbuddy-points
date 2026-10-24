@@ -31,3 +31,6 @@ desktop.ini
 
 # 项目内部记忆/会话数据
 .workbuddy/
+
+# 开发期截图（含真实余额与项目名，不入公开仓库）
+docs/shots/
