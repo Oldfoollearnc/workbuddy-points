@@ -515,6 +515,31 @@
       <section class="view" data-view="settings">
         <div class="set-page">
 
+          <!-- 每日积分 -->
+          <section class="set-group">
+            <header class="set-group-head">
+              <div><h2>每日积分</h2><p>开机自动领，结论显示在总览顶部</p></div>
+            </header>
+            <div class="set-rows">
+              <div class="set-row">
+                <div class="set-label"><b>启动时自动签到</b><em>每次打开程序领当日 100 分，已签到自动跳过</em></div>
+                <label class="switch-wrap"><input type="checkbox" id="optCheckinAuto" checked><i class="switch"></i></label>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>顺带派猫猫旅行</b><em>到家自动领，随后重新派出（1–4 小时带回 5–10 分）；当天派过就跳过</em></div>
+                <label class="switch-wrap"><input type="checkbox" id="optCheckinTravel" checked><i class="switch"></i></label>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>计入每日签到</b><em>把签到赠送的 100 分/天计入可用额度</em></div>
+                <label class="switch-wrap"><input type="checkbox" id="optSignin" checked><i class="switch"></i></label>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>工作日折算</b><em>剔除周末与法定节假日，计算每日可用积分</em></div>
+                <label class="switch-wrap"><input type="checkbox" id="optHoliday" checked><i class="switch"></i></label>
+              </div>
+            </div>
+          </section>
+
           <!-- 外观 -->
           <section class="set-group">
             <header class="set-group-head">
@@ -545,31 +570,6 @@
                   <button data-motion-choice="reduced">精简</button>
                   <button data-motion-choice="off">关闭</button>
                 </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- 每日积分 -->
-          <section class="set-group">
-            <header class="set-group-head">
-              <div><h2>每日积分</h2><p>开机自动领，结论显示在总览顶部</p></div>
-            </header>
-            <div class="set-rows">
-              <div class="set-row">
-                <div class="set-label"><b>启动时自动签到</b><em>每次打开程序领当日 100 分，已签到自动跳过</em></div>
-                <label class="switch-wrap"><input type="checkbox" id="optCheckinAuto" checked><i class="switch"></i></label>
-              </div>
-              <div class="set-row">
-                <div class="set-label"><b>顺带派猫猫旅行</b><em>到家自动领，随后重新派出（1–4 小时带回 5–10 分）；当天派过就跳过</em></div>
-                <label class="switch-wrap"><input type="checkbox" id="optCheckinTravel" checked><i class="switch"></i></label>
-              </div>
-              <div class="set-row">
-                <div class="set-label"><b>计入每日签到</b><em>把签到赠送的 100 分/天计入可用额度</em></div>
-                <label class="switch-wrap"><input type="checkbox" id="optSignin" checked><i class="switch"></i></label>
-              </div>
-              <div class="set-row">
-                <div class="set-label"><b>工作日折算</b><em>剔除周末与法定节假日，计算每日可用积分</em></div>
-                <label class="switch-wrap"><input type="checkbox" id="optHoliday" checked><i class="switch"></i></label>
               </div>
             </div>
           </section>
