@@ -15,6 +15,10 @@
 #define MyAppShortName "WorkBuddy Points"
 #define MyAppPublisher "WorkBuddy"
 #define MyAppExeName "WorkBuddyPoints.exe"
+#ifndef SrcDir
+  #define SrcDir "..\dist\WorkBuddyPoints"
+#endif
+
 #ifndef MyVersion
   #define MyVersion "1.0.0"
 #endif
@@ -74,7 +78,7 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 Name: "startupicon"; Description: "开机自动启动（最小化到托盘）"; GroupDescription: "启动项："; Flags: unchecked
 
 [Files]
-Source: "..\dist\WorkBuddyPoints\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SrcDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; 安装完后在程序目录留一份纯文本说明，记事本直接可读（README 面向 GitHub，不适合放进安装包）
 Source: "安装说明.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
 
