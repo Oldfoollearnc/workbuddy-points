@@ -35,6 +35,7 @@
   <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2Z"/></symbol>
   <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5.4l3.4 2"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5M12 7.6v.8"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4.2 3.2 19.8h17.6L12 4.2Z"/><path d="M12 9.8v4.6M12 17.1v.8"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M4.5 12.5l5 5 10-11"/></symbol>
   <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
   <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M18 13l-6 6-6-6"/></symbol>
@@ -492,6 +493,9 @@
                 <svg class="i"><use href="#i-search"/></svg>
                 <input id="ledgerSearch" type="text" placeholder="搜索模型 / 项目 / 任务" autocomplete="off">
               </label>
+              <button class="btn btn-ghost btn-sm" id="ledgerExport" title="导出云端逐笔流水为 CSV">
+                <svg class="i"><use href="#i-download"/></svg>导出
+              </button>
             </div>
           </header>
 
@@ -714,6 +718,10 @@
               <div class="set-row">
                 <div class="set-label"><b>版本</b><em>每次提交自动递增，格式 v主.次.修订</em></div>
                 <b class="set-value mono" id="aboutVersion">v1.0.0</b>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>导出诊断信息</b><em>把日志尾部、版本、账号与数据源状态打成 zip；不含手机号与登录凭证</em></div>
+                <button class="btn btn-soft btn-sm" id="btnDiag"><svg class="i"><use href="#i-download"/></svg>导出</button>
               </div>
               <div class="set-row">
                 <div class="set-label"><b>快捷面板</b><em>独立常驻面板，与窗口最小化不同</em></div>

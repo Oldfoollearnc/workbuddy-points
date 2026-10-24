@@ -61,6 +61,7 @@ HTCLIENT = 1
 VK_ESCAPE = 0x1B
 
 ID_OPEN_POPUP, ID_OPEN_MAIN, ID_REFRESH, ID_EXIT = 1, 2, 3, 4
+ID_SYNC, ID_AUTOSTART = 5, 6
 
 # 菜单尺寸（逻辑像素；进程 DPI 无关，和界面 1:1 对应）
 MENU_W = 176
@@ -231,6 +232,7 @@ class Tray:
     """系统托盘图标：左键单击 → 快捷面板；右键 → 自绘菜单。"""
 
     def __init__(self, icon_path, on_click=None, on_open_main=None, on_refresh=None, on_exit=None,
+                 on_sync=None, on_autostart=None, autostart_state=None,
                  tooltip="WorkBuddy 积分观测台 · 单击查看今日积分", logger=None):
         self.log = logger or (lambda msg: None)
         self.icon_path = icon_path
@@ -238,6 +240,9 @@ class Tray:
         self.on_open_main = on_open_main
         self.on_refresh = on_refresh
         self.on_exit = on_exit
+        self.on_sync = on_sync
+        self.on_autostart = on_autostart
+        self.autostart_state = autostart_state      # 返回 bool，用来画勾
         self.tooltip = tooltip[:120]
 
         self.hwnd = None
@@ -420,10 +425,18 @@ class Tray:
         return hwnd
 
     def _popup_menu(self):
+        auto_on = False
+        try:
+            auto_on = bool(self.autostart_state and self.autostart_state())
+        except Exception:
+            auto_on = False
         self._menu_items = [
             (ID_OPEN_POPUP, "打开快捷面板", "#2563EB"),
             (ID_OPEN_MAIN, "展开完整主界面", "#06B6D4"),
             (ID_REFRESH, "刷新数据", "#10B981"),
+            (ID_SYNC, "立即同步云端", "#7C3AED"),
+            (0, None, None),
+            (ID_AUTOSTART, ("✓ 开机自启" if auto_on else "开机自启"), "#64748B"),
             (0, None, None),
             (ID_EXIT, "退出", "#DC2626"),
         ]
@@ -578,6 +591,9 @@ class Tray:
         user32.AppendMenuW(menu, MF_STRING, ID_OPEN_POPUP, "打开快捷面板")
         user32.AppendMenuW(menu, MF_STRING, ID_OPEN_MAIN, "展开完整主界面")
         user32.AppendMenuW(menu, MF_STRING, ID_REFRESH, "刷新数据")
+        user32.AppendMenuW(menu, MF_STRING, ID_SYNC, "立即同步云端")
+        user32.AppendMenuW(menu, MF_STRING | MF_SEPARATOR, 0, None)
+        user32.AppendMenuW(menu, MF_STRING, ID_AUTOSTART, "开机自启（切换）")
         user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
         user32.AppendMenuW(menu, MF_STRING, ID_EXIT, "退出")
         user32.SetMenuDefaultItem(menu, ID_OPEN_POPUP, 0)
@@ -599,6 +615,10 @@ class Tray:
             self._safe(self.on_open_main)
         elif cmd == ID_REFRESH:
             self._safe(self.on_refresh)
+        elif cmd == ID_SYNC:
+            self._safe(self.on_sync)
+        elif cmd == ID_AUTOSTART:
+            self._safe(self.on_autostart)
         elif cmd == ID_EXIT:
             self._safe(self.on_exit)
 

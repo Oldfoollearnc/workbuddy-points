@@ -20,6 +20,7 @@ WorkBuddy 账号积分 · 联网取数服务（最终版）
 只读、不写、不下单；登录态只存在应用自己的 WebView2 profile。
 """
 import datetime as dt
+import hashlib
 import json
 import os
 import threading
@@ -501,10 +502,36 @@ class AccountService:
                 raise RuntimeError(last_err or "接口未返回数据")
 
             mapped = self._map(bill, self.state.get("usageRows") or [])
+
+            # —— 降级保护 ——
+            # 接口字段改名/分页失效时，最伤人的不是报错，而是"看起来同步成功、数字全变 0"。
+            # 这里做两件事：明显不合理的新值不覆盖旧值，并打上 stale 标记让界面说明。
+            prev = (self.state.get("cloud") or {})
+            fresh = mapped["cloud"]
+            stale_note = ""
+            try:
+                new_avail = fresh.get("available") or 0
+                old_avail = prev.get("available") or 0
+                new_rows = mapped.get("usageRows") or []
+                if old_avail > 0 and new_avail <= 0:
+                    fresh["available"] = old_avail
+                    fresh["total"] = prev.get("total") or fresh.get("total") or 0
+                    fresh["used"] = prev.get("used") or 0
+                    stale_note = "云端余额字段异常，沿用上次数据"
+                elif prev.get("used", 0) > 0 and not new_rows:
+                    mapped["usageRows"] = self.state.get("usageRows") or []
+                    mapped["daily"] = self.state.get("daily") or []
+                    stale_note = "本次没有取到逐笔明细，沿用上次数据"
+            except Exception as e:
+                _log(f"degrade check error: {e}")
+            if stale_note:
+                fresh["stale"] = stale_note
+                _log("sync degraded: %s" % stale_note)
+
             with self.lock:
                 self.state.update({
                     "status": "connected",
-                    "cloud": mapped["cloud"],
+                    "cloud": fresh,
                     "packages": mapped["packages"],
                     "daily": mapped["daily"],
                     "cloudWeek": mapped.get("cloudWeek"),
@@ -664,8 +691,10 @@ class AccountService:
                     "nickname": a0.get("nickname") or "",
                     "avatar": a0.get("avatarUrl") or "",
                     "phone": a0.get("phoneNumber") or "",
-                    "uid": a0.get("uid") or "",
-                    "uin": str(a0.get("uin") or ""),
+                    # UID / UIN 不落盘：本地任何地方都不展示它们，
+                    # 只留一个不可逆哈希用于区分账号（多账号功能会用到这个哈希）。
+                    "uidHash": hashlib.sha256(
+                        str(a0.get("uid") or "").encode("utf-8")).hexdigest()[:16],
                     "accountType": a0.get("type") or "",
                 }
         except Exception:

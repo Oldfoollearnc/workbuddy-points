@@ -35,6 +35,8 @@ CACHE = app_paths.data_path("checkin.json")
 ORIGIN = "https://www.workbuddy.cn"
 PROFILE_PATH = "/profile/plans-usage"
 
+BACKOFF_SEC = (60, 300, 900)   # 失败重试：1 分钟 → 5 分钟 → 15 分钟
+
 STATUS_PATH = "/billing/meter/checkin-activity-status"
 CHECKIN_PATH = "/billing/meter/daily-checkin"
 TRAVEL_STATUS = "/activity/growth/buddy/travel/status"
@@ -94,6 +96,7 @@ class CheckinService:
         self._watch_started = False
         self._watch_stop = threading.Event()
         self.on_update = None           # 后台跑完一轮后的回调（刷新界面）
+        self._fail_streak = 0           # 连续失败次数，用于退避
         self._tasks = {}                # 成长任务缓存 {"at": ts, "data": {...}}
         self.state = {
             "status": "idle",           # idle | running | done | failed
@@ -168,14 +171,18 @@ class CheckinService:
         href = self.account._href() or ""
         return ("workbuddy.cn" in href) or ("codebuddy.cn" in href)
 
-    def _ensure_page(self, timeout=12.0):
+    def _reload_page(self, timeout=12.0):
+        """强制重新加载页面，用于 401 后的自愈（会话多半只是页面状态坏了）。"""
+        return self._ensure_page(timeout=timeout, force=True)
+
+    def _ensure_page(self, timeout=12.0, force=False):
         """确保隐藏窗口停在 workbuddy 的页面里，fetch 才有同源会话。
 
         导航必须带超时：pywebview 的 load_url 会一直等到加载完成，网络不好或
         会话异常时能卡几分钟，整个签到线程就吊死在那里（实测遇过一次）。
         这里把导航丢进子线程，最多等 timeout 秒，超时就按"页面没就绪"处理。
         """
-        if self._page_ready():
+        if self._page_ready() and not force:
             return True
 
         done = threading.Event()
@@ -380,19 +387,33 @@ class CheckinService:
             return
         while not self._watch_stop.is_set():
             travel = None
+            ok = True
             try:
                 if self.options.get("auto", True):
                     snap = self.run(travel_auto=bool(self.options.get("travel", True)),
                                     lock_timeout=8, quiet=True)
-                    travel = ((snap or {}).get("result") or {}).get("travel")
+                    res = (snap or {}).get("result") or {}
+                    ok = bool(res.get("ok"))
+                    travel = res.get("travel")
                     if self.on_update:
                         try:
                             self.on_update()
                         except Exception as e:
                             _log("checkin notify error: %s" % e)
             except Exception as e:
+                ok = False
                 _log("checkin watch error: %s" % e)
-            if self._sleep_until(self._next_wait(travel)):
+
+            # 失败时按 1 → 5 → 15 分钟退避，最多三次；成功立刻清零。
+            # 不加这个，一次网络抖动就要等到下个自然节点（可能 4 小时后）。
+            if ok:
+                self._fail_streak = 0
+                wait = self._next_wait(travel)
+            else:
+                self._fail_streak = min(self._fail_streak + 1, len(BACKOFF_SEC))
+                wait = BACKOFF_SEC[self._fail_streak - 1]
+                _log("checkin retry #%d，%ds 后再试" % (self._fail_streak, wait))
+            if self._sleep_until(wait):
                 return
 
     @staticmethod
@@ -508,6 +529,11 @@ class CheckinService:
                                   "error": None, "skipped": True}
             else:
                 st = self._call(STATUS_PATH, "POST")
+                if st.get("status") in (401, 403):
+                    # 会话多半只是页面状态坏了：重载一次再试，比直接让用户扫码温和得多
+                    _log("checkin status 401，重载页面后重试")
+                    if self._reload_page():
+                        st = self._call(STATUS_PATH, "POST", retry=0)
                 if st.get("status") != 200:
                     res["error"] = self._http_hint(st, "读取签到状态失败")
                     res["reason"] = "status_failed"

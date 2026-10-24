@@ -2233,3 +2233,6 @@ body[data-mode="popup"] .rz { display: none; }
 .loading-ring i:nth-child(3) { inset: 8px; border-top-color: var(--good); animation-duration: 1100ms; }
 @keyframes ringSpin { to { transform: rotate(360deg); } }
 @keyframes veilIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* 降级提示：同步成功但数据可疑时，在提示条里标出来 */
+.warn-text { color: var(--warn); font-weight: 600; }

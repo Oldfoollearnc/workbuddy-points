@@ -47,7 +47,7 @@
       holiday: true, signin: true, localRefresh: 60,
       calGlow: true, calIntro: true, groupMinute: true, notice: true,
       checkinAuto: true, checkinTravel: true, checkinDismissed: '',
-      sideSwipeSec: 3, popSwipeSec: 5 },
+      sideSwipeSec: 3, popSwipeSec: 5, warnDismissed: '' },
     readPrefs()
   );
 
@@ -562,6 +562,27 @@
     ui.lastCalSig = '';
   }
 
+  /**
+   * 错误边界：单个区块渲染失败只废掉那一块，其余照常。
+   * 以前任何一个 render* 抛异常都会让整页停在半截（白屏），
+   * 用户只会觉得"程序坏了"，而实际可能只是某个字段格式不对。
+   */
+  function safeRender(name, fn) {
+    try {
+      fn();
+      return true;
+    } catch (e) {
+      console.error('[render:' + name + ']', e);
+      // 同一块每会话只提示一次，避免定时刷新把 toast 刷屏
+      if (!ui.renderFailed) ui.renderFailed = new Set();
+      if (!ui.renderFailed.has(name)) {
+        ui.renderFailed.add(name);
+        try { toast(name + ' 渲染失败，其他区域不受影响', 'i-alert'); } catch (err) { /* ignore */ }
+      }
+      return false;
+    }
+  }
+
   function renderActive(force) {
     // 小窗入场期间不接受外部触发的重绘：可见性变化、定时刷新都会抢主线程，
     // 中途重排一次动画就"卡一下"。动画结束后由 enterPopup 统一补渲染。
@@ -569,16 +590,22 @@
     const now = performance.now();
     if (!force && now - lastRender < 250) return;
     lastRender = now;
-    if (state.mode === 'popup') { renderPopup(); return; }
+    if (state.mode === 'popup') { safeRender('小窗', renderPopup); return; }
     // 先统一标记"只出终态"，渲染完再把视野内的重绘成带生长动画的版本
-    $$('[data-chart]').forEach(el => { el.dataset.anim = '0'; });
-    renderSidebar();
-    renderSideSwipe();     // 左下角卡片常驻，切页也要跟着数字走
-    if (state.view === 'overview') { renderOverview(); renderCheckin(); }
-    else if (state.view === 'analytics') renderAnalytics();
-    else if (state.view === 'ledger') renderLedger();
-    else if (state.view === 'settings') renderSettings();
-    revealCharts();
+    try { $$('[data-chart]').forEach(el => { el.dataset.anim = '0'; }); } catch (e) { /* ignore */ }
+    safeRender('侧栏', renderSidebar);
+    safeRender('左下卡片', renderSideSwipe);   // 常驻，切页也要跟着数字走
+    if (state.view === 'overview') {
+      safeRender('总览', renderOverview);
+      safeRender('签到条', renderCheckin);
+    } else if (state.view === 'analytics') {
+      safeRender('用量分析', renderAnalytics);
+    } else if (state.view === 'ledger') {
+      safeRender('流水', renderLedger);
+    } else if (state.view === 'settings') {
+      safeRender('设置', renderSettings);
+    }
+    try { revealCharts(); } catch (e) { /* ignore */ }
   }
 
   let localTimer = null;
@@ -599,7 +626,9 @@
       const bucketed = !!(ACCOUNT.cloud && ACCOUNT.cloud.countKind === 'bucket');
       txt = `云端每 ${every}同步（上次 ${sync || '—'}）：消耗 / 笔数取<b>${bucketed ? '计费记录' : '逐笔'}</b>`
           + (bucketed ? `（5 分钟 × 模型聚合，一笔 ≠ 一次调用）` : '')
-          + `，Token 取本机。`;
+          + `，Token 取本机。`
+          + (ACCOUNT.cloud && ACCOUNT.cloud.stale
+              ? ` <b class="warn-text">⚠ ${esc(ACCOUNT.cloud.stale)}</b>` : '');
     } else {
       txt = `当前只有<b>本机记录</b>：消耗与 Token 实时，但<b>不含账号余额</b>；`
           + `点右上角头像 → 连接账号（扫码一次），之后自动显示可用积分与周期。`;
@@ -1161,6 +1190,30 @@
     }
   }
 
+  /** 额度 / 消耗预警：每天最多弹一次，不打扰。 */
+  function maybeWarnQuota() {
+    try {
+      if (!ACCOUNT || ACCOUNT.status !== 'connected') return;
+      const today = todayKey();
+      if (prefs.warnDismissed === today) return;
+      const al = allowance(effAccount());
+      const msgs = [];
+      if (al.available > 0 && al.available < 500) {
+        msgs.push(`可用积分只剩 ${F.credit(al.available)} 分`);
+      }
+      const stat = todayStat();
+      const prev = (D.daily || []).slice(-8, -1).map(d => d.points || 0);
+      const avg = prev.length ? prev.reduce((a, b) => a + b, 0) / prev.length : 0;
+      if (avg > 1 && stat.consumed > avg * 3 && stat.consumed > 10) {
+        msgs.push(`今日消耗 ${F.credit(stat.consumed)} 分，是近 7 天均值的 ${(stat.consumed / avg).toFixed(1)} 倍`);
+      }
+      if (!msgs.length) return;
+      prefs.warnDismissed = today;
+      savePrefs();
+      toast(msgs.join('；'), 'i-alert');
+    } catch (e) { /* 预警失败不能影响主渲染 */ }
+  }
+
   function renderOverview() {
     const acc = effAccount();
     const configured = hasQuota();
@@ -1263,6 +1316,7 @@
     renderTrend();
 
     renderQuotaCard(acc, configured);
+    maybeWarnQuota();
   }
 
   /* ---------------- 额度与消耗：今日 / 本周 / 本月 三个口径 ---------------- */
@@ -1554,19 +1608,12 @@
       : '暂无数据');
     renderRows($('#projectRank'), projItems, { limit: 6, empty: '近 7 天暂无项目消耗' });
 
+    // 说明：这段在用量分析页，历史上也没有 #insightList 容器，一直未生效；
+    // 额度预警已改到总览用 toast 提示（见 maybeWarnQuota）。
     const list = $('#insightList');
     if (list) {
       const connected = !!(ACCOUNT && ACCOUNT.status === 'connected');
       const items = (D.insights || []).filter(it => !(connected && /额度/.test(it.title || '')));
-      if (connected) {
-        const al = allowance(effAccount());
-        items.push({
-          icon: 'i-clock',
-          title: '额度可用性',
-          text: `本周期剩余 <b>${F.credit(al.available)}</b> 分，按剩余 <b>${leftDaysText(al)}</b> 折算，`
-              + `每日约 <b>${F.credit(al.perDay)}</b> 分；有效期至 <b>${(ACCOUNT.cloud && ACCOUNT.cloud.expireAtText) || '—'}</b>。`
-        });
-      }
       list.innerHTML = items.map((it, i) => `
         <div class="insight-item" style="animation-delay:${i * 60}ms">
           <span class="badge"><svg class="i"><use href="#${it.icon || 'i-info'}"/></svg></span>
@@ -2111,6 +2158,36 @@
       renderCheckin();
     });
     bindToggle('#optCheckinTravel', 'checkinTravel', () => pushCheckinOptions());
+
+    const ledgerExport = $('#ledgerExport');
+    if (ledgerExport) ledgerExport.addEventListener('click', async () => {
+      if (!bridge.has() || !bridge.can('export_ledger_csv')) return;
+      ledgerExport.disabled = true;
+      try {
+        const r = await bridge.call('export_ledger_csv');
+        if (r && r.ok) toast('已导出 ' + r.count + ' 条：' + r.path);
+        else if (!(r && r.cancelled)) toast('导出失败：' + ((r && r.error) || '未知错误'), 'i-alert');
+      } catch (e) {
+        toast('导出失败', 'i-alert');
+      } finally {
+        ledgerExport.disabled = false;
+      }
+    });
+
+    const diagBtn = $('#btnDiag');
+    if (diagBtn) diagBtn.addEventListener('click', async () => {
+      if (!bridge.has() || !bridge.can('export_diagnostics')) return;
+      diagBtn.disabled = true;
+      try {
+        const r = await bridge.call('export_diagnostics');
+        if (r && r.ok) toast('已导出：' + r.path);
+        else if (!(r && r.cancelled)) toast('导出失败：' + ((r && r.error) || '未知错误'), 'i-alert');
+      } catch (e) {
+        toast('导出失败', 'i-alert');
+      } finally {
+        diagBtn.disabled = false;
+      }
+    });
 
     const autoEl = $('#optAutostart');
     if (autoEl) autoEl.addEventListener('change', async () => {
@@ -2768,6 +2845,8 @@
       return ok;
     },
     /** 由 Python 在后台签到结束后调用：把结论推到结果条上 */
+    /** 供 Python 侧（托盘菜单等）弹一条提示 */
+    toast: (msg, icon) => { try { toast(msg, icon); } catch (e) { /* ignore */ } },
     reloadCheckin: async () => {
       const ok = await loadCheckin();
       await loadTasks();

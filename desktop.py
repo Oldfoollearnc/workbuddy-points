@@ -20,6 +20,7 @@ python desktop.py            # 打开主界面（默认）
 python desktop.py --show     # 启动只弹小窗
 python desktop.py --main     # 同默认（显式写法）
 """
+import csv
 import ctypes
 import faulthandler
 import json
@@ -45,6 +46,7 @@ import webview
 import app_paths
 import autostart
 import data_source
+import diagnostics
 import logutil
 
 from win32_utils import (      # noqa: E402  Win32 底层工具（拆分自本文件，行为未变）
@@ -943,6 +945,70 @@ class Api:
         """成长计划任务进度（活动卡第四格用，带 30 分钟缓存）。"""
         return self._desk.checkin.tasks()
 
+    def export_ledger_csv(self):
+        """把云端逐笔流水导出成 CSV（utf-8-sig，Excel 直接打开不乱码）。"""
+        try:
+            rows = self._desk.account.state.get("usageRows") or []
+            if not rows:
+                return {"ok": False, "error": "还没有可导出的流水，先同步一次云端"}
+            win = self._desk.main or self._desk.popup
+            name = "WorkBuddy-流水-%s.csv" % dt.datetime.now().strftime("%Y%m%d-%H%M")
+            picked = win.create_file_dialog(webview.SAVE_DIALOG, save_filename=name)
+            if not picked:
+                return {"ok": False, "cancelled": True}
+            path = picked[0] if isinstance(picked, (list, tuple)) else picked
+            with open(path, "w", encoding="utf-8-sig", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(["时间", "模型", "用途", "积分"])
+                for r in rows:
+                    w.writerow([r.get("t") or "", r.get("model") or "",
+                                r.get("purpose") or "", r.get("credit") or 0])
+            log("export_ledger_csv -> %s (%d 行)" % (path, len(rows)))
+            return {"ok": True, "path": path, "count": len(rows)}
+        except Exception as e:
+            log(f"export_ledger_csv error: {e}")
+            return {"ok": False, "error": str(e)[:160]}
+
+    def export_diagnostics(self):
+        """把排障要用的东西打成 zip（不含手机号 / cookie / 登录凭证）。"""
+        try:
+            win = self._desk.main or self._desk.popup
+            picked = win.create_file_dialog(webview.FOLDER_DIALOG)
+            if not picked:
+                return {"ok": False, "cancelled": True}
+            dest = picked[0] if isinstance(picked, (list, tuple)) else picked
+
+            def _g(fn, default=None):
+                try:
+                    return fn()
+                except Exception:
+                    return default
+
+            acc = _g(self._desk.account.snapshot, {}) or {}
+            state = {
+                "账号状态": acc.get("status"),
+                "上次同步": acc.get("lastSync"),
+                "同步间隔(分钟)": acc.get("interval"),
+                "云端可用积分": (acc.get("cloud") or {}).get("available"),
+                "云端本周期已用": (acc.get("cloud") or {}).get("used"),
+                "签到状态": _g(lambda: (self._desk.checkin.snapshot().get("result") or {}).get("checkin")),
+                "旅行状态": _g(lambda: ((self._desk.checkin.snapshot().get("result") or {}).get("travel") or {}).get("state")),
+                "开机自启": _g(autostart.is_enabled),
+                "本地数据目录": _g(lambda: (self._desk.usage.snapshot() or {}).get("home")),
+            }
+            path = diagnostics.build(
+                dest,
+                version=read_version(),
+                log_path=LOG_PATH,
+                data_dir=app_paths.data_dir(),
+                app_state=state,
+            )
+            log("export_diagnostics -> %s" % path)
+            return {"ok": True, "path": path}
+        except Exception as e:
+            log(f"export_diagnostics error: {e}")
+            return {"ok": False, "error": str(e)[:200]}
+
     def get_autostart(self):
         """开机自启：当前是否开启 + 会写进注册表的命令（供设置页展示）。"""
         return {"on": autostart.is_enabled(), "command": autostart.launch_command()}
@@ -1159,11 +1225,26 @@ def main():
                 log(f"sync(one-shot) error: {e}")
         threading.Thread(target=_one_shot, daemon=True).start()
 
+    def _tray_autostart():
+        """托盘菜单里切换开机自启，成功后弹个气泡说明。"""
+        try:
+            on = not autostart.is_enabled()
+            autostart.set_enabled(on)
+            msg = "已开启开机自启（静默到托盘）" if on else "已关闭开机自启"
+            log("tray autostart -> %s" % on)
+            for w in (app.main, app.popup):
+                app._safe_js(w, "window.App && App.toast && App.toast('%s')" % msg)
+        except Exception as e:
+            log(f"tray autostart error: {e}")
+
     tray = Tray(
         ICON,
         on_click=app.toggle_popup,
         on_open_main=app.open_main,
         on_refresh=app.refresh_all,
+        on_sync=lambda: app.account.sync(),
+        on_autostart=_tray_autostart,
+        autostart_state=autostart.is_enabled,
         on_exit=app.quit,
         logger=log,
     )
