@@ -2193,18 +2193,6 @@
       }
     });
 
-    const testNotify = $('#btnTestNotify');
-    if (testNotify) testNotify.addEventListener('click', async () => {
-      if (!bridge.has() || !bridge.can('test_notify')) return;
-      try {
-        const r = await bridge.call('test_notify');
-        const where = { main: '主窗', popup: '小窗', tray: '托盘气泡' }[(r && r.where)] || '未知';
-        toast('已投递到：' + where);
-      } catch (e) {
-        toast('测试通知失败', 'i-alert');
-      }
-    });
-
     const diagBtn = $('#btnDiag');
     if (diagBtn) diagBtn.addEventListener('click', async () => {
       if (!bridge.has() || !bridge.can('export_diagnostics')) return;

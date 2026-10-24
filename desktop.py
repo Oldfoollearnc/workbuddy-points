@@ -1039,7 +1039,11 @@ class Api:
             return {"ok": False, "error": str(e)[:200]}
 
     def test_notify(self):
-        """设置页的「测试通知」：走一遍真实分流，返回投递到了哪里。"""
+        """内部自测用：走一遍真实分流并返回投递到了哪里。
+
+        界面上已经没有入口（验证完就撤了），保留接口是为了以后排查时
+        能直接从前端 console 调 window.pywebview.api.test_notify()。
+        """
         try:
             where = self._desk.notify("这是一条测试通知：能看到就说明分流正常", "info")
             return {"ok": True, "where": where}

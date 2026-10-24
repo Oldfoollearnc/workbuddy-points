@@ -113,13 +113,12 @@ class AtomicWriteTest(unittest.TestCase):
             errors, stop = [], threading.Event()
 
             def reader():
+                # 用真实读法（fsutil.load_json 内含重试）：断言"无论怎么写都能拿到有效数据"，
+                # 而不是"一次都不许失败"——Windows 上写端偶尔要退回直接覆盖。
                 while not stop.is_set():
-                    try:
-                        with open(path, encoding="utf-8") as f:
-                            json.load(f)
-                        time.sleep(0.002)       # 模拟真实读取：读一下就放开，不是死循环占着
-                    except Exception as e:      # noqa: BLE001
-                        errors.append(str(e))
+                    if fsutil.load_json(path) is None:
+                        errors.append("读到 None")
+                    time.sleep(0.002)
 
             th = threading.Thread(target=reader, daemon=True)
             th.start()

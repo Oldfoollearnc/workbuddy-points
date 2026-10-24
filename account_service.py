@@ -169,8 +169,9 @@ class AccountService:
 
     def _load_cache(self):
         try:
-            with open(CACHE, encoding="utf-8") as f:
-                d = json.load(f)
+            d = fsutil.load_json(CACHE)
+            if d is None:
+                raise FileNotFoundError(CACHE)
             for k in ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "usageRows", "lastSync", "interval", "origin", "autoLogin"):
                 if k in d:
                     self.state[k] = d[k]

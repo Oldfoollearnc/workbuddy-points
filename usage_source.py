@@ -352,14 +352,20 @@ class UsageService:
 
     def _load_cache(self):
         """读缓存；结构/版本不符直接丢弃（返回 None）。损坏的缓存不该让程序起不来。"""
-        try:
-            with open(CACHE_PATH, encoding="utf-8") as f:
-                cache = json.load(f)
-        except FileNotFoundError:
-            return None
-        except Exception as e:
-            log(f"cache read error: {e}")
-            return None
+        cache = None
+        for attempt in range(3):
+            try:
+                with open(CACHE_PATH, encoding="utf-8") as f:
+                    cache = json.load(f)
+                break
+            except FileNotFoundError:
+                return None
+            except Exception as e:
+                # 撞上写端正在替换文件时会读到半截，隔一会儿重读通常就正常了
+                if attempt == 2:
+                    log(f"cache read error: {e}")
+                    return None
+                time.sleep(0.05)
         if not isinstance(cache, dict) or cache.get("ver") != CACHE_VER:
             return None
         if not isinstance(cache.get("files"), dict):

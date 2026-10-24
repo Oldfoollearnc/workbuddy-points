@@ -46,12 +46,19 @@ def save_json(path, data, indent=None):
         pass
 
 
-def load_json(path, default=None):
-    """读 JSON；文件不存在或损坏都返回 default。"""
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return default
-    except Exception:
-        return default
+def load_json(path, default=None, retries=2):
+    """读 JSON；文件不存在或损坏都返回 default。
+
+    偶发解析失败多半是"写端正好在替换文件"，隔几十毫秒重读一次通常就好了
+    （Windows 上写端口按 `os.replace` 失败时会退回直接覆盖，那一瞬间可能被读端撞上）。
+    """
+    for attempt in range(retries + 1):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return default
+        except Exception:
+            if attempt >= retries:
+                return default
+            time.sleep(0.05)
