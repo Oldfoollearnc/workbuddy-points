@@ -45,6 +45,16 @@ import webview
 import app_paths
 import data_source
 import logutil
+
+from win32_utils import (      # noqa: E402  Win32 底层工具（拆分自本文件，行为未变）
+    RECT, POINT, MONITORINFO,
+    dpi_scale, work_area, virtual_screen, clamp_main_pos,
+    set_app_id, find_hwnd, on_taskbar, round_corners, strip_nonclient,
+    single_instance, signal_show,
+    SW_MINIMIZE, SW_MAXIMIZE, SW_RESTORE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE, SWP_FRAMECHANGED,
+    GWL_STYLE, KEEP_VISIBLE_X, KEEP_VISIBLE_Y,
+)
 import usage_source
 from account_service import AccountService, CDP_PORT, cdp_enabled
 from checkin_service import CheckinService
@@ -162,71 +172,6 @@ def alert(title, text):
         user32.MessageBoxW(None, text, title, 0x10)
     except Exception:
         pass
-
-
-def dpi_scale():
-    try:
-        return max(1.0, user32.GetDpiForSystem() / 96.0)
-    except Exception:
-        return 1.0
-
-
-def work_area():
-    r = RECT()
-    try:
-        if user32.SystemParametersInfoW(0x0030, 0, ctypes.byref(r), 0):
-            return r.left, r.top, r.right, r.bottom
-    except Exception:
-        pass
-    return 0, 0, user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
-
-
-def virtual_screen():
-    """整个虚拟桌面（多显示器时包含负坐标屏），用于判断窗口是否还在可见范围。"""
-    try:
-        x = user32.GetSystemMetrics(SM_XVIRTUALSCREEN)
-        y = user32.GetSystemMetrics(SM_YVIRTUALSCREEN)
-        w = user32.GetSystemMetrics(SM_CXVIRTUALSCREEN)
-        h = user32.GetSystemMetrics(SM_CYVIRTUALSCREEN)
-        if w > 0 and h > 0:
-            return x, y, x + w, y + h
-    except Exception:
-        pass
-    return work_area()
-
-
-def clamp_main_pos(x, y, w, h):
-    """把主窗位置限制在"还能抓得到"的范围里。
-
-    拖到屏幕外不是致命的，但用户找不回来就只能重启 —— 所以水平方向至少留
-    KEEP_VISIBLE_X 宽、垂直方向保证标题栏（顶部 KEEP_VISIBLE_Y）始终在屏内。
-    """
-    vl, vt, vr, vb = virtual_screen()
-    x = int(max(vl - w + KEEP_VISIBLE_X, min(x, vr - KEEP_VISIBLE_X)))
-    y = int(max(vt, min(y, vb - KEEP_VISIBLE_Y)))
-    return x, y
-
-
-def set_app_id():
-    """让任务栏/开始菜单按应用而不是 python.exe 分组与显示图标。
-
-    注意：SetCurrentProcessExplicitAppUserModelID 由 shell32 导出，kernel32 里没有
-    （此前写在 kernel32 上会静默失败，任务栏因此一直显示 Python 图标）。
-    """
-    try:
-        shell32.SetCurrentProcessExplicitAppUserModelID.argtypes = [wintypes.LPCWSTR]
-        shell32.SetCurrentProcessExplicitAppUserModelID.restype = ctypes.c_long
-        hr = shell32.SetCurrentProcessExplicitAppUserModelID("WorkBuddy.Points.Insight")
-        log(f"set_app_id hr={hr}")
-    except Exception as e:
-        log(f"set_app_id error: {e}")
-
-
-def find_hwnd(title):
-    hwnd = user32.FindWindowW(None, title)
-    return hwnd or None
-
-
 user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
 user32.GetAsyncKeyState.restype = ctypes.c_short
 user32.GetCursorPos.argtypes = [ctypes.POINTER(wintypes.POINT)]
@@ -237,82 +182,6 @@ user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
 user32.MonitorFromPoint.restype = wintypes.HANDLE
 user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MONITORINFO)]
-
-
-def on_taskbar(pt):
-    """光标是否落在任务栏/通知区域上。
-
-    托盘图标也算"小窗外面的点击"，但它的语义是"我要看小窗"，不是"点外面收起"。
-    这里两条判断：
-    1) 窗口类名（Shell_TrayWnd / TrayNotifyWnd / 溢出区…）；
-    2) 光标在该显示器的"工作区之外、显示器之内"——任务栏无论放上下左右都能盖住。
-    """
-    try:
-        hwnd = user32.WindowFromPoint(pt)
-        if hwnd:
-            buf = ctypes.create_unicode_buffer(256)
-            user32.GetClassNameW(hwnd, buf, 256)
-            cls = buf.value or ""
-            if cls in ("Shell_TrayWnd", "Shell_SecondaryTrayWnd", "TrayNotifyWnd",
-                       "NotifyIconOverflowWindow", "TopLevelWindowForOverflowXamlIsland") \
-                    or "Tray" in cls or "Overflow" in cls:
-                return True
-        mon = user32.MonitorFromPoint(pt, 2)      # MONITOR_DEFAULTTONEAREST
-        if mon:
-            mi = MONITORINFO()
-            mi.cbSize = ctypes.sizeof(MONITORINFO)
-            if user32.GetMonitorInfoW(mon, ctypes.byref(mi)):
-                in_mon = (mi.rcMonitor.left <= pt.x < mi.rcMonitor.right
-                          and mi.rcMonitor.top <= pt.y < mi.rcMonitor.bottom)
-                in_work = (mi.rcWork.left <= pt.x < mi.rcWork.right
-                           and mi.rcWork.top <= pt.y < mi.rcWork.bottom)
-                if in_mon and not in_work:
-                    return True
-    except Exception:
-        pass
-    return False
-
-
-def round_corners(hwnd):
-    """Win11：给无边框窗口加系统圆角（DWMWCP_ROUND）。Win10 会直接返回错误码，忽略即可。"""
-    try:
-        pref = ctypes.c_int(2)          # DWMWCP_ROUND
-        rc = ctypes.windll.dwmapi.DwmSetWindowAttribute(
-            wintypes.HWND(hwnd), 33,     # DWMWA_WINDOW_CORNER_PREFERENCE
-            ctypes.byref(pref), ctypes.sizeof(pref))
-        return rc == 0
-    except Exception as e:
-        log(f"round_corners error: {e}")
-        return False
-
-
-def strip_nonclient(hwnd):
-    """确保窗口没有任何非客户区。
-
-    曾经的实现给无边框窗口补 WS_THICKFRAME 来恢复"拖边缩放"，代价是 Windows 会画一圈
-    非客户区边框（深色主题下是 8px 近黑色带），也就是用户看到的"顶部黑边"。
-    现在改为前端自绘缩放把手（见 app.js `setupResize`），窗口必须保持纯客户区。
-    """
-    try:
-        style = user32.GetWindowLongW(hwnd, GWL_STYLE)
-        # 曾试过把 WS_THICKFRAME 加回来 + DwmExtendFrameIntoClientArea 做边缘吸附，
-        # 实测两个后果：窗口顶部出现一条深色边框，且拖到边缘依旧不吸附
-        # （pywebview 的窗口类没有配 WM_NCCALCSIZE，系统拿到的仍是"有非客户区"的窗口）。
-        # 真正要做需要替换窗口过程处理 NCCALCSIZE，风险大于收益，先回到纯客户区。
-        want = style & ~(WS_THICKFRAME | WS_MAXIMIZEBOX | WS_CAPTION)
-        if style != want:
-            user32.SetWindowLongW(hwnd, GWL_STYLE, want)
-            user32.SetWindowPos(hwnd, None, 0, 0, 0, 0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)
-            log(f"strip_nonclient: style {hex(style)} -> {hex(want)}")
-
-        # 顺带补圆角：主窗去掉边框后是纯直角，Win11 下用 DWM 恢复系统圆角
-        if round_corners(hwnd):
-            log("round_corners: ok")
-    except Exception as e:
-        log(f"strip_nonclient error: {e}")
-
-
 def set_window_icons():
     try:
         user32.LoadImageW.restype = wintypes.HANDLE
@@ -330,40 +199,9 @@ def set_window_icons():
             hicon = user32.LoadImageW(None, ICON, IMAGE_ICON, size, size, LR_LOADFROMFILE)
             if hicon:
                 user32.SendMessageW(hwnd, WM_SETICON, kind, hicon)
-
-
-def single_instance():
-    """同一时刻只允许一个实例，避免两个进程争用 WebView2 用户数据目录。"""
-    kernel32.CreateMutexW.restype = wintypes.HANDLE
-    kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
-    handle = kernel32.CreateMutexW(None, False, "Local\\WorkBuddyPointsInsight")
-    already = ctypes.get_last_error() == 183  # ERROR_ALREADY_EXISTS
-    return handle, already
-
-
 # 第二次双击图标时不再弹"程序已在运行"——那是在教用户去找托盘图标。
 # 正常逻辑应该是：点图标 = 我要看界面，那就把已经跑着的那个窗口拿到眼前。
 SHOW_EVENT = "Local\\WorkBuddyPointsInsightShow"
-
-
-def signal_show():
-    """第二个实例：给已经跑着的实例发一个"亮一下"的信号。"""
-    try:
-        kernel32.OpenEventW.restype = wintypes.HANDLE
-        kernel32.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
-        h = kernel32.OpenEventW(0x0002, False, SHOW_EVENT)   # EVENT_MODIFY_STATE
-        if not h:
-            return False
-        try:
-            kernel32.SetEvent(h)
-        finally:
-            kernel32.CloseHandle(h)
-        return True
-    except Exception as e:
-        log(f"signal_show failed: {e}")
-        return False
-
-
 def start_show_watcher(app):
     """第一个实例：驻守一个线程，等第二个实例敲门。"""
     try:
