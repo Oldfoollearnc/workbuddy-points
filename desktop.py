@@ -47,6 +47,7 @@ import data_source
 import logutil
 import usage_source
 from account_service import AccountService, CDP_PORT, cdp_enabled
+from checkin_service import CheckinService
 from tray import Tray
 
 # 资源随程序走，数据写到可写目录：安装版在 Program Files 下也能正常读写日志与缓存
@@ -294,12 +295,17 @@ def strip_nonclient(hwnd):
     """
     try:
         style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+        # 曾试过把 WS_THICKFRAME 加回来 + DwmExtendFrameIntoClientArea 做边缘吸附，
+        # 实测两个后果：窗口顶部出现一条深色边框，且拖到边缘依旧不吸附
+        # （pywebview 的窗口类没有配 WM_NCCALCSIZE，系统拿到的仍是"有非客户区"的窗口）。
+        # 真正要做需要替换窗口过程处理 NCCALCSIZE，风险大于收益，先回到纯客户区。
         want = style & ~(WS_THICKFRAME | WS_MAXIMIZEBOX | WS_CAPTION)
         if style != want:
             user32.SetWindowLongW(hwnd, GWL_STYLE, want)
             user32.SetWindowPos(hwnd, None, 0, 0, 0, 0,
                                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)
             log(f"strip_nonclient: style {hex(style)} -> {hex(want)}")
+
         # 顺带补圆角：主窗去掉边框后是纯直角，Win11 下用 DWM 恢复系统圆角
         if round_corners(hwnd):
             log("round_corners: ok")
@@ -335,6 +341,64 @@ def single_instance():
     return handle, already
 
 
+# 第二次双击图标时不再弹"程序已在运行"——那是在教用户去找托盘图标。
+# 正常逻辑应该是：点图标 = 我要看界面，那就把已经跑着的那个窗口拿到眼前。
+SHOW_EVENT = "Local\\WorkBuddyPointsInsightShow"
+
+
+def signal_show():
+    """第二个实例：给已经跑着的实例发一个"亮一下"的信号。"""
+    try:
+        kernel32.OpenEventW.restype = wintypes.HANDLE
+        kernel32.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+        h = kernel32.OpenEventW(0x0002, False, SHOW_EVENT)   # EVENT_MODIFY_STATE
+        if not h:
+            return False
+        try:
+            kernel32.SetEvent(h)
+        finally:
+            kernel32.CloseHandle(h)
+        return True
+    except Exception as e:
+        log(f"signal_show failed: {e}")
+        return False
+
+
+def start_show_watcher(app):
+    """第一个实例：驻守一个线程，等第二个实例敲门。"""
+    try:
+        kernel32.CreateEventW.restype = wintypes.HANDLE
+        kernel32.CreateEventW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR]
+        kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        ev = kernel32.CreateEventW(None, False, False, SHOW_EVENT)   # 自动复位
+        if not ev:
+            log("show watcher: CreateEventW returned null")
+            return False
+    except Exception as e:
+        log(f"show watcher create failed: {e}")
+        return False
+
+    def loop():
+        while True:
+            try:
+                if kernel32.WaitForSingleObject(ev, 1000) == 0:
+                    log("second instance detected -> bring main window up")
+                    try:
+                        if "--show" in sys.argv:
+                            app.show_popup()
+                        else:
+                            app.show_main()
+                    except Exception as e:
+                        log(f"show from watcher error: {e}")
+            except Exception as e:
+                log(f"show watcher loop error: {e}")
+                return
+
+    threading.Thread(target=loop, daemon=True).start()
+    return True
+
+
 class Desktop:
     def __init__(self):
         self.popup = None
@@ -357,6 +421,7 @@ class Desktop:
         self._main_visible = threading.Event()
         self.usage = usage_source.UsageService()
         self.account = AccountService()
+        self.checkin = CheckinService(self.account)
 
     # ---------- 构建 ----------
 
@@ -976,6 +1041,10 @@ class Desktop:
     def quit(self):
         self.quitting = True
         try:
+            self.checkin.stop_watch()   # 先让看猫轮询退出，别在窗口销毁后再伸手
+        except Exception:
+            pass
+        try:
             if self.tray:
                 self.tray.stop()
         except Exception:
@@ -1016,6 +1085,23 @@ class Api:
 
     def account_logout(self):
         return self._desk.account.logout()
+
+    # ---------- 每日签到 / 派猫猫旅行 ----------
+
+    def get_checkin(self):
+        return self._desk.checkin.snapshot()
+
+    def checkin_run(self):
+        """手动重试（界面上"重试"按钮用）。同步执行，前端 await 时转圈。"""
+        opt = self._desk.checkin.options
+        return self._desk.checkin.run(travel_auto=bool(opt.get("travel", True)))
+
+    def checkin_options(self, auto=None, travel=None):
+        return self._desk.checkin.set_options(auto=auto, travel=travel)
+
+    def get_checkin_tasks(self):
+        """成长计划任务进度（活动卡第四格用，带 30 分钟缓存）。"""
+        return self._desk.checkin.tasks()
 
     def refresh_usage(self):
         return self._desk.usage.refresh()
@@ -1196,13 +1282,19 @@ def main():
     set_app_id()
     handle, already = single_instance()
     if already:
-        log("another instance detected, exit")
-        alert("WorkBuddy 积分观测台",
-              "程序已在运行。\n请在右下角通知区找到托盘图标（蓝色柱状图标），单击即可打开快捷面板。")
+        # 点图标 = 想看界面：直接把已经跑着的那个喊到前面，不再弹窗教用户找托盘
+        if signal_show():
+            log("another instance detected, asked it to show main; exiting")
+        else:
+            log("another instance detected but signal failed; showing alert")
+            alert("WorkBuddy 积分观测台",
+                  "程序已在运行，但没能把窗口叫到前面。\n"
+                  "请在右下角通知区找到托盘图标（蓝色柱状图标），单击即可打开。")
         return
 
     app = Desktop()
     app.build()
+    start_show_watcher(app)      # 被再次双击时，负责把主窗亮出来
     app.usage.start()          # 后台读取本机用量
     app.account.start_polling()  # 账号云同步轮询（默认 60 分钟）
 
@@ -1243,19 +1335,49 @@ def main():
         except Exception as e:
             log(f"startup show error: {e}")
 
+    def _push_checkin():
+        """把后台签到/派猫的最新结论推到界面上的结果条。"""
+        for w in (app.main, app.popup):
+            app._safe_js(w, "window.App && App.reloadCheckin && App.reloadCheckin()")
+
+    app.checkin.set_notify(_push_checkin)
+
     # 启动时尝试回填上次登录态（有存档则无需再次扫码）
     def _auto_restore():
         time.sleep(4)
+        restored = False
         try:
-            ok = app.account.try_restore()
-            log(f"auto-restore: {ok}")
-            if ok:
-                for delay in (0, 3, 8):
-                    time.sleep(delay)
-                    for w in (app.main, app.popup):
-                        app._safe_js(w, "window.App && App.reloadAccount()")
+            restored = app.account.try_restore()
+            log(f"auto-restore: {restored}")
         except Exception as e:
             log(f"auto-restore error: {e}")
+
+        # 签到紧跟在同步之后：此时隐藏窗口已停在 profile 页，页面内 fetch 直接可用，
+        # 整个签到 + 派猫也就一两次往返。放到 reloadAccount 的延时循环后面会白等 11 秒。
+        try:
+            opt = app.checkin.options
+            travel_now = None
+            if opt.get("auto", True):
+                snap = app.checkin.run(travel_auto=bool(opt.get("travel", True)))
+                travel_now = ((snap or {}).get("result") or {}).get("travel")
+                _push_checkin()
+            else:
+                log("auto-checkin skipped: 用户已关闭自动签到")
+        except Exception as e:
+            log(f"auto-checkin error: {e}")
+
+        # 常驻看猫：到点自动领积分，跨天自动签新的一天再派一趟。
+        # 每天只能派 1 次，所以真正会丢的只有"到家没领"这一段。
+        try:
+            app.checkin.start_watch(travel_now)
+        except Exception as e:
+            log(f"checkin watch start error: {e}")
+
+        if restored:
+            for delay in (0, 3, 8):
+                time.sleep(delay)
+                for w in (app.main, app.popup):
+                    app._safe_js(w, "window.App && App.reloadAccount()")
     threading.Thread(target=_auto_restore, daemon=True).start()
 
     def _apply_icons():

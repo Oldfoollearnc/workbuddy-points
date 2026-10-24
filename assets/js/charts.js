@@ -121,10 +121,15 @@
    * 由调用方用 data-anim="0" 声明"这次只要终态"（离屏卡片），其余照常播放；
    * 万一 rAF 被挂起，tween 里的看门狗会在 1 秒内把图形落到终态。
    */
-  function animate(container, duration, onUpdate, delay) {
-    onUpdate(1);
-    if (container.dataset.anim === '0') return;      // 调用方要求只出终态
-    if (document.hidden || motionLevel() === 'off') return;
+  /**
+   * opts.noPrerender：不要先画一遍终态。
+   * 仪表盘的弧长和百分比都要从 0 长起来，预渲染会让它先闪一下 100% 再回 0，
+   * 看起来就是"卡一下、不是从头涨"。柱状图没有这个观感，保持原样。
+   */
+  function animate(container, duration, onUpdate, delay, opts) {
+    const instant = container.dataset.anim === '0' || document.hidden || motionLevel() === 'off';
+    if (instant) { onUpdate(1); return; }
+    if (!(opts && opts.noPrerender)) onUpdate(1);
     addCancel(container, tween(container, duration, onUpdate, delay));
   }
 
@@ -751,7 +756,7 @@
         // 弧长封顶在 100%，但数字照实显示（超支时能看到 118%）
         const shown = (cfg.countTo != null ? cfg.countTo : pctVal) * e;
         big.textContent = (shown * 100).toFixed(shown > 1 ? 0 : 1) + '%';
-      }, 60);
+      }, 60, { noPrerender: true });
     });
   }
 

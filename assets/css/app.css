@@ -317,7 +317,7 @@ body.is-desktop[data-mode="popup"] .popup-card {
   animation: barFill 600ms cubic-bezier(.35, .9, .2, 1) both;
 }
 @keyframes barFill { to { transform: scaleX(1); } }
-.popup-card.is-refreshing .pop-hero .big span {
+.popup-card.is-refreshing .pop-slide .big span {
   display: inline-block;
   animation: numPulse 600ms var(--ease-out) both;
 }
@@ -367,22 +367,92 @@ body.is-desktop[data-mode="popup"] .popup-card {
   scrollbar-width: thin;
 }
 
-.pop-hero {
-  flex: none;
+.pop-swipe { flex: none; border-radius: 11px; overflow: hidden; }
+.pop-swipe .swipe-track { align-items: stretch; }
+.pop-slide {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 148px;
   gap: 12px;
-  align-items: end;
-  padding: 12px 14px 13px;
+  align-items: center;
+  padding: 12px 16px 12px;
+  height: 96px;
   border-radius: 11px;
-  background: linear-gradient(135deg, var(--brand-soft) 0%, var(--brand-softer) 60%, transparent 100%);
   border: 1px solid var(--border);
+  background: linear-gradient(135deg, var(--brand-soft) 0%, var(--brand-softer) 60%, transparent 100%);
 }
+.pop-slide--act {
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  gap: 7px;
+  justify-items: stretch;
+}
+.psl-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--text-3); }
+.psl-week { gap: 9px; }
+.psl-week i { width: 13px; height: 13px; }
+.psl-big { display: flex; align-items: baseline; gap: 4px; }
+.psl-big b { font-size: 26px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.psl-big span { font-size: 11px; color: var(--text-3); }
+.psl-big b.as-text { font-size: 17px; font-weight: 600; letter-spacing: 0; }
+.psl-foot { font-size: 10.5px; color: var(--text-3); }
+.psl-task-row { display: flex; align-items: center; gap: 12px; }
+/* 小窗任务卡：横向进度条替代小环 —— 92px 的空间里环太小、也不好看 */
+.psl-task2 { display: flex; align-items: center; gap: 12px; }
+.psl-task2 .psl-big { flex: none; align-items: baseline; }
+.psl-task2 .psl-big b { font-size: 22px; }
+.psl-bar { flex: 1 1 auto; height: 7px; margin: 0; }
+.psl-fill {
+  display: block; height: 100%; width: 0; border-radius: 4px;
+  background: var(--warn);
+  transition: width 720ms var(--ease-out);
+}
+/* 指示点单独占一条 14px 的带子，绝不叠在卡片文字上；卡片本身仍是 92px */
+.pop-swipe { padding-bottom: 6px; }
+.pop-swipe .swipe-dots {
+  height: 13px;
+  gap: 7px;
+}
+.pop-swipe .swipe-dot { width: 5px; height: 5px; }
+.pop-swipe .swipe-dot.is-on { width: 14px; }
+
+/* 切到新卡片时，内容轻轻起一下，别只是硬切 */
+.side-card.is-in .sc-body,
+.side-card.is-in .sc-foot,
+.pop-slide.is-in .psl-head,
+.pop-slide.is-in .psl-tv,
+.pop-slide.is-in .psl-foot,
+.pop-slide.is-in .side-week,
+.pop-slide.is-in .psl-task-row { animation: cardFade 280ms var(--ease-out) backwards; }
+.pop-slide.is-in .psl-foot { animation-delay: 40ms; }
+@keyframes cardFade {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
+}
+[data-motion="off"] .side-card.is-in .sc-body,
+[data-motion="off"] .pop-slide.is-in .psl-head { animation: none; }
+.pop-swipe-tip {
+  position: absolute; left: 50%; bottom: 16px;
+  transform: translateX(-50%);
+  padding: 4px 10px; border-radius: 99px;
+  background: var(--surface-inverse); color: var(--text-on-brand);
+  font-size: 10.5px; white-space: nowrap;
+  pointer-events: none;
+  animation: tipIn 260ms var(--ease-out) both;
+}
+@keyframes tipIn { from { opacity: 0; transform: translate(-50%, 4px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes hintSwipe {
+  0%, 100% { transform: translateX(0); }
+  22% { transform: translateX(-11%); }
+  44% { transform: translateX(0); }
+  66% { transform: translateX(9%); }
+  88% { transform: translateX(0); }
+}
+.pop-swipe.is-hint .swipe-track { animation: hintSwipe 1700ms var(--ease-in-out) 1; }
+
 .eyebrow { font-size: 11px; letter-spacing: .06em; color: var(--text-3); }
-.pop-hero .big { display: flex; align-items: baseline; gap: 3px; margin-top: 1px; line-height: 1.08; }
-.pop-hero .big span { font-size: 33px; font-weight: 650; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
-.pop-hero .big em { font-style: normal; font-size: 11px; color: var(--text-3); font-weight: 500; }
-.pop-hero-sub { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11.5px; }
+.pop-slide .big { display: flex; align-items: baseline; gap: 3px; margin-top: 1px; line-height: 1.08; }
+.pop-slide .big span { font-size: 31px; font-weight: 650; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+.pop-slide .big em { font-style: normal; font-size: 11px; color: var(--text-3); font-weight: 500; }
+.pop-hero-sub { display: flex; align-items: center; gap: 8px; margin-top: 5px; font-size: 11.5px; }
 .pop-hero-sub .muted b { color: var(--text-2); font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .quota-mini { display: flex; flex-direction: column; gap: 5px; padding-bottom: 1px; }
@@ -625,22 +695,129 @@ body.is-desktop[data-mode="popup"] .popup-card {
 [data-motion="reduced"] .nav-item.is-active .i { animation: navPop 240ms var(--ease-out) 1; }
 [data-motion="off"] .nav-item.is-active .i { animation: none; }
 
-.side-quota {
+/* 轮播骨架：两处共用，丢了就会变成纵向堆叠 */
+.swipe { position: relative; }
+.swipe-track {
+  display: flex;
+  transition: transform 420ms var(--ease-out);
+  will-change: transform;
+}
+.swipe.is-drag .swipe-track { transition: none; }
+.swipe.is-drag { cursor: grabbing; }
+.swipe-track > * { flex: 0 0 100%; min-width: 0; }
+.swipe-dots { display: flex; align-items: center; justify-content: center; gap: 5px; }
+.swipe-dot {
+  position: relative;
+  width: 5px; height: 5px; border-radius: 3px;
+  background: var(--border-2);
+  cursor: pointer;
+  transition: width 240ms var(--ease-out), background-color 240ms var(--ease-out);
+}
+/* 视觉只有 5px，可点区域撑到 17px，不然根本点不中 */
+.swipe-dot::before {
+  content: "";
+  position: absolute;
+  inset: -7px -5px;
+}
+.swipe-dot:hover { background: var(--text-3); }
+.swipe-dot.is-on { width: 14px; background: var(--brand); }
+
+/* 左下角轮播：几张同尺寸卡片左右滑，跟手机小组件一个手感 */
+.side-swipe {
   margin-top: auto;
-  padding: 13px 13px 12px;
+  position: relative;
   border-radius: 14px;
   border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+.side-card {
+  flex: 0 0 100%;
+  min-width: 0;
+  height: 112px;
+  padding: 12px 14px 11px;
+  display: flex;
+  flex-direction: column;
   background:
     radial-gradient(180px 90px at 92% -30%, var(--brand-soft), transparent 72%),
     linear-gradient(160deg, var(--surface) 0%, var(--surface-2) 100%);
-  box-shadow: var(--shadow-1);
 }
+.side-swipe .swipe-dots { padding: 7px 0 7px; }
+
+.sc-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 10.5px; color: var(--text-3); flex: none;
+}
+.sc-body { flex: 1 1 auto; display: flex; flex-direction: column; justify-content: center; gap: 8px; min-height: 0; }
+.sc-body--center { align-items: center; justify-content: center; }
+.sc-body--row { flex-direction: row; align-items: center; gap: 14px; }
+.sc-foot {
+  flex: none;
+  margin-top: auto;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 10px; color: var(--text-3);
+}
+.sc-foot b { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.sc-foot .warn { color: var(--warn); }
+.sc-big { display: flex; align-items: baseline; gap: 4px; }
+.sc-big b { font-size: 22px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.sc-big span { font-size: 10px; color: var(--text-3); }
+.sc-big b.as-text { font-size: 15px; font-weight: 600; letter-spacing: 0; }
+
+.side-week { display: flex; align-items: center; justify-content: center; gap: 9px; }
+.side-week i {
+  width: 12px; height: 12px; border-radius: 50%;
+  border: 1.5px solid var(--border-2);
+  background: transparent;
+  animation: actPop 300ms var(--ease-spring) backwards;
+  animation-delay: calc(var(--k, 0) * 40ms);
+}
+.side-week i.on { background: var(--brand); border-color: var(--brand); }
+.side-week i.today { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--brand); }
+
+/* 底注：额度卡两行，避免"日约 450"被截掉 */
+.sc-foot--col { flex-direction: column; align-items: flex-start; gap: 1px; line-height: 1.45; }
+.sc-foot--col .side-quota-note { text-align: left; max-width: 100%; }
+
+.sc-body--tight { gap: 3px; }
+.sc-place {
+  font-size: 11px; color: var(--text-2); font-weight: 500;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+}
+.tv-track { margin-top: 7px; }
+
+/* 小窗猫猫卡：大数字 + 地点一行，下面是行程条 */
+.psl-tv { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.psl-tv .psl-foot { flex: 1 1 auto; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.side-track-wrap {
+  position: relative;
+  height: 7px; border-radius: 4px;
+  background: var(--border);
+  overflow: hidden;
+}
+.side-fill {
+  display: block; height: 100%; width: 0; border-radius: 4px;
+  background: var(--good);
+  transition: width 720ms var(--ease-out);
+}
+.side-fill.is-muted { background: var(--text-3); opacity: .7; }
+
+.side-ring svg { display: block; }
+.side-ring .ring-bg { stroke: var(--border-2); }
+.side-ring .ring-fg {
+  stroke: var(--warn);
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: center;
+  transition: stroke-dashoffset 900ms var(--ease-out);
+}
+
 .side-quota-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10.5px; color: var(--text-3); }
-.side-quota-num { display: flex; align-items: baseline; gap: 4px; margin: 7px 0 8px; }
+.side-quota-num { display: flex; align-items: baseline; gap: 4px; }
 .side-quota-num b { font-size: 21px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .side-quota-num span { font-size: 10px; color: var(--text-3); }
-.side-quota-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; font-size: 10px; color: var(--text-3); }
-.side-quota-foot b { color: var(--text-2); font-variant-numeric: tabular-nums; }
 .side-quota-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
 
 .side-foot { display: flex; align-items: center; justify-content: space-between; padding: 0 2px; }
@@ -1462,12 +1639,13 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
   width: 30px; height: 30px; margin-left: 4px; padding: 0;
   border: 1px solid var(--border); border-radius: 50%;
   background: var(--brand-soft); color: var(--brand);
-  font-size: 11px; font-weight: 650; cursor: pointer; overflow: hidden;
+  /* 不能裁剪：右下角那个状态点在圆外，overflow:hidden 会把它啃掉一半 */
+  font-size: 11px; font-weight: 650; cursor: pointer; overflow: visible;
   display: inline-flex; align-items: center; justify-content: center;
   transition: transform 120ms var(--ease-out), box-shadow 160ms var(--ease-out);
 }
 .dock-avatar:hover { transform: translateY(-1px); box-shadow: 0 6px 14px -8px rgba(37,99,235,.6); }
-.dock-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.dock-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; border-radius: 50%; }
 
 /* ---- 设置页 ---- */
 .view[data-view="settings"] .grid { align-items: start; }
@@ -1618,6 +1796,7 @@ body.is-loading .boot-mask { display: flex; }
 .rows-track { height: 8px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
 .rows-track i { display: block; height: 100%; width: 0; border-radius: 99px; background: var(--brand-gradient); transition: width 760ms var(--ease-out); }
 .rows-val { text-align: right; font-weight: 620; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rows-free { font-style: normal; font-weight: 500; font-size: 10.5px; color: var(--text-3); }
 .rows-pct { text-align: right; font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .rows-empty { padding: 22px 4px; font-size: 11px; color: var(--text-3); text-align: center; }
 
@@ -1728,8 +1907,9 @@ body.is-loading .boot-mask { display: flex; }
 /* 状态点：绿=已连接，黄=过期/异常，灰=未连接（不占文字，顶栏保持干净） */
 .avatar-dot {
   position: absolute;
-  right: -1px; bottom: -1px;
-  width: 9px; height: 9px;
+  right: -2px; bottom: -2px;
+  width: 10px; height: 10px;
+  box-shadow: 0 0 0 1px var(--surface);
   border-radius: 50%;
   background: var(--text-3);
   border: 2px solid var(--surface);
@@ -1884,6 +2064,44 @@ body.is-loading .boot-mask { display: flex; }
 }
 .notice-close .i { width: 11px; height: 11px; }
 .notice-close:hover { background: var(--brand-soft); color: var(--brand); }
+
+/* 签到结果条：和数据提示条同一副骨架，但**不能同色**。
+   两条同色同形叠在一起，看起来就是同一句话说了两遍。
+   这里的配色规则：
+     今天已签过（默认）= 白底灰勾，安静，今天没事可做
+     本次签到成功 = 绿底绿勾，真的拿到 100 分了
+     失败         = 红底红叹号，才需要用户动手 */
+.notice-checkin {
+  margin-bottom: 10px;
+  background: var(--surface);
+}
+.notice-checkin .notice-icon {
+  background: rgba(127, 140, 165, .14);
+  color: var(--text-3);
+}
+.notice-checkin.is-ok {
+  background: linear-gradient(90deg, var(--good-soft), transparent 70%), var(--surface);
+}
+.notice-checkin.is-ok .notice-icon { background: var(--good-soft); color: var(--good); }
+.notice-checkin.is-ok .notice-text b { color: var(--good); }
+.notice-checkin.is-bad {
+  background: linear-gradient(90deg, var(--bad-soft), transparent 70%), var(--surface);
+}
+.notice-checkin.is-bad .notice-icon { background: var(--bad-soft); color: var(--bad); }
+.notice-checkin.is-bad .notice-text b { color: var(--bad); }
+.notice-checkin .notice-text b { font-weight: 600; }
+.notice-checkin .notice-text .dim { color: var(--text-3); }
+.notice-checkin .notice-link[hidden] { display: none; }
+
+/* 轮播卡的入场动效：点逐个弹、条和环生长，跟整站同一条时间线 */
+@keyframes actPop { from { opacity: 0; transform: scale(.3); } to { opacity: 1; transform: none; } }
+
+[data-motion="reduced"] .side-week i { animation-duration: 120ms; animation-delay: 0ms; }
+[data-motion="reduced"] .side-fill,
+[data-motion="reduced"] .side-ring .ring-fg { transition-duration: 140ms; }
+[data-motion="off"] .side-week i { animation: none; }
+[data-motion="off"] .side-fill,
+[data-motion="off"] .side-ring .ring-fg { transition: none; }
 
 /* ===================== 设置页：列表分组（竖向） ===================== */
 

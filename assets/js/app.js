@@ -82,7 +82,9 @@
   const prefs = Object.assign(
     { theme: 'light', motion: 'full', countUp: true, labels: true, tray: true,
       holiday: true, signin: true, localRefresh: 60,
-      calGlow: true, calIntro: true, groupMinute: true, notice: true },
+      calGlow: true, calIntro: true, groupMinute: true, notice: true,
+      checkinAuto: true, checkinTravel: true, checkinDismissed: '',
+      sideSwipeSec: 3, popSwipeSec: 5 },
     readPrefs()
   );
 
@@ -101,6 +103,9 @@
     themeTimer: null,
     lastCalSig: '',        // 日历重绘签名
     lastLedgerSig: '',     // 流水行内容签名
+    lastWeekSig: '',       // （旧）总览活动卡点阵签名
+    lastSideWeekSig: '',   // 左下角轮播卡点阵签名
+    lastPopWeekSig: '',    // 小窗轮播卡点阵签名
     enterUntil: 0,         // 小窗入场期间屏蔽重绘的截止时刻
     enterTimer: 0
   };
@@ -358,6 +363,11 @@
       exitAnim = null;
     }
     renderActive(true);
+    // 小窗每次重新显示都回到第一张「今日使用积分」：不记忆上次滑到哪，
+    // 否则下次点开看到的是一张和"今天用了多少"无关的卡，得先滑回来。
+    if (state.mode === 'popup') {
+      if (popSwipe) popSwipe.reset();
+    }
     return changed;
   }
 
@@ -455,7 +465,7 @@
     const start = () => {
       const jobs = [
         ['.pop-head', 0, -7],
-        ['.pop-hero', 45, 12],
+        ['.pop-swipe', 45, 12],
         ['.pop-latency', 80, 8],
         ['.pop-block--hours', 110, 10],
         ['.pop-foot', 145, 8]
@@ -600,7 +610,8 @@
     // 先统一标记"只出终态"，渲染完再把视野内的重绘成带生长动画的版本
     $$('[data-chart]').forEach(el => { el.dataset.anim = '0'; });
     renderSidebar();
-    if (state.view === 'overview') renderOverview();
+    renderSideSwipe();     // 左下角卡片常驻，切页也要跟着数字走
+    if (state.view === 'overview') { renderOverview(); renderCheckin(); }
     else if (state.view === 'analytics') renderAnalytics();
     else if (state.view === 'ledger') renderLedger();
     else if (state.view === 'settings') renderSettings();
@@ -640,6 +651,426 @@
       txt += ` · 逐笔与已用差 <b>${(c.driftPct * 100).toFixed(1)}%</b>（入账时序，以云端为准）`;
     }
     el.innerHTML = txt;
+  }
+
+  /* ---------------- 每日签到结果条 ---------------- */
+
+  let CHECKIN = null;
+
+  /** 今天的日期串，用来做"当天只提示一次"的判定。 */
+  function todayKey() {
+    const d = new Date();
+    return `${d.getFullYear()}-${F.pad(d.getMonth() + 1)}-${F.pad(d.getDate())}`;
+  }
+
+  function setCheckinIcon(id) {
+    const use = $('#checkinIcon use');
+    if (use) use.setAttribute('href', '#' + id);
+  }
+
+  /**
+   * 三种结论，三种表述，别混：
+   *   签到成功（绿）—— 这一次真的领到了 100 分
+   *   今天已签过（中性）—— 正常状态，不是错误，别涂红
+   *   失败（红）—— 才需要用户处理，并给"重试"
+   */
+  function buildCheckinText(r) {
+    if (!r) return '正在签到并看猫猫…';
+    if (r.ok === false) return `自动签到没成功：<b>${esc(r.error || '未知原因')}</b>`;
+    const c = r.checkin || {};
+    const t = r.travel || {};
+    const bits = [];
+    if (c.new) bits.push(`今日签到成功 <b>+${c.gain || 100}</b> 分`);
+    else if (c.done) bits.push('今天已经签过，没有重复打卡');
+    if (r.streak) bits.push(`连签 <b>${r.streak}</b> 天`);
+    if (t.claimed) bits.push(`猫猫带回来 <b>${t.claimed}</b> 分`);
+    if (t.departed) {
+      const until = Math.round(Date.now() / 1000) + (t.remainingSec || 0);
+      bits.push(`猫猫已出发去${esc(t.location || '逛街')}`
+        + (t.remainingSec ? `，<span class="ck-eta" data-until="${until}">${esc(t.remainingText)}回来</span>` : ''));
+    } else if (t.state === 'traveling') {
+      // 到家用倒计时而不是死数字：签到条可能挂在屏幕上大半天，
+      // 一直写"15 分钟后回来"就成了假消息。
+      const until = Math.round(Date.now() / 1000) + (t.remainingSec || 0);
+      bits.push(`猫猫在${esc(t.location || '旅行中')}，`
+        + `<span class="ck-eta" data-until="${until}">${esc(t.remainingText || '过会儿')}回来</span>`);
+    } else if (t.state === 'arrived') {
+      bits.push(`猫猫已到家，<b>${t.reward || 0}</b> 分待领取`);
+    } else if (t.state === 'idle' && t.limitReached) {
+      // 每天只能派 1 次，领完也不重置，所以这里必须说清楚"不是漏了"
+      bits.push(t.claimed ? '今天已经派满（每天 1 次）' : '今日猫猫已派过');
+    }
+    if (t.error) bits.push(`<span class="dim">${esc(t.error)}</span>`);
+    if (!bits.length) bits.push('签到检查完成');
+    return bits.join(' · ');
+  }
+
+  function renderCheckin() {
+    const box = $('#checkinNotice');
+    if (!box) return;
+    // 开关关了、或今天点过「我知道了」—— 都不占位置
+    if (!prefs.checkinAuto || prefs.checkinDismissed === todayKey()) {
+      box.hidden = true;
+      return;
+    }
+
+    const r = CHECKIN && CHECKIN.result;
+    const today = todayKey();
+    const isToday = !!(r && (!r.date || r.date === today));
+    const running = !!(CHECKIN && CHECKIN.status === 'running');
+
+    const txt = $('#checkinText');
+    const retry = $('#checkinRetry');
+
+    // 今天的结论还没出来（启动阶段要等账号同步把页面导好）：先站个位，
+    // 直接把昨天那条结果摆上去会让人误以为是今天的。
+    if (!isToday || running) {
+      box.hidden = false;
+      box.classList.remove('is-ok', 'is-bad');
+      setCheckinIcon('i-clock');
+      if (txt) txt.innerHTML = running ? '正在签到并看猫猫…' : '正在准备签到…';
+      if (retry) retry.hidden = true;
+      return;
+    }
+
+    const failed = r.ok === false;
+    const gotDaily = !!(r.ok && (r.checkin || {}).new);
+    box.hidden = false;
+    box.classList.toggle('is-ok', gotDaily);
+    box.classList.toggle('is-bad', failed);
+    setCheckinIcon(failed ? 'i-info' : 'i-check');
+    if (txt) txt.innerHTML = buildCheckinText(r);
+    if (retry) retry.hidden = !failed;
+  }
+
+  async function loadCheckin() {
+    if (!bridge.has() || !bridge.can('get_checkin')) return false;
+    try {
+      const r = await bridge.call('get_checkin');
+      if (r) { CHECKIN = r; renderCheckin(); return true; }
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+
+  /** 把界面上的两个开关同步给 Python：它启动时要靠这个决定跑不跑签到。 */
+  function pushCheckinOptions() {
+    if (!bridge.has() || !bridge.can('checkin_options')) return;
+    try { bridge.call('checkin_options', prefs.checkinAuto, prefs.checkinTravel); } catch (e) { /* ignore */ }
+  }
+
+  /* ---------------- 左下角轮播卡（额度 / 签到 / 猫猫 / 任务） ---------------- */
+
+  let TASKS = null;
+
+  async function loadTasks() {
+    if (!bridge.has() || !bridge.can('get_checkin_tasks')) return false;
+    try {
+      const r = await bridge.call('get_checkin_tasks');
+      if (r) { TASKS = r; return true; }
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+
+  /** 环或 id 都能传：同一条渲染逻辑要给左下角卡片和小窗共用。 */
+  function pick(x) { return (typeof x === 'string') ? $('#' + x) : x; }
+
+  function paintRing(box, pct) {
+    box = pick(box);
+    if (!box) return;
+    const size = 42, r = 17, c = 2 * Math.PI * r;
+    if (!box.firstChild) {
+      box.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true">
+        <circle class="ring-bg" cx="21" cy="21" r="${r}" fill="none" stroke-width="4"/>
+        <circle class="ring-fg" cx="21" cy="21" r="${r}" fill="none" stroke-width="4"
+                stroke-dasharray="${c.toFixed(1)}" stroke-dashoffset="${c.toFixed(1)}"/>
+      </svg>`;
+    }
+    const fg = box.querySelector('.ring-fg');
+    if (!fg) return;
+    const target = c * (1 - Math.max(0, Math.min(1, pct)));
+    if (fg.dataset.v === String(target)) return;   // 重绘频繁，值没变就别再排一次 rAF
+    fg.dataset.v = String(target);
+    requestAnimationFrame(() => { fg.style.strokeDashoffset = target.toFixed(1); });
+  }
+
+  function paintBar(bar, pct, tone) {
+    bar = pick(bar);
+    if (!bar) return;
+    const w = (Math.max(0, Math.min(1, pct)) * 100).toFixed(1);
+    bar.className = (bar.classList.contains('side-fill') ? 'side-fill' : 'act-fill')
+      + (tone && tone !== 'good' ? ' is-' + tone : '');
+    if (bar.dataset.w !== w) {
+      bar.dataset.w = w;
+      bar.style.width = w + '%';
+    }
+  }
+
+  /** 本周七天点阵：已签实心、今天带环、没到空心。 */
+  function paintWeek(box, week, sigKey) {
+    box = pick(box);
+    if (!box) return;
+    const todayIdx = (new Date().getDay() + 6) % 7;   // 周一 = 0
+    const sig = JSON.stringify(week) + '|' + todayIdx;
+    if (ui[sigKey] === sig) return;                   // 没变就别重建，省得每次重绘都弹一次
+    ui[sigKey] = sig;
+    const cls = box.classList.contains('side-week') ? 'side-week' : 'act-week';
+    let html = '';
+    for (let i = 0; i < 7; i++) {
+      const on = !!(week && week[i]);
+      html += `<i class="${on ? 'on' : ''}${i === todayIdx ? ' today' : ''}" style="--k:${i}"></i>`;
+    }
+    box.innerHTML = html;
+  }
+
+  /* ---------------- 滑动卡片（左下角 / 小窗共用） ---------------- */
+
+  /** 通用卡片轮播：拖动、点指示点、可选自动播。少于两张卡时直接不启用。 */
+  function createSwipe(root, opts) {
+    if (!root) return null;
+    const o = Object.assign({ auto: false, interval: 5000 }, opts || {});
+    const track = root.querySelector('.swipe-track');
+    const dotsBox = root.querySelector('.swipe-dots');
+    if (!track) return null;
+    const cards = Array.prototype.slice.call(track.children);
+    if (cards.length < 2) return null;
+
+    let index = 0, timer = null, drag = false, startX = 0, startY = 0, dx = 0, axis = '';
+
+    if (dotsBox) {
+      dotsBox.innerHTML = cards.map((_, i) =>
+        `<i class="swipe-dot${i === 0 ? ' is-on' : ''}" data-i="${i}"></i>`).join('');
+      // 必须用 pointerdown + stopPropagation：root 上有 setPointerCapture，
+      // 捕获之后 click 的 target 会变成 root，closest('.swipe-dot') 永远拿不到点，
+      // 表现就是"点了一下、卡片抖一下但没切换"。
+      dotsBox.addEventListener('pointerdown', e => {
+        const d = e.target.closest ? e.target.closest('.swipe-dot') : null;
+        if (!d) return;
+        e.stopPropagation();
+        e.preventDefault();
+        jump(+d.dataset.i, 340);
+        restartAuto();
+      });
+    }
+
+    function paint() {
+      track.style.transform = 'translateX(' + (-index * 100) + '%)';
+      if (dotsBox) {
+        Array.prototype.forEach.call(dotsBox.children, (d, i) =>
+          d.classList.toggle('is-on', i === index));
+      }
+      // 切到新卡片：内容轻轻起一下，不然只是位置变了、像一帧硬切
+      const card = cards[index];
+      if (card) {
+        card.classList.remove('is-in');
+        void card.offsetWidth;
+        card.classList.add('is-in');
+      }
+      if (o.onIndex) o.onIndex(index);
+    }
+
+    /** ms > 0 时用指定时长过渡，用于"回卷"和"点指示点"，避免跨多张的硬切。 */
+    function jump(i, ms) {
+      if (i === index && !ms) return;
+      if (ms) track.style.transitionDuration = ms + 'ms';
+      index = i;
+      paint();
+      if (ms) setTimeout(() => { track.style.transitionDuration = ''; }, ms + 60);
+    }
+
+    function autoNext() {
+      // 自动播到末尾：用短过渡翻回第一张，而不是 420ms 一路扫过三张
+      if (index >= cards.length - 1) jump(0, 300);
+      else jump(index + 1, 0);
+    }
+
+    /** 手动翻页不循环：到头就轻轻顶一下，比"从第 4 张硬挤到第 1 张"自然。 */
+    function step(delta) {
+      const t = index + delta;
+      if (t < 0 || t > cards.length - 1) { edge(delta); return; }
+      jump(t, 0);
+    }
+
+    function edge(delta) {
+      const dir = delta > 0 ? 1 : -1;
+      track.style.transitionDuration = '110ms';
+      track.style.transform = 'translateX(' + (-index * 100 + dir * 1.6) + '%)';
+      setTimeout(() => { track.style.transitionDuration = ''; paint(); }, 130);
+    }
+
+    function restartAuto() {
+      clearInterval(timer);
+      if (!o.auto || !o.interval) return;
+      timer = setInterval(() => {
+        // 界面没露出来就不切：用户看不见的翻页没有意义
+        if (document.hidden) return;
+        autoNext();
+      }, o.interval);
+    }
+
+    root.addEventListener('pointerdown', e => {
+      if (e.button !== 0) return;
+      drag = true; startX = e.clientX; startY = e.clientY; dx = 0; axis = '';
+      root.classList.add('is-drag');
+      try { root.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      clearInterval(timer);
+    });
+
+    root.addEventListener('pointermove', e => {
+      if (!drag) return;
+      const mx = e.clientX - startX, my = e.clientY - startY;
+      if (!axis) {
+        if (Math.abs(mx) < 6 && Math.abs(my) < 6) return;
+        axis = Math.abs(mx) > Math.abs(my) ? 'x' : 'y';
+        if (axis === 'y') { drag = false; root.classList.remove('is-drag'); restartAuto(); return; }
+      }
+      dx = mx;
+      const off = (dx / (root.clientWidth || 1)) * 100;
+      track.style.transform = 'translateX(' + (-index * 100 + off) + '%)';
+    });
+
+    function endDrag() {
+      if (!drag) return;
+      drag = false;
+      root.classList.remove('is-drag');
+      const th = (root.clientWidth || 1) * 0.16;
+      if (dx < -th) step(1);
+      else if (dx > th) step(-1);
+      else paint();
+      dx = 0;
+      restartAuto();
+    }
+    root.addEventListener('pointerup', endDrag);
+    root.addEventListener('pointercancel', endDrag);
+    root.addEventListener('mouseenter', () => clearInterval(timer));
+    root.addEventListener('mouseleave', restartAuto);
+
+    paint();
+    restartAuto();
+
+    return {
+      go: i => jump(i, 340),
+      next: () => step(1),
+      prev: () => step(-1),
+      index: () => index,
+      reset: () => jump(0, 0),
+      setInterval: ms => { o.interval = ms; restartAuto(); }
+    };
+  }
+
+  let sideSwipe = null;
+  let popSwipe = null;
+
+  /** 左下角四张卡：额度（静态）+ 签到 / 猫猫 / 任务。 */
+  /** 把一份签到/旅行/任务状态渲染到任意一组元素上（左下角和小窗共用）。 */
+  function paintActCards(p, weekSig) {
+    const r = (CHECKIN && CHECKIN.result) || {};
+    const t = r.travel || {};
+    const fresh = r.date === todayKey();
+    const st = t.state;
+
+    paintWeek(p + 'Week', fresh ? r.week : null, weekSig);
+
+    const ckChip = $('#' + p + 'CkChip');
+    if (ckChip) {
+      const done = !!r.checkedIn;
+      ckChip.textContent = done ? '已签到' : (fresh ? '待签到' : '—');
+      ckChip.className = 'chip' + (done ? ' chip-good' : '');
+    }
+    const ckNote = $('#' + p + 'CkNote');
+    if (ckNote) {
+      const wk = (fresh && Array.isArray(r.week)) ? r.week.filter(Boolean).length : null;
+      ckNote.textContent = wk === null ? '—' : `本周已签 ${wk} / 7 天`;
+    }
+
+    const tvChip = $('#' + p + 'TvChip');
+    if (tvChip) {
+      tvChip.textContent = st === 'traveling' ? '旅行中'
+        : (st === 'arrived' ? '可领取' : (st === 'idle' ? (t.limitReached ? '今日已派' : '空闲') : '—'));
+      tvChip.className = 'chip' + (st === 'arrived' ? ' chip-good' : '');
+    }
+    const tvMain = $('#' + p + 'TvMain');
+    const tvUnit = $('#' + p + 'TvUnit');
+    if (tvMain && tvUnit) {
+      if (st === 'traveling' && t.remainingSec > 0) {
+        tvMain.classList.remove('as-text');
+        tvMain.textContent = String(Math.max(1, Math.round(t.remainingSec / 60)));
+        tvUnit.textContent = '分钟后回来';
+        paintBar(p + 'TvBar', t.progress || 0, 'good');
+      } else if (st === 'arrived') {
+        tvMain.classList.remove('as-text');
+        tvMain.textContent = String(t.reward || 0);
+        tvUnit.textContent = '分待领取';
+        paintBar(p + 'TvBar', 1, 'good');
+      } else if (st === 'idle') {
+        if (t.limitReached) {
+          tvMain.textContent = '今天已派满';
+          tvMain.classList.add('as-text');
+          tvUnit.textContent = '';
+        } else {
+          tvMain.textContent = '可以派出去';
+          tvMain.classList.add('as-text');
+          tvUnit.textContent = '';
+        }
+        paintBar(p + 'TvBar', t.limitReached ? 1 : 0, t.limitReached ? 'muted' : 'good');
+      } else {
+        tvMain.textContent = '—';
+        tvMain.classList.remove('as-text');
+        tvUnit.textContent = '';
+        paintBar(p + 'TvBar', 0, 'good');
+      }
+    }
+    const tvNote = $('#' + p + 'TvNote');
+    if (tvNote) {
+      if (st === 'idle' && t.limitReached) tvNote.textContent = '明天 0 点后可再派';
+      else if (st === 'idle') tvNote.textContent = '每天可派 1 次';
+      else tvNote.textContent = t.location || '—';
+    }
+
+    const tk = (TASKS && TASKS.ok) ? TASKS : null;
+    const done = $('#' + p + 'TkDone');
+    const total = $('#' + p + 'TkTotal');
+    if (done) done.textContent = tk ? String(tk.completed) : '—';
+    if (total) total.textContent = tk ? '/ ' + tk.total : '';
+    const tpct = (tk && tk.total) ? tk.completed / tk.total : 0;
+    paintRing(p + 'Ring', tpct);            // 左侧卡片用环
+    const tbar = $('#' + p + 'TkBar');      // 小窗用横向条
+    if (tbar) tbar.style.width = (tpct * 100).toFixed(1) + '%';
+    const tkChip = $('#' + p + 'TkChip');
+    if (tkChip) {
+      const todo = (tk && tk.total) ? tk.total - tk.completed : null;
+      tkChip.textContent = todo === null ? '—' : (todo > 0 ? todo + ' 个可做' : '全做完');
+      tkChip.className = 'chip' + (todo === 0 ? ' chip-good' : '');
+    }
+    const tkNote = $('#' + p + 'TkNote');
+    if (tkNote) {
+      tkNote.textContent = tk
+        ? `已领 ${F.credit(tk.claimedCredit || 0)} 分`
+        : '—';
+    }
+  }
+
+  function renderSideSwipe() {
+    paintActCards('side', 'lastSideWeekSig');
+  }
+
+  function renderPopSwipe() {
+    paintActCards('pop', 'lastPopWeekSig');
+  }
+  function startEtaTicker() {
+    setInterval(() => {
+      const now = Math.round(Date.now() / 1000);
+      $$('.ck-eta').forEach(el => {
+        const left = (+el.dataset.until || 0) - now;
+        el.textContent = left <= 0 ? '应该已经到家，重启程序可领取' : etaText(left);
+      });
+    }, 5000);
+  }
+
+  function etaText(sec) {
+    const m = Math.round(sec / 60);
+    if (m < 60) return `${Math.max(1, m)} 分钟后回来`;
+    const h = Math.floor(m / 60), mm = m % 60;
+    return `${h} 小时${mm ? ' ' + mm + ' 分钟' : ''}后回来`;
   }
 
   /* ---------------- 版本号（每次提交自动递增） ---------------- */
@@ -821,6 +1252,8 @@
     setText('#popCycle', configured
       ? `剩 ${leftDaysText(al)} · 每日约 ${F.credit(al.perDay)}`
       : '连接账号后自动计算');
+
+    renderPopSwipe();
 
     setText('#popUpdated', `${source === 'real' ? '本机' : '演示'} ${D.meta.updated || '—'}`);
     const popCloud = $('#popCloud');
@@ -1097,7 +1530,11 @@
   function renderRows(el, items, opts) {
     if (!el) return;
     const o = opts || {};
-    const list = (items || []).filter(i => i.points > 0).slice(0, o.limit || 6);
+    // keepZero：模型榜要把"免费用过"的模型也列出来，否则会出现
+    // "今日构成 5 个模型、模型使用量只有 1 个"的自相矛盾。
+    const list = (items || [])
+      .filter(i => (i.points > 0 || (o.keepZero && (i.calls || 0) > 0)))
+      .slice(0, o.limit || 6);
     if (!list.length) {
       el.innerHTML = `<div class="rows-empty">${o.empty || '暂无数据'}</div>`;
       return;
@@ -1109,12 +1546,13 @@
       const tone = C.toneColor('c' + ((i % 6) + 1));
       const w = Math.max(3, (m.points / max) * 100);
       const calls = (m.calls == null) ? '' : ` · ${F.fmt(m.calls)} ${cloudRows() ? '笔' : '次'}`;
+      const val = m.points > 0 ? F.credit(m.points) : '<em class="rows-free">免费</em>';
       return `<div class="rows-row" data-name="${esc(m.name)}"
           data-points="${F.credit(m.points)}" data-pct="${pct.toFixed(1)}" data-calls="${m.calls == null ? '' : m.calls}">
         <span class="rows-idx">${String(i + 1).padStart(2, '0')}</span>
         <span class="rows-name" title="${esc(m.name)}${calls}">${esc(m.name)}</span>
         <span class="rows-track"><i data-w="${w.toFixed(1)}" style="width:0%;background:linear-gradient(90deg, ${C.hexToRgba(tone, .45)}, ${tone})"></i></span>
-        <span class="rows-val">${F.credit(m.points)}</span>
+        <span class="rows-val">${val}</span>
         <span class="rows-pct">${pct.toFixed(1)}%</span>
       </div>`;
     }).join('');
@@ -1221,7 +1659,11 @@
     } else {
       modelItems = (D.models || []).map(m => ({ name: m.name, points: m.points, calls: m.calls }));
     }
-    modelItems = modelItems.filter(m => m.points > 0).sort((a, b) => b.points - a.points);
+    // 免费模型（0 分但有调用）也要留下：全部滤掉会出现
+    // "今日构成 5 个模型、模型使用量只有 1 个"的自相矛盾。
+    modelItems = modelItems
+      .filter(m => (m.points || 0) > 0 || (m.calls || 0) > 0)
+      .sort((a, b) => b.points - a.points);
 
     const mTotal = modelItems.reduce((a, b) => a + b.points, 0);
     setText('#modelTotal', modelItems.length ? `合计 ${F.credit(mTotal)} 分` : '暂无数据');
@@ -1242,7 +1684,7 @@
             <div><span>平均每次</span><b>${m && m.calls ? (m.points / m.calls).toFixed(2) + ' 分' : '—'}</b></div>
             <div><span>累计 Token</span><b>${tokens || '—'}</b></div>
           </div>
-          <div class="ms-note">30 天内只用到 <b>1 个模型</b>，因此占比恒为 <b>100%</b>；切换模型或使用子任务后，这里会自动按模型拆分。</div>`;
+          <div class="ms-note">近 30 天只用过 <b>1 个模型</b>，没有可比的第二项；换成别的模型后这里会自动按模型拆分。</div>`;
         const box = $('#msDonut');
         if (box) {
           C.donut(box, {
@@ -1250,15 +1692,17 @@
             legend: false,
             size: 156,
             hRatio: 0.96,
-            centerLabel: '模型占比',
-            centerFormat: () => '100%',
-            centerUnit: '单一模型'
+            // 环内一律不写字：156 的环径放 100% 会压到环上，看着像描边糊了
+            hideCenter: true,
+            centerLabel: '',
+            centerFormat: () => '',
+            centerUnit: ''
           });
         }
       } else {
         mlist.hidden = false;
         single.hidden = true;
-        renderRows(mlist, modelItems, { limit: 6, empty: '暂无模型消耗' });
+        renderRows(mlist, modelItems, { limit: 6, empty: '暂无模型消耗', keepZero: true });
       }
     }
 
@@ -1551,31 +1995,12 @@
       const pct = (hasCloud && acc.total) ? Math.min(1, Math.max(0, acc.usedPct)) : 0;
       requestAnimationFrame(() => { availBar.style.width = (pct * 100).toFixed(1) + '%'; });
     }
-    const plan = u.plan || '';
-    setText('#cloudCycle', c.cycleStartText ? `${String(c.cycleStartText).slice(5)} 起` : (plan || '—'));
-    const cycEl = $('#cloudCycle');
-    if (cycEl) cycEl.title = c.cycleStartText ? `${c.cycleStartText} 起${plan ? ' · ' + plan : ''}` : (plan || '');
     setText('#cloudExpire', c.expireAtText || '—');
 
     // 账号身份
     setText('#accName', u.nickname || (st === 'connected' ? 'WorkBuddy 账号' : '未连接账号'));
     setText('#accPlan', u.plan ? `${u.plan}${u.phone ? ' · ' + u.phone : ''}` : '扫码后可读取余额与有效期');
-    setText('#accId', u.uin ? 'UIN ' + u.uin : (u.uid ? 'UID ' + String(u.uid).slice(0, 8) : '—'));
     renderAvatar();
-
-    // 积分包明细
-    const list = $('#pkgList');
-    if (list) {
-      const pkgs = (ACCOUNT.packages || []).filter(p => p.total > 0);
-      list.innerHTML = pkgs.length
-        ? pkgs.map(p => {
-            const pct = p.total ? Math.max(2, (p.remain / p.total) * 100) : 0;
-            return `<div class="pkg-row"><span class="nm">${esc(p.name)}</span>
-              <span class="bar"><i style="width:${pct.toFixed(1)}%"></i></span>
-              <b>${F.credit(p.remain)}</b><span>/ ${F.credit(p.total)}</span></div>`;
-          }).join('')
-        : '';
-    }
 
     // 头像状态点：连接成功=绿，过期/异常=黄，未连接=灰
     const dot = $('#avatarDot');
@@ -1586,10 +2011,17 @@
     }
 
     // 上次同步 / 间隔（渲染只回填值，事件在 bind 里只绑一次）
-    const pendingTxt = (hasCloud && acc.pending > 0.005) ? ` · 同步后已花 ${F.credit(acc.pending)} 分（下限）` : '';
-    setText('#accLastSync', ACCOUNT.lastSync
-      ? ACCOUNT.lastSync + pendingTxt + (ACCOUNT.lastError ? ' · 异常：' + ACCOUNT.lastError : '')
-      : '尚未同步');
+    // 这里只留"几点几分"，完整时间戳和"同步后已花多少"放到 title 里：
+    // 一行挤三件事会把「立即同步」顶到第二行，看着像排版坏了。
+    const pendingTxt = (hasCloud && acc.pending > 0.005)
+      ? ` · 同步后本机已花 ${F.credit(acc.pending)} 分（可用积分按此扣减，属下限）` : '';
+    const ls = ACCOUNT.lastSync || '';
+    const todayStr = new Date().toISOString().slice(0, 10);
+    let lsShort = '';
+    if (ls) lsShort = (ls.slice(0, 10) === todayStr) ? ls.slice(11, 19) : ls.slice(5, 16);
+    setText('#accLastSync', ls ? lsShort + (ACCOUNT.lastError ? ' · 异常' : '') : '尚未同步');
+    const lsEl = $('#accLastSync');
+    if (lsEl) lsEl.title = ls ? ls + pendingTxt + (ACCOUNT.lastError ? ' · ' + ACCOUNT.lastError : '') : '';
     const sel = $('#cloudInterval');
     if (sel && document.activeElement !== sel) sel.value = String(ACCOUNT.interval == null ? 60 : ACCOUNT.interval);
     setText('#cloudHint', ACCOUNT.lastError
@@ -1646,6 +2078,12 @@
     if ($('#optNotice')) $('#optNotice').checked = prefs.notice !== false;
     if ($('#optHoliday')) $('#optHoliday').checked = prefs.holiday !== false;
     if ($('#optSignin')) $('#optSignin').checked = prefs.signin !== false;
+    if ($('#optCheckinAuto')) $('#optCheckinAuto').checked = prefs.checkinAuto !== false;
+    if ($('#optCheckinTravel')) $('#optCheckinTravel').checked = prefs.checkinTravel !== false;
+    const ssSel = $('#optSideSwipe');
+    if (ssSel && document.activeElement !== ssSel) ssSel.value = String(prefs.sideSwipeSec ?? 3);
+    const psSel = $('#optPopSwipe');
+    if (psSel && document.activeElement !== psSel) psSel.value = String(prefs.popSwipeSec ?? 5);
     const lrSel = $('#optLocalRefresh');
     if (lrSel && document.activeElement !== lrSel) lrSel.value = String(prefs.localRefresh ?? 60);
     // 覆盖天数以服务端配置为准（meta 里带回），避免本地偏好与服务端配置打架
@@ -1826,6 +2264,26 @@
     bindToggle('#optCalIntro', 'calIntro', () => { if (state.view === 'analytics') renderAnalytics(); });
     bindToggle('#optGroupMinute', 'groupMinute', () => { if (state.view === 'ledger') renderLedger(true); });
     bindToggle('#optNotice', 'notice', () => { if (state.view === 'overview') renderOverview(); });
+    // 签到两个开关：Python 启动时按它自己的配置决定跑不跑，本地偏好只做镜像，
+    // 所以每次改动都要显式回写一次，不能只存 localStorage。
+    bindToggle('#optCheckinAuto', 'checkinAuto', () => {
+      pushCheckinOptions();
+      renderCheckin();
+    });
+    bindToggle('#optCheckinTravel', 'checkinTravel', () => pushCheckinOptions());
+
+    const ssOpt = $('#optSideSwipe');
+    if (ssOpt) ssOpt.addEventListener('change', () => {
+      prefs.sideSwipeSec = +ssOpt.value;
+      savePrefs();
+      if (sideSwipe) sideSwipe.setInterval(prefs.sideSwipeSec * 1000 || 0);
+    });
+    const psOpt = $('#optPopSwipe');
+    if (psOpt) psOpt.addEventListener('change', () => {
+      prefs.popSwipeSec = +psOpt.value;
+      savePrefs();
+      if (popSwipe) popSwipe.setInterval(prefs.popSwipeSec * 1000 || 0);
+    });
     // 这两个开关直接决定"每日可用 / 每周可用"的折算结果：所有展示额度的地方必须同步刷新
     bindToggle('#optHoliday', 'holiday', renderQuotaSurfaces);
     bindToggle('#optSignin', 'signin', renderQuotaSurfaces);
@@ -1964,6 +2422,7 @@
       await bridge.call('account_set_interval', ci.value);
       await loadAccount();
       renderAccountCard();
+      renderActive(true);   // 顶部提示条写着"云端每 X 分钟同步"，不重绘会一直停在旧值
       toast(+ci.value === 0 ? '已改为仅手动同步' : `自动同步间隔 ${ci.value} 分钟`);
     });
     const clo = $('#cloudLogout');
@@ -2172,6 +2631,30 @@
       toast('已隐藏顶部提示，可在「设置 → 显示与行为」重新打开', 'i-check');
     });
 
+    // 签到结果条：「我知道了」按天记，当天不再出现，次日自动恢复。
+    // 天天重启程序也天天弹一遍同样的"今天已签过"，只会被无视。
+    const ckOk = $('#checkinOk');
+    if (ckOk) ckOk.addEventListener('click', () => {
+      prefs.checkinDismissed = todayKey();
+      savePrefs();
+      renderCheckin();
+    });
+
+    const ckRetry = $('#checkinRetry');
+    if (ckRetry) ckRetry.addEventListener('click', async () => {
+      if (!bridge.has()) { toast('浏览器预览无法签到', 'i-info'); return; }
+      ckRetry.disabled = true;
+      CHECKIN = Object.assign({}, CHECKIN, { status: 'running' });
+      renderCheckin();
+      try {
+        const r = await bridge.call('checkin_run');
+        if (r) CHECKIN = r;
+      } finally {
+        ckRetry.disabled = false;
+        renderCheckin();
+      }
+    });
+
     const pickBtn = $('#dbPick');
     if (pickBtn) pickBtn.addEventListener('click', async () => {
       if (!bridge.has()) { toast('浏览器预览无法选择目录', 'i-info'); return; }
@@ -2191,6 +2674,15 @@
     });
 
     setupResize();
+
+    // 左下角四张卡：额度 / 签到 / 猫猫 / 任务，左右滑或等它自己翻
+    sideSwipe = createSwipe($('#sideSwipe'), {
+      auto: true, interval: Math.max(0, prefs.sideSwipeSec) * 1000 || 0
+    });
+    // 小窗也自动播，节奏比左侧慢一档；每次打开都回到第 1 张
+    popSwipe = createSwipe($('#popSwipe'), {
+      auto: true, interval: Math.max(0, prefs.popSwipeSec) * 1000 || 0
+    });
 
     const pcl = $('#popCloud');
     if (pcl) pcl.addEventListener('click', async () => {
@@ -2349,6 +2841,11 @@
       await loadUsage();
       await loadAccount();
       await loadVersion();
+      await loadCheckin();
+      pushCheckinOptions();   // 让 Python 侧配置与界面开关对齐，避免"界面关了它还在签"
+      // 任务进度不挡首屏：它要打两个网络请求，还可能排在账号同步后面等锁，
+      // 放在 boot 里 await 会让启动遮罩多停好几秒。
+      setTimeout(() => { loadTasks().then(() => renderSideSwipe()); }, 400);
     }
 
     // 只有浏览器预览（没有桌面桥）才生成演示数据：
@@ -2364,6 +2861,7 @@
 
     setTimeout(() => { if (state.mode === 'popup') renderPopup(); }, 260);
     setupLocalRefresh();
+    startEtaTicker();
 
     // 后台同步完成后自动刷新账号卡片（60 秒轮询一次，本地调用，无网络开销）
     setInterval(async () => {
@@ -2405,6 +2903,13 @@
     reloadUsage: async () => {
       const ok = await loadUsage();
       if (ok) renderActive();
+      return ok;
+    },
+    /** 由 Python 在后台签到结束后调用：把结论推到结果条上 */
+    reloadCheckin: async () => {
+      const ok = await loadCheckin();
+      await loadTasks();
+      if (state.view === 'overview') renderActive(true);
       return ok;
     },
     __applyTheme: t => {

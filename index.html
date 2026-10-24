@@ -57,22 +57,53 @@
     </header>
 
     <div class="pop-body">
-      <section class="pop-hero">
-        <div class="pop-hero-main">
-          <span class="eyebrow" id="popAvailLabel">今日使用积分</span>
-          <div class="big"><span id="popTodayUsed">0</span><em>分</em></div>
-          <div class="pop-hero-sub">
-            <span class="delta" id="popDelta">—</span>
-            <span class="muted">较昨日</span>
-            <span class="pop-sep">·</span>
-            <span class="muted">可用 <b id="popAvailable">0</b> 分</span>
+      <!-- 小窗轮播：默认永远是第 1 张「今日使用积分」，不记忆上次滑到哪 -->
+      <section class="swipe pop-swipe" id="popSwipe">
+        <div class="swipe-track" id="popTrack">
+          <div class="pop-slide">
+            <div class="pop-hero-main">
+              <span class="eyebrow" id="popAvailLabel">今日使用积分</span>
+              <div class="big"><span id="popTodayUsed">0</span><em>分</em></div>
+              <div class="pop-hero-sub">
+                <span class="delta" id="popDelta">—</span>
+                <span class="muted">较昨日</span>
+                <span class="pop-sep">·</span>
+                <span class="muted">可用 <b id="popAvailable">0</b> 分</span>
+              </div>
+            </div>
+            <div class="quota-mini">
+              <div class="quota-mini-head"><span>额度已用</span><b id="popUsedPct">0%</b></div>
+              <div class="track"><i id="popProgress"></i></div>
+              <div class="quota-mini-foot" id="popCycle">—</div>
+            </div>
+          </div>
+
+          <div class="pop-slide pop-slide--act">
+            <div class="psl-head"><span>今日签到</span><span class="chip" id="popCkChip">—</span></div>
+            <div class="side-week psl-week" id="popWeek"></div>
+            <div class="psl-foot" id="popCkNote">—</div>
+          </div>
+
+          <div class="pop-slide pop-slide--act">
+            <div class="psl-head"><span>猫猫旅行</span><span class="chip" id="popTvChip">—</span></div>
+            <div class="psl-tv">
+              <div class="psl-big"><b id="popTvMain">—</b><span id="popTvUnit"></span></div>
+              <div class="psl-foot" id="popTvNote">—</div>
+            </div>
+            <div class="side-track-wrap tv-track"><i class="side-fill" id="popTvBar"></i></div>
+          </div>
+
+          <div class="pop-slide pop-slide--act">
+            <div class="psl-head"><span>成长任务</span><span class="chip" id="popTkChip">—</span></div>
+            <div class="psl-task2">
+              <div class="psl-big"><b id="popTkDone">—</b><span id="popTkTotal"></span></div>
+              <div class="side-track-wrap psl-bar"><i class="psl-fill" id="popTkBar"></i></div>
+            </div>
+            <div class="psl-foot" id="popTkNote">—</div>
           </div>
         </div>
-        <div class="quota-mini">
-          <div class="quota-mini-head"><span>额度已用</span><b id="popUsedPct">0%</b></div>
-          <div class="track"><i id="popProgress"></i></div>
-          <div class="quota-mini-foot" id="popCycle">—</div>
-        </div>
+        <div class="swipe-dots" id="popDots"></div>
+        <div class="pop-swipe-tip" id="popHint" hidden>左右滑动查看更多</div>
       </section>
 
       <section class="pop-block pop-block--hours">
@@ -159,17 +190,10 @@
           </div>
         </section>
 
-        <div class="ap-meta">
-          <div><span>当前周期</span><b id="cloudCycle">—</b></div>
-          <div><span>账号</span><b class="mono" id="accId">—</b></div>
-        </div>
-
         <div class="ap-sync">
           <span>上次同步 <b id="accLastSync">—</b></span>
           <button class="ap-link-btn" id="cloudSync">立即同步</button>
         </div>
-
-        <div class="pkg-list" id="pkgList"></div>
 
         <div class="acct-actions">
           <button class="btn btn-ghost btn-sm" id="cloudLogout">断开账号</button>
@@ -214,14 +238,46 @@
       </button>
     </nav>
 
-    <div class="side-quota">
-      <div class="side-quota-head"><span>本周期额度</span><span class="chip chip-brand" id="sidePlan">专业版</span></div>
-      <div class="side-quota-num"><b id="sideLeft">0</b><span>/ 200,000 分</span></div>
-      <div class="track track-sm"><i id="sideProgress"></i></div>
-      <div class="side-quota-foot">
-        <span>已用 <b id="sideUsedPct">0%</b></span>
-        <span class="side-quota-note" id="sideCycle">—</span>
+    <!-- 左侧底部：同尺寸卡片轮播（额度 / 签到 / 猫猫 / 任务） -->
+    <div class="swipe side-swipe" id="sideSwipe">
+      <div class="swipe-track" id="sideTrack">
+        <div class="side-card">
+          <div class="sc-head"><span>本周期额度</span><span class="chip chip-brand" id="sidePlan">专业版</span></div>
+          <div class="sc-body">
+            <div class="side-quota-num"><b id="sideLeft">0</b><span>/ 200,000 分</span></div>
+            <div class="track track-sm"><i id="sideProgress"></i></div>
+          </div>
+          <div class="sc-foot sc-foot--col">
+            <span>已用 <b id="sideUsedPct">0%</b></span>
+            <span class="side-quota-note" id="sideCycle">—</span>
+          </div>
+        </div>
+
+        <div class="side-card">
+          <div class="sc-head"><span>今日签到</span><span class="chip" id="sideCkChip">—</span></div>
+          <div class="sc-body sc-body--center"><div class="side-week" id="sideWeek"></div></div>
+          <div class="sc-foot"><span id="sideCkNote">—</span></div>
+        </div>
+
+        <div class="side-card">
+          <div class="sc-head"><span>猫猫旅行</span><span class="chip" id="sideTvChip">—</span></div>
+          <div class="sc-body sc-body--tight">
+            <div class="sc-big"><b id="sideTvMain">—</b><span id="sideTvUnit"></span></div>
+            <div class="sc-place" id="sideTvNote">—</div>
+          </div>
+          <div class="side-track-wrap tv-track"><i class="side-fill" id="sideTvBar"></i></div>
+        </div>
+
+        <div class="side-card">
+          <div class="sc-head"><span>成长任务</span><span class="chip" id="sideTkChip">—</span></div>
+          <div class="sc-body sc-body--row">
+            <div class="side-ring" id="sideRing"></div>
+            <div class="sc-big"><b id="sideTkDone">—</b><span id="sideTkTotal"></span></div>
+          </div>
+          <div class="sc-foot"><span id="sideTkNote">—</span></div>
+        </div>
       </div>
+      <div class="swipe-dots" id="sideDots"></div>
     </div>
 
     <div class="side-foot">
@@ -244,6 +300,14 @@
           <button class="notice-close" id="noticeClose" title="不再显示（可在设置里重新打开）" aria-label="不再显示">
             <svg class="i"><use href="#i-close"/></svg>
           </button>
+        </div>
+
+        <!-- 每日签到结果：启动时自动签到 + 派猫，结论就摆在这条里，可「我知道了」收起 -->
+        <div class="notice notice-checkin" id="checkinNotice" hidden>
+          <span class="notice-icon" id="checkinIcon"><svg class="i"><use href="#i-check"/></svg></span>
+          <p class="notice-text" id="checkinText"></p>
+          <button class="notice-link" id="checkinRetry" hidden>重试</button>
+          <button class="notice-link" id="checkinOk">我知道了</button>
         </div>
 
         <div class="kpi-grid">
@@ -365,6 +429,7 @@
               <div class="comp-list" id="compList"></div>
             </div>
           </article>
+
         </div>
       </section>
 
@@ -484,15 +549,44 @@
             </div>
           </section>
 
-          <!-- 显示与行为 -->
+          <!-- 每日积分 -->
           <section class="set-group">
             <header class="set-group-head">
-              <div><h2>显示与行为</h2><p>偏好保存在本机，立即生效</p></div>
+              <div><h2>每日积分</h2><p>开机自动领，结论显示在总览顶部</p></div>
+            </header>
+            <div class="set-rows">
+              <div class="set-row">
+                <div class="set-label"><b>启动时自动签到</b><em>每次打开程序领当日 100 分，已签到自动跳过</em></div>
+                <label class="switch-wrap"><input type="checkbox" id="optCheckinAuto" checked><i class="switch"></i></label>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>顺带派猫猫旅行</b><em>到家自动领，随后重新派出（1–4 小时带回 5–10 分）；当天派过就跳过</em></div>
+                <label class="switch-wrap"><input type="checkbox" id="optCheckinTravel" checked><i class="switch"></i></label>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>计入每日签到</b><em>把签到赠送的 100 分/天计入可用额度</em></div>
+                <label class="switch-wrap"><input type="checkbox" id="optSignin" checked><i class="switch"></i></label>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>工作日折算</b><em>剔除周末与法定节假日，计算每日可用积分</em></div>
+                <label class="switch-wrap"><input type="checkbox" id="optHoliday" checked><i class="switch"></i></label>
+              </div>
+            </div>
+          </section>
+
+          <!-- 显示与动效 -->
+          <section class="set-group">
+            <header class="set-group-head">
+              <div><h2>显示与动效</h2><p>图表怎么画、动画放多少</p></div>
             </header>
             <div class="set-rows">
               <div class="set-row">
                 <div class="set-label"><b>图表数值标注</b><em>在柱体与扇区上显示数值</em></div>
                 <label class="switch-wrap"><input type="checkbox" id="optLabels" checked><i class="switch"></i></label>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>顶部数据提示条</b><em>在总览顶部显示数据来源与云端延迟说明</em></div>
+                <label class="switch-wrap"><input type="checkbox" id="optNotice" checked><i class="switch"></i></label>
               </div>
               <div class="set-row">
                 <div class="set-label"><b>日历悬停光圈</b><em>鼠标移上消耗日历时发光，并照亮相邻方格</em></div>
@@ -507,21 +601,34 @@
                 <label class="switch-wrap"><input type="checkbox" id="optGroupMinute" checked><i class="switch"></i></label>
               </div>
               <div class="set-row">
-                <div class="set-label"><b>顶部数据提示条</b><em>在总览顶部显示数据来源与云端延迟说明</em></div>
-                <label class="switch-wrap"><input type="checkbox" id="optNotice" checked><i class="switch"></i></label>
+                <div class="set-label"><b>左下角卡片切换</b><em>总览左下角四张卡自动翻页的间隔</em></div>
+                <select id="optSideSwipe" class="mini-select">
+                  <option value="3">3 秒</option>
+                  <option value="5">5 秒</option>
+                  <option value="8">8 秒</option>
+                  <option value="15">15 秒</option>
+                  <option value="0">不自动切换</option>
+                </select>
               </div>
               <div class="set-row">
-                <div class="set-label"><b>关闭时收起到托盘</b><em>关闭窗口不退出程序，可从托盘重新唤起</em></div>
-                <label class="switch-wrap"><input type="checkbox" id="optTray" checked><i class="switch"></i></label>
+                <div class="set-label"><b>小窗卡片切换</b><em>右下角小窗四张卡的翻页间隔，窗口露出后才计时</em></div>
+                <select id="optPopSwipe" class="mini-select">
+                  <option value="5">5 秒</option>
+                  <option value="8">8 秒</option>
+                  <option value="10">10 秒</option>
+                  <option value="20">20 秒</option>
+                  <option value="0">不自动切换</option>
+                </select>
               </div>
-              <div class="set-row">
-                <div class="set-label"><b>工作日折算</b><em>剔除周末与法定节假日，计算每日可用积分</em></div>
-                <label class="switch-wrap"><input type="checkbox" id="optHoliday" checked><i class="switch"></i></label>
-              </div>
-              <div class="set-row">
-                <div class="set-label"><b>计入每日签到</b><em>把签到赠送的 100 分/天计入可用额度</em></div>
-                <label class="switch-wrap"><input type="checkbox" id="optSignin" checked><i class="switch"></i></label>
-              </div>
+            </div>
+          </section>
+
+          <!-- 运行与刷新 -->
+          <section class="set-group">
+            <header class="set-group-head">
+              <div><h2>运行与刷新</h2><p>多久读一次数据，关窗后去哪</p></div>
+            </header>
+            <div class="set-rows">
               <div class="set-row">
                 <div class="set-label"><b>本地刷新间隔</b><em>只重读本机记录，不产生任何网络请求</em></div>
                 <select id="optLocalRefresh" class="mini-select">
@@ -541,6 +648,10 @@
                   <option value="180">3 小时</option>
                   <option value="0">仅手动</option>
                 </select>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>关闭时收起到托盘</b><em>关闭窗口不退出程序；再次双击图标会直接把主界面叫出来</em></div>
+                <label class="switch-wrap"><input type="checkbox" id="optTray" checked><i class="switch"></i></label>
               </div>
             </div>
           </section>
@@ -611,6 +722,7 @@
       </section>
     </div>
   </main>
+</div>
 </div>
 
 <!-- 自绘缩放手柄：窗口已去掉系统边框（避免顶部黑边），边缘 4px 热区负责缩放 -->

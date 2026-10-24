@@ -282,6 +282,14 @@ class AccountService:
             pass
         return True
 
+    def _on_origin(self, origin):
+        """隐藏窗口当前是否已经停在这个域里——同源 fetch 不需要重新加载页面。"""
+        try:
+            href = self.win.evaluate_js("location.href") or ""
+        except Exception:
+            return False
+        return str(href).startswith(origin)
+
     def _current_path(self):
         try:
             return self.win.evaluate_js("location.pathname") or ""
@@ -395,6 +403,31 @@ class AccountService:
             except Exception:
                 pass
 
+    def _sync_cooling(self):
+        """距上次成功同步是否还没到间隔。
+
+        为什么要有它：以前每次启动都无条件 sync 一遍，一天开五次机就是五次全量拉取
+        （汇总 + 免费包 + 付费包 + 多页逐笔 + 身份）。这类接口按频率风控，
+        开得越勤越容易被限流，限流之后连手动同步都难。
+        用户手动点「同步」不走这里，永远能立刻拉。
+        """
+        try:
+            mins = int(self.interval_min)
+        except Exception:
+            mins = 60
+        if mins <= 0:
+            return True          # 设为「仅手动」：启动时一次都不打
+        if self.state.get("status") != "connected" or not self.state.get("cloud"):
+            return False         # 没有可用缓存，必须同步一次
+        last = self.state.get("lastSync")
+        if not last:
+            return False
+        try:
+            lt = dt.datetime.strptime(str(last), "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return False
+        return (dt.datetime.now() - lt).total_seconds() < mins * 60
+
     def try_restore(self):
         """启动时调用：登录态来自 WebView2 持久化 profile，能同步就同步。
 
@@ -405,9 +438,15 @@ class AccountService:
             _log("try_restore skipped: 用户已退出登录")
             return False
         time.sleep(2.0)
+        # 先导一次页面把会话激活（签到要用同源 fetch，也需要页面在 workbuddy 域）
         self._nav(ORIGINS[0] + "/app", wait=3.5)
         if cdp_enabled() and os.path.exists(COOKIE_FILE):
             self.restore_session()
+
+        if self._sync_cooling():
+            _log("try_restore: 距上次同步不足 %s 分钟，直接用缓存，跳过主动同步" % self.interval_min)
+            return bool(self.state.get("cloud"))
+
         self._nav(ORIGINS[0] + PROFILE_PATH, wait=4.5)
         res = self.sync()
         _log(f"try_restore sync ok={res.get('ok')}")
@@ -427,12 +466,14 @@ class AccountService:
             used_origin = ""
             for origin in ORIGINS:
                 for attempt in range(2):
-                    # 会话按页面加载刷新：用页面内跳转刷新对应域的 profile 页
-                    need_nav = (attempt > 0) or (self._current_path() != PROFILE_PATH)
+                    # 页面已经在这个域里就直接发请求，不再每次同步都整页重载一遍
+                    # （一次重载要拉 HTML/JS/CSS，几百 KB，纯属白花）。
+                    # 兜底：第一次拿不到数据时，重试会强制导航一次再试。
+                    need_nav = (attempt > 0) or (not self._on_origin(origin))
                     if need_nav:
                         self._nav(origin + PROFILE_PATH, wait=4.5)
                     else:
-                        time.sleep(2.0)
+                        time.sleep(1.2)
 
                     since = self._usage_since()
                     self.win.evaluate_js("window.__wbBill=null; window.__wbSince=%s;" % json.dumps(since))
