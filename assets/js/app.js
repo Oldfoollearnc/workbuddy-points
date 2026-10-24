@@ -1916,6 +1916,26 @@
         : '扫码在官方页面完成，登录态只保存在本机（DPAPI 加密）');
   }
 
+  /** 打开设置页时查一次版本（有缓存就不发请求）。有新版本才改副标题。 */
+  async function loadUpdate() {
+    const note = $('#updateNote');
+    if (!note || !bridge.has() || !bridge.can('check_update')) return;
+    try {
+      const r = await bridge.call('check_update');
+      if (!r || !r.ok) return;
+      if (r.hasUpdate) {
+        note.innerHTML = `有新版本 <b>v${r.latest}</b>（当前 v${r.current}）· <a href="#" id="updateLink">去下载</a>`;
+        const link = $('#updateLink');
+        if (link) link.addEventListener('click', e => {
+          e.preventDefault();
+          if (bridge.can('open_url')) bridge.call('open_url', r.url);
+        });
+      } else {
+        note.textContent = `已是最新（v${r.current}）`;
+      }
+    } catch (e) { /* 查不到不影响设置页 */ }
+  }
+
   function renderSettings() {
     const acc = effAccount();
     renderAccountCard();
@@ -1928,6 +1948,7 @@
     setText('#srcDays', `${D.meta.days || 0} 天有消耗`);
     setText('#srcInterval', (+ACCOUNT.interval === 0 ? '仅手动' : (ACCOUNT.interval || 60) + ' 分钟'));
     setText('#aboutVersion', appVersion);
+    loadUpdate();     // 打开设置页时顺手查一次版本（一天缓存）
     setText('#appVersion', appVersion);
     setText('#sideVersion', appVersion);
 

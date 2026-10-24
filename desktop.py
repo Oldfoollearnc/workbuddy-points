@@ -58,6 +58,7 @@ from win32_utils import (      # noqa: E402  Win32 底层工具（拆分自本�
     SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE, SWP_FRAMECHANGED,
     GWL_STYLE, KEEP_VISIBLE_X, KEEP_VISIBLE_Y,
 )
+import update_check
 import usage_source
 from account_service import AccountService, CDP_PORT, cdp_enabled
 from checkin_service import CheckinService
@@ -1036,6 +1037,33 @@ class Api:
         except Exception as e:
             log(f"export_diagnostics error: {e}")
             return {"ok": False, "error": str(e)[:200]}
+
+    def open_url(self, url):
+        """用系统默认浏览器打开链接（只允许 http/https，避免被页面里塞奇怪协议）。"""
+        try:
+            u = str(url or "").strip()
+            if not u.lower().startswith(("http://", "https://")):
+                return {"ok": False, "error": "只支持 http/https"}
+            os.startfile(u)          # noqa: S606  Windows 专用
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:120]}
+
+    _update_cache = {"at": 0.0, "data": None}
+
+    def check_update(self):
+        """查 GitHub 最新版（结果缓存一天，失败静默）。"""
+        now = time.time()
+        c = Api._update_cache
+        if c["data"] and now - c["at"] < 86400:
+            return c["data"]
+        try:
+            r = update_check.check(read_version())
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:120], "hasUpdate": False}
+        if r.get("ok"):
+            Api._update_cache = {"at": now, "data": r}
+        return r
 
     def get_autostart(self):
         """开机自启：当前是否开启 + 会写进注册表的命令（供设置页展示）。"""
