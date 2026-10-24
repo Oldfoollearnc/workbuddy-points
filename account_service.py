@@ -27,6 +27,7 @@ import threading
 import time
 
 import app_paths
+import fsutil
 import dpapi
 import logutil
 
@@ -179,10 +180,10 @@ class AccountService:
 
     def _save_cache(self):
         try:
-            with open(CACHE, "w", encoding="utf-8") as f:
-                json.dump({k: self.state[k] for k in
+            # 原子写：这个文件上百 KB，直接 open(w) 截断再写，别的线程读到半截会解析失败
+            fsutil.save_json(CACHE, {k: self.state[k] for k in
                            ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "usageRows", "lastSync", "interval", "origin", "autoLogin")},
-                          f, ensure_ascii=False, indent=2)
+                           indent=2)
         except Exception:
             pass
 

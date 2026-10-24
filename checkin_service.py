@@ -29,6 +29,7 @@ import threading
 import time
 
 import app_paths
+import fsutil
 
 CACHE = app_paths.data_path("checkin.json")
 
@@ -141,14 +142,12 @@ class CheckinService:
 
     def _save_cache(self):
         try:
-            with open(CACHE, "w", encoding="utf-8") as f:
-                json.dump({"at": self.state["at"], "result": self.state["result"],
-                           "options": self.options,
-                           "signedDate": self.state.get("signedDate"),
-                           "streak": self.state.get("streak"),
-                           "week": self.state.get("week"),
-                           "balance": self.state.get("balance")},
-                          f, ensure_ascii=False, indent=2)
+            fsutil.save_json(CACHE, {"at": self.state["at"], "result": self.state["result"],
+                                 "options": self.options,
+                                 "signedDate": self.state.get("signedDate"),
+                                 "streak": self.state.get("streak"),
+                                 "week": self.state.get("week"),
+                                 "balance": self.state.get("balance")}, indent=2)
         except Exception:
             pass
 

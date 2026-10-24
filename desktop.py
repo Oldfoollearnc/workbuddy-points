@@ -1038,6 +1038,14 @@ class Api:
             log(f"export_diagnostics error: {e}")
             return {"ok": False, "error": str(e)[:200]}
 
+    def test_notify(self):
+        """设置页的「测试通知」：走一遍真实分流，返回投递到了哪里。"""
+        try:
+            where = self._desk.notify("这是一条测试通知：能看到就说明分流正常", "info")
+            return {"ok": True, "where": where}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:120]}
+
     def open_url(self, url):
         """用系统默认浏览器打开链接（只允许 http/https，避免被页面里塞奇怪协议）。"""
         try:

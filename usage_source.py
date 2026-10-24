@@ -24,6 +24,7 @@ import time
 from collections import defaultdict
 
 import app_paths
+import fsutil
 import data_source
 import logutil
 
@@ -341,10 +342,8 @@ class UsageService:
         data["meta"]["cached"] = not dirty
         if dirty:
             try:
-                os.makedirs(os.path.dirname(CACHE_PATH), exist_ok=True)
-                with open(CACHE_PATH, "w", encoding="utf-8") as f:
-                    json.dump({"ver": CACHE_VER, "home": self.source["home"], "files": stats},
-                              f, ensure_ascii=False)
+                fsutil.save_json(CACHE_PATH,
+                                 {"ver": CACHE_VER, "home": self.source["home"], "files": stats})
             except Exception as e:
                 log(f"cache write error: {e}")
         if tail_reads:

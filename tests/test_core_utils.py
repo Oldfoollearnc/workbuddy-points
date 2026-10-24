@@ -93,3 +93,55 @@ class MaskTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AtomicWriteTest(unittest.TestCase):
+    """缓存文件必须原子替换：并发读不能读到半截 JSON。"""
+
+    def test_concurrent_read_never_sees_partial(self):
+        import json
+        import tempfile
+        import threading
+        import time
+
+        import fsutil
+
+        fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        try:
+            fsutil.save_json(path, {"big": "x" * 60000})
+            errors, stop = [], threading.Event()
+
+            def reader():
+                while not stop.is_set():
+                    try:
+                        with open(path, encoding="utf-8") as f:
+                            json.load(f)
+                        time.sleep(0.002)       # 模拟真实读取：读一下就放开，不是死循环占着
+                    except Exception as e:      # noqa: BLE001
+                        errors.append(str(e))
+
+            th = threading.Thread(target=reader, daemon=True)
+            th.start()
+            for _ in range(20):
+                fsutil.save_json(path, {"big": "y" * 60000})
+            stop.set()
+            th.join(timeout=2)
+            self.assertEqual(errors, [], "读到半截 JSON：原子写没生效")
+        finally:
+            os.unlink(path)
+
+    def test_load_json_handles_broken_file(self):
+        import tempfile
+
+        import fsutil
+
+        fd, path = tempfile.mkstemp(suffix=".json")
+        os.close(fd)
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write('{"half": ')          # 故意写坏的
+            self.assertIsNone(fsutil.load_json(path))
+            self.assertEqual(fsutil.load_json(path, {"a": 1}), {"a": 1})
+        finally:
+            os.unlink(path)
