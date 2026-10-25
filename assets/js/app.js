@@ -1380,11 +1380,11 @@
 
   /* ---------------- 额度与消耗：今日 / 本周 / 本月 三个口径 ---------------- */
 
-  const QUOTA_LABEL = { day: '今日', week: '本周', cycle: '本期' };
+  const QUOTA_LABEL = { day: '今日', week: '本周', month: '本月', cycle: '本期' };
 
   /** 区间内已消耗多少分：云端优先（与流水同源），否则回退 D.daily（只带 MM-DD） */
-  /** 环图的"额度"跟着区间走：今日=每日可用，本周=本周可用，本期=总额度（副标题显示周期剩余）
-   *  底部三项统计按数值从小到大排列，不随切换变化。 */
+  /** 环图的"额度"跟着区间走：今日=每日可用，本周=本周可用，本月=按剩余工作日折算，
+   *  本期=总额度（副标题显示周期剩余）。底部三项统计按数值从小到大排列，不随切换变化。 */
   function renderQuotaCard(acc, configured) {
     const kind = state.quotaRange || 'week';
     const lb = QUOTA_LABEL[kind] || '本周';
@@ -1395,7 +1395,14 @@
     let used = 0, budget = 0;
     if (kind === 'day') { used = quotaWindow('day').sum; budget = al.perDay; }
     else if (kind === 'cycle') { used = cycleUsed; budget = Math.max(1, cycleUsed + cycleLeft); }
-    else { used = quotaWindow('week').sum; budget = al.perWeek; }
+    else if (kind === 'month') {
+      // 本月没有现成额度：已用 + 剩下这几天能吃多少（perDay 已按剩余工作日折算）
+      const now = new Date();
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      const leftWork = countWorkdays(now, monthEnd, al.holidayOn);
+      used = quotaWindow('month').sum;
+      budget = used + al.perDay * Math.max(0, leftWork);
+    } else { used = quotaWindow('week').sum; budget = al.perWeek; }
 
     const rawPct = budget > 0 ? used / budget : 0;
     const pct = Math.min(1, rawPct);
@@ -1404,9 +1411,13 @@
     const over = Math.max(0, used - budget);
     const sub = !configured ? '点头像连接账号'
       : kind === 'cycle' ? `周期剩余 ${F.credit(cycleLeft)} · 已用 ${F.credit(cycleUsed)}`
-        : budget > 0
-          ? `额度 ${F.credit(budget)} · ${over > 0 ? '超 ' + F.credit(over) : '剩 ' + F.credit(budget - used)}`
-          : '额度为 0';
+        : kind === 'month'
+          // 本月的分母是"已花 + 剩下还能花"，不是月初定的额度，所以百分比天然偏高。
+          // 把两个数并排写出来，避免 88% 被当成"快超支"。
+          ? `已花 ${F.credit(used)} · 剩 ${F.credit(Math.max(0, budget - used))}`
+          : budget > 0
+            ? `额度 ${F.credit(budget)} · ${over > 0 ? '超 ' + F.credit(over) : '剩 ' + F.credit(budget - used)}`
+            : '额度为 0';
 
     const gaugeEl = $('[data-chart="gauge"]');
     if (gaugeEl) {
@@ -2338,6 +2349,25 @@
           return;
         }
         if (!bridge.can('export_ledger_csv')) return;
+        // 逐笔也按页面当前筛选导出：与屏幕完全一致，并带上本机补足的实时记录。
+        // 旧实现直接读云端 usageRows，既无视筛选、也漏掉同步后的本机流水。
+        const rows = ledgerRows(ledgerAll());
+        if (!rows.length) { toast('当前筛选下没有记录', 'i-info'); return; }
+        if (bridge.can('export_rows_csv')) {
+          const head = ['时间', '类型', '模型', '动作', '项目', '积分', 'Token'];
+          const body = rows.map(e => {
+            const t = e.time instanceof Date ? e.time : new Date(e.time);
+            const stamp = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())} `
+              + `${F.pad(t.getHours())}:${F.pad(t.getMinutes())}:${F.pad(t.getSeconds())}`;
+            return [stamp, e.type === 'earn' ? '获得' : '消耗', e.model || '', e.task || '',
+              e.project || '', e.points || 0, e.tokens == null ? '' : e.tokens];
+          });
+          const rr = await bridge.call('export_rows_csv', 'WorkBuddy-流水',
+            JSON.stringify(head), JSON.stringify(body));
+          if (rr && rr.ok) toast('已导出 ' + rr.count + ' 条：' + rr.path);
+          else if (!(rr && rr.cancelled)) toast('导出失败：' + ((rr && rr.error) || '未知错误'), 'i-alert');
+          return;
+        }
         const r = await bridge.call('export_ledger_csv');
         if (r && r.ok) toast('已导出 ' + r.count + ' 条：' + r.path);
         else if (!(r && r.cancelled)) toast('导出失败：' + ((r && r.error) || '未知错误'), 'i-alert');

@@ -412,12 +412,13 @@
             <header class="card-head">
               <div>
                 <h2>额度与消耗</h2>
-                <p>按今日 / 本周 / 本月查看额度消耗进度</p>
+                <p>今日 / 本周 / 本月 / 本期 的额度进度</p>
               </div>
               <div class="card-tools">
                 <div class="segmented segmented-sm" id="quotaSeg" role="tablist" aria-label="额度区间">
                   <button data-quota="day">今日</button>
                   <button class="is-active" data-quota="week">本周</button>
+                  <button data-quota="month">本月</button>
                   <button data-quota="cycle">本期</button>
                 </div>
               </div>
@@ -487,11 +488,11 @@
               <div class="segmented" id="ledgerType">
                 <button class="is-active" data-type="all">全部</button>
                 <button data-type="today">今日</button>
-                <button data-type="week">近 7 天</button>
+                <button data-type="week">7 天</button>
               </div>
               <label class="search" for="ledgerSearch">
                 <svg class="i"><use href="#i-search"/></svg>
-                <input id="ledgerSearch" type="text" placeholder="搜索模型 / 项目 / 任务" autocomplete="off">
+                <input id="ledgerSearch" type="text" placeholder="搜索模型 / 项目" autocomplete="off">
               </label>
               <select id="ledgerFilter" class="mini-select" title="只看某个模型或项目">
                 <option value="">全部模型 / 项目</option>

@@ -143,6 +143,27 @@ class BuildTest(unittest.TestCase):
             self.assertEqual(full["today"]["consumed"], 9)
             self.assertEqual(full["meta"]["records"], 3)
 
+    def test_rewritten_file_triggers_full_rescan(self):
+        """文件被重写（长度变大、头部变了）：必须整文件重扫。
+
+        只看 size/mtime 会以为"又是追加"，从旧 offset 接着读 —— 那里已在行中间，
+        前半段记录会永久丢失，而且因为条件一直成立，永远等不到自愈。
+        """
+        base = int(time.time() * 1000)
+        self._append([_line(base, mid="a", credit=2)])
+        with mock.patch.object(U.data_source, "resolve", return_value=self.state), \
+                mock.patch.object(U, "CACHE_PATH", self.cache):
+            svc = U.UsageService()
+            svc._build(force=True)
+            # 重写：开头插入一条更早、更长的记录，整体变长
+            with open(self.file, "w", encoding="utf-8") as f:
+                f.write(_line(base - 5000, mid="zzzzzzzz", credit=5) + "\n")
+                f.write(_line(base, mid="a", credit=2) + "\n")
+            os.utime(self.file, None)
+            data = svc._build(force=False)
+        self.assertEqual(data["meta"]["records"], 2)
+        self.assertEqual(data["today"]["consumed"], 7)
+
     def test_same_message_in_two_files_counted_once(self):
         base = int(time.time() * 1000)
         self._append([_line(base, mid="dup", credit=7)])

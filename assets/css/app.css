@@ -156,6 +156,7 @@ img { display: block; }
   border-radius: 6px;
   font-size: 11.5px;
   color: var(--text-3);
+  white-space: nowrap;              /* 「近 7 天」在窄容器里会被压成两行 */
   transition: background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out);
 }
 .segmented button:hover { color: var(--text-1); }
@@ -1198,9 +1199,21 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
 /* ===================== 流水表 ===================== */
 
 .ledger-card { padding: 16px 18px 12px; }
-.ledger-head { align-items: center; }
-.ledger-tools { display: flex; align-items: center; gap: 8px; }
-.ledger-tools .search { width: 230px; }
+.ledger-head { align-items: center; flex-wrap: wrap; row-gap: 8px; }
+.ledger-tools {
+  display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap; justify-content: flex-end;
+  /* 一行控件统一 30px：分段、搜索、两个下拉、导出，高度参差最显乱 */
+  --ctl-h: 30px;
+}
+.ledger-tools .segmented { height: var(--ctl-h); padding: 2px; }
+.ledger-tools .segmented button { height: calc(var(--ctl-h) - 4px); padding: 0 9px; }
+.ledger-tools .search {
+  height: var(--ctl-h); width: 210px;
+  flex: 1 1 150px; min-width: 130px; max-width: 210px;
+}
+.ledger-tools .mini-select { height: var(--ctl-h); }
+.ledger-tools .btn-sm { height: var(--ctl-h); }
 
 .ledger-summary {
   display: grid;
@@ -2192,7 +2205,7 @@ body[data-mode="popup"] .rz { display: none; }
   .span-8, .span-7, .span-5, .span-4, .span-6 { grid-column: span 12; }
   .chart-donut, .chart-task { min-height: 280px; }
   .insight-list { grid-template-columns: 1fr; }
-  .ledger-tools .search { width: 180px; }
+  .ledger-tools .search { width: 160px; max-width: 160px; flex-basis: 120px; }
   .set-cols { grid-template-columns: 1fr; }
   .set-pair { grid-template-columns: 1fr; }
 }

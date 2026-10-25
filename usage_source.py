@@ -23,6 +23,8 @@ import threading
 import time
 from collections import defaultdict
 
+import hashlib
+
 import app_paths
 import fsutil
 import data_source
@@ -129,6 +131,19 @@ def _mix(points_map, total):
             "tone": TONE_ORDER[i % len(TONE_ORDER)],
         })
     return out
+
+
+def _head_sig(path, n=512):
+    """文件头指纹：只读前 512 字节，用来区分"末尾追加"和"整文件被重写"。
+
+    mtime/size 都相同或变大，也可能是压缩、备份覆盖、客户端重建文件；
+    这时候 offset 已经不在行边界，继续增量读会丢掉前半段记录。
+    """
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha1(f.read(n)).hexdigest()[:16]
+    except Exception:
+        return ""
 
 
 def _scan_file(path, offset=0):
@@ -333,19 +348,30 @@ class UsageService:
             if ent and ent.get("size") == size and abs(float(ent.get("mtime") or 0) - mtime) < 1e-6:
                 # 文件没动过：直接复用上次的逐笔
                 recs, offset = ent.get("records") or [], int(ent.get("offset") or 0)
+                sig = ent.get("head") or _head_sig(path)
             elif (ent and size >= int(ent.get("size") or 0)
                   and int(ent.get("offset") or 0) <= size
                   and mtime >= float(ent.get("mtime") or 0)):
-                # 常见路径：会话文件只在末尾追加 → 只读新增的那一段
-                tail, offset = _scan_file(path, int(ent.get("offset") or 0))
-                recs = (ent.get("records") or []) + tail
-                dirty = True
-                tail_reads += 1
+                # 常见路径：会话文件只在末尾追加 → 只读新增的那一段。
+                # 但"变长"不等于"追加"：客户端压缩/重写、或用备份覆盖时长度也可能变大，
+                # 此时 offset 已不在行边界，从那里读会从半截 JSON 开始，前半段永远丢。
+                # 所以先比一下文件头部指纹，变了就整文件重扫。
+                sig = _head_sig(path)
+                if ent.get("head") and sig and ent.get("head") != sig:
+                    recs, offset = _scan_file(path, 0)
+                    dirty = True
+                else:
+                    tail, offset = _scan_file(path, int(ent.get("offset") or 0))
+                    recs = (ent.get("records") or []) + tail
+                    dirty = True
+                    tail_reads += 1
             else:
                 # 被截断 / 被重写 / 首次见：整文件重扫
                 recs, offset = _scan_file(path, 0)
+                sig = _head_sig(path)
                 dirty = True
-            stats[path] = {"mtime": mtime, "size": size, "offset": offset, "records": recs}
+            stats[path] = {"mtime": mtime, "size": size, "offset": offset,
+                           "records": recs, "head": sig}
             for r in recs:
                 merged.setdefault(r["mid"], r)      # 同一 message 可能跨文件重复
         if set(stats) != set(prev):
