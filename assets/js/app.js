@@ -690,7 +690,11 @@
       bits.push(`猫猫已到家，<b>${t.reward || 0}</b> 分待领取`);
     } else if (t.state === 'idle' && t.limitReached) {
       // 每天只能派 1 次，领完也不重置，所以这里必须说清楚"不是漏了"
-      bits.push(t.claimed ? '今天已经派满（每天 1 次）' : '今日猫猫已派过');
+      // claimedToday 是按天累计、写在本地缓存里的，重启后这条也还在
+      const gotToday = t.claimedToday || 0;
+      bits.push(gotToday
+        ? `猫猫今天带回来 <b>${gotToday}</b> 分`
+        : (t.claimed ? '今天已经派满（每天 1 次）' : '今日猫猫已派过'));
     }
     if (t.error) bits.push(`<span class="dim">${esc(t.error)}</span>`);
     if (!bits.length) bits.push('签到检查完成');
@@ -860,10 +864,15 @@
     const tvMain = $('#' + p + 'TvMain');
     const tvUnit = $('#' + p + 'TvUnit');
     if (tvMain && tvUnit) {
+      delete tvMain.dataset.until;      // 每次重绘先清掉，只有「旅行中」才挂倒计时
       if (st === 'traveling' && t.remainingSec > 0) {
         tvMain.classList.remove('as-text');
         tvMain.textContent = String(Math.max(1, Math.round(t.remainingSec / 60)));
         tvUnit.textContent = '分钟后回来';
+        // 卡片也要跟着走秒：否则它停在"出发那一刻的分钟数"，一直到下次数据推送
+        // （看猫定时器睡到猫到家，可能 4 小时后）才变 —— 用户看到的就是"数字不动"。
+        tvMain.dataset.until = String(Math.round(Date.now() / 1000) + (t.remainingSec || 0));
+        tvMain.dataset.p = p;
         paintBar(p + 'TvBar', t.progress || 0, 'good');
       } else if (st === 'arrived') {
         tvMain.classList.remove('as-text');
@@ -890,7 +899,10 @@
     }
     const tvNote = $('#' + p + 'TvNote');
     if (tvNote) {
-      if (st === 'idle' && t.limitReached) tvNote.textContent = '明天 0 点后可再派';
+      const gotToday = t.claimedToday || 0;
+      if (st === 'idle' && t.limitReached) tvNote.textContent = gotToday
+        ? `今日已领 ${gotToday} 分 · 明天可再派`
+        : '明天 0 点后可再派';
       else if (st === 'idle') tvNote.textContent = '每天可派 1 次';
       else tvNote.textContent = t.location || '—';
     }
@@ -931,6 +943,21 @@
       $$('.ck-eta').forEach(el => {
         const left = (+el.dataset.until || 0) - now;
         el.textContent = left <= 0 ? '应该已经到家，重启程序可领取' : etaText(left);
+      });
+      // 猫猫卡片上的"X 分钟后回来"：和横幅一样按绝对时间走，不再是个死数字
+      $$('[data-until]').forEach(el => {
+        if (el.classList.contains('ck-eta')) return;
+        const left = (+el.dataset.until || 0) - now;
+        const unit = el.dataset.p ? $('#' + el.dataset.p + 'TvUnit') : null;
+        if (left <= 0) {
+          el.textContent = '到家了';
+          el.classList.add('as-text');
+          if (unit) unit.textContent = '';
+        } else {
+          el.textContent = String(Math.max(1, Math.round(left / 60)));
+          el.classList.remove('as-text');
+          if (unit) unit.textContent = '分钟后回来';
+        }
       });
     }, 5000);
   }

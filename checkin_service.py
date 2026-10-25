@@ -130,7 +130,7 @@ class CheckinService:
                 self.state["result"] = d.get("result")
                 self.state["status"] = "done" if (d.get("result") or {}).get("ok") else "failed"
             # 记住"哪天签成的"：重启后也能直接跳过当天剩余的签到查询
-            for k in ("signedDate", "streak", "week", "balance"):
+            for k in ("signedDate", "streak", "week", "balance", "claimedDate", "claimedToday"):
                 if k in d:
                     self.state[k] = d.get(k)
             opt = d.get("options") or {}
@@ -147,7 +147,9 @@ class CheckinService:
                                  "signedDate": self.state.get("signedDate"),
                                  "streak": self.state.get("streak"),
                                  "week": self.state.get("week"),
-                                 "balance": self.state.get("balance")}, indent=2)
+                                 "balance": self.state.get("balance"),
+                                 "claimedDate": self.state.get("claimedDate"),
+                                 "claimedToday": self.state.get("claimedToday")}, indent=2)
         except Exception:
             pass
 
@@ -543,6 +545,18 @@ class CheckinService:
                 res["checkedIn"] = bool(data.get("today_checked_in"))
                 res["week"] = [bool(x) for x in (data.get("week_progress") or [])][:7]
                 res["checkin"] = self._do_checkin(data)
+                if res["checkin"].get("done") and not res["checkedIn"]:
+                    # 刚签成功：data 是**签到前**的状态快照，checkedIn / week 还停在旧值。
+                    # 早先直接拿它去渲染，界面就自相矛盾：横幅写「今日签到成功 +100 分」，
+                    # 左下角卡片和签到面板却写「待签到」、「本周已签 6/7 天」。
+                    # 先按本地结果乐观补上今天的点，再回读一次服务端做校准。
+                    res["checkedIn"] = True
+                    week = list(res["week"] or [])
+                    if len(week) == 7:
+                        week[now.weekday()] = True      # 点阵是周一为 0，与界面一致
+                    res["week"] = week
+                    self._refresh_after_checkin(res)
+
                 # 记下"哪一天签成了"，当天余下的轮询就不必再问签到接口
                 if res["checkedIn"]:
                     self.state["signedDate"] = today_s
@@ -552,6 +566,7 @@ class CheckinService:
 
             if travel_auto:
                 res["travel"] = self._do_travel()
+                self._note_travel_claim(res["travel"])
             res["ok"] = True
             # 签到结论优先于旅行：猫猫失败不影响"今天签到成功"这个结论
             if res["checkin"] and res["checkin"].get("error"):
@@ -589,6 +604,31 @@ class CheckinService:
         out["error"] = self._http_hint(r, "签到失败")
         out["message"] = out["error"]
         return out
+
+    def _refresh_after_checkin(self, res):
+        """签到成功后回读一次状态，把 checkedIn / week / 连签 / 余额校准成服务端值。
+
+        读不到（网络/会话问题）就保留调用方按本地结果推算的值 —— 至少"今天签过了"是对的，
+        不会又变回"待签到"。只做加法：服务端如果还没跟上（today_checked_in 仍为 false），
+        不把已经成立的签到结论降级。
+        """
+        try:
+            st = self._call(STATUS_PATH, "POST", retry=0)
+            if st.get("status") != 200:
+                return
+            d = (st.get("json") or {}).get("data") or {}
+            if d.get("today_checked_in"):
+                res["checkedIn"] = True
+            wk = [bool(x) for x in (d.get("week_progress") or [])][:7]
+            if len(wk) == 7:
+                old = res["week"] if len(res["week"] or []) == 7 else [False] * 7
+                res["week"] = [a or b for a, b in zip(wk, old)]
+            if d.get("streak_days") is not None:
+                res["streak"] = d.get("streak_days")
+            if d.get("total_credits") is not None:
+                res["balance"] = d.get("total_credits")
+        except Exception as e:
+            _log("checkin 签到后回读状态失败：%s" % e)
 
     def _http_hint(self, resp, prefix):
         """把接口错误翻译成"用户能懂 + 知道下一步做什么"的话。
@@ -655,6 +695,22 @@ class CheckinService:
                 else:
                     out["error"] = self._http_hint(p, "派出猫猫失败")
         return out
+
+    def _note_travel_claim(self, travel):
+        """把"今天领到多少"记进本地状态。
+
+        为什么要另记一笔：`travel["claimed"]` 只代表**本轮**领到多少，下一轮重建 travel 就归零，
+        界面上"今天领了多少"随之消失（重启更是彻底看不到）。这里按天累加写进 checkin.json，
+        界面就能一直显示，跨天自动清零。
+        """
+        today = dt.date.today().isoformat()
+        if self.state.get("claimedDate") != today:
+            self.state["claimedDate"] = today
+            self.state["claimedToday"] = 0
+        got = int(travel.get("claimed") or 0)
+        if got:
+            self.state["claimedToday"] = int(self.state.get("claimedToday") or 0) + got
+        travel["claimedToday"] = int(self.state.get("claimedToday") or 0)
 
     def _travel_locations(self):
         r = self._call(TRAVEL_CONFIG, "GET")
