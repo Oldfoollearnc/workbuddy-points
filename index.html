@@ -59,54 +59,28 @@
     </header>
 
     <div class="pop-body">
-      <!-- 小窗轮播：默认永远是第 1 张「今日使用积分」，不记忆上次滑到哪 -->
-      <section class="swipe pop-swipe" id="popSwipe">
-        <div class="swipe-track" id="popTrack">
-          <div class="pop-slide">
-            <div class="pop-hero-main">
-              <span class="eyebrow" id="popAvailLabel">今日使用积分</span>
-              <div class="big"><span id="popTodayUsed">0</span><em>分</em></div>
-              <div class="pop-hero-sub">
-                <span class="delta" id="popDelta">—</span>
-                <span class="muted">较昨日</span>
-                <span class="pop-sep">·</span>
-                <span class="muted">可用 <b id="popAvailable">0</b> 分</span>
-              </div>
-            </div>
-            <div class="quota-mini">
-              <div class="quota-mini-head"><span>额度已用</span><b id="popUsedPct">0%</b></div>
-              <div class="track"><i id="popProgress"></i></div>
-              <div class="quota-mini-foot" id="popCycle">—</div>
-            </div>
-          </div>
-
-          <div class="pop-slide pop-slide--act">
-            <div class="psl-head"><span>今日签到</span><span class="chip" id="popCkChip">—</span></div>
-            <div class="side-week psl-week" id="popWeek"></div>
-            <div class="psl-foot" id="popCkNote">—</div>
-          </div>
-
-          <div class="pop-slide pop-slide--act">
-            <div class="psl-head"><span>猫猫旅行</span><span class="chip" id="popTvChip">—</span></div>
-            <div class="psl-tv">
-              <div class="psl-big"><b id="popTvMain">—</b><span id="popTvUnit"></span></div>
-              <div class="psl-foot" id="popTvNote">—</div>
-            </div>
-            <div class="side-track-wrap tv-track"><i class="side-fill" id="popTvBar"></i></div>
-          </div>
-
-          <div class="pop-slide pop-slide--act">
-            <div class="psl-head"><span>成长任务</span><span class="chip" id="popTkChip">—</span></div>
-            <div class="psl-task2">
-              <div class="psl-big"><b id="popTkDone">—</b><span id="popTkTotal"></span></div>
-              <div class="side-track-wrap psl-bar"><i class="psl-fill" id="popTkBar"></i></div>
-            </div>
-            <div class="psl-foot" id="popTkNote">—</div>
-          </div>
+      <!-- 小窗只回答三件事：今天花了多少、还能用多久、签到/猫猫/任务有没有落下 -->
+      <div class="pop-hero">
+        <span class="eyebrow" id="popAvailLabel">今日使用积分</span>
+        <div class="big"><span id="popTodayUsed">0</span><em>分</em></div>
+        <div class="pop-hero-sub">
+          <span class="delta" id="popDelta">—</span>
+          <span class="muted">较昨日</span>
+          <span class="pop-sep">·</span>
+          <span class="muted">可用 <b id="popAvailable">0</b> 分</span>
         </div>
-        <div class="swipe-dots" id="popDots"></div>
-        <div class="pop-swipe-tip" id="popHint" hidden>左右滑动查看更多</div>
-      </section>
+        <div class="pop-status">
+          <span class="chip" id="popCkChip">—</span>
+          <span class="chip pop-chip-eta">猫猫 <b id="popTvMain">—</b><span id="popTvUnit"></span></span>
+          <span class="chip" id="popTkChip">—</span>
+        </div>
+      </div>
+
+      <div class="quota-mini">
+        <div class="quota-mini-head"><span>额度已用</span><b id="popUsedPct">0%</b></div>
+        <div class="track"><i id="popProgress"></i></div>
+        <div class="quota-mini-foot" id="popCycle">—</div>
+      </div>
 
       <section class="pop-block pop-block--hours">
         <div class="pop-block-head"><h3><svg class="i"><use href="#i-bar"/></svg>今日消耗时段分布</h3><span id="popPeak">—</span></div>
@@ -311,6 +285,19 @@
           <button class="notice-link" id="checkinOk">我知道了</button>
         </div>
 
+        <!-- 未连接账号时的首屏引导：与其摆四张 0，不如给一个明确动作 -->
+        <article class="card kpi-guide" id="kpiGuide" hidden>
+          <span class="kg-mark"><svg class="i"><use href="#i-bolt"/></svg></span>
+          <div class="kg-body">
+            <b>还没连接账号</b>
+            <p>连上后显示可用积分、周期额度和账号级流水；不连也能看本机用量。</p>
+          </div>
+          <div class="kg-act">
+            <span class="kg-local" id="kgLocal">—</span>
+            <button class="btn btn-primary btn-sm" id="kgConnect">扫码连接账号</button>
+          </div>
+        </article>
+
         <div class="kpi-grid">
           <article class="card kpi is-primary" style="--i:0">
             <div class="kpi-top">
@@ -356,7 +343,27 @@
         <div class="insight-strip" id="insightStrip"></div>
 
         <div class="grid">
-          <article class="card chart-card span-8" style="--i:4">
+          <article class="card chart-card span-12" style="--i:0">
+            <header class="card-head">
+              <div>
+                <h2>近 30 天消耗趋势</h2>
+                <p>柱：每日消耗 · 线：区间累计（右轴）</p>
+              </div>
+              <div class="card-tools">
+                <div class="segmented" id="rangeSeg" role="tablist">
+                  <button class="is-active" data-range="30">30 天</button>
+                  <button data-range="14">14 天</button>
+                  <button data-range="7">7 天</button>
+                  <button data-range="month">本月</button>
+                </div>
+              </div>
+            </header>
+            <div class="chart chart-trend" data-chart="trend"></div>
+          </article>
+        </div>
+
+        <div class="grid">
+          <article class="card chart-card span-8" style="--i:1">
             <header class="card-head">
               <div>
                 <h2>今日消耗时段分布</h2>
@@ -375,7 +382,7 @@
             </footer>
           </article>
 
-          <article class="card chart-card span-4 comp-card" style="--i:5">
+          <article class="card chart-card span-4 comp-card" style="--i:2">
             <header class="card-head">
               <div>
                 <h2>今日消耗构成</h2>
@@ -391,25 +398,7 @@
         </div>
 
         <div class="grid">
-          <article class="card chart-card span-8" style="--i:6">
-            <header class="card-head">
-              <div>
-                <h2>近 30 天消耗趋势</h2>
-                <p>柱：每日消耗 · 线：区间累计（右轴）</p>
-              </div>
-              <div class="card-tools">
-                <div class="segmented" id="rangeSeg" role="tablist">
-                  <button class="is-active" data-range="30">30 天</button>
-                  <button data-range="14">14 天</button>
-                  <button data-range="7">7 天</button>
-                  <button data-range="month">本月</button>
-                </div>
-              </div>
-            </header>
-            <div class="chart chart-trend" data-chart="trend"></div>
-          </article>
-
-          <article class="card quota-card span-4" style="--i:7">
+          <article class="card quota-card span-12 quota-wide" style="--i:3">
             <header class="card-head">
               <div>
                 <h2>额度与消耗</h2>
@@ -424,13 +413,17 @@
                 </div>
               </div>
             </header>
-            <div class="chart chart-gauge" data-chart="gauge"></div>
-            <div class="quota-stats">
-              <div><span id="quotaK1">本周已用</span><b id="quotaWeek">—</b></div>
-              <div><span id="quotaK2">本周额度</span><b id="quotaLeft">—</b></div>
-              <div><span id="quotaK3">每日可用</span><b id="quotaDay" class="warn">—</b></div>
+            <div class="quota-body">
+              <div class="chart chart-gauge" data-chart="gauge"></div>
+              <div class="quota-side">
+                <div class="quota-stats">
+                  <div><span id="quotaK1">本周已用</span><b id="quotaWeek">—</b></div>
+                  <div><span id="quotaK2">本周额度</span><b id="quotaLeft">—</b></div>
+                  <div><span id="quotaK3">每日可用</span><b id="quotaDay" class="warn">—</b></div>
+                </div>
+                <p class="quota-hint" id="quotaHint">按剩余工作日折算，可用积分取自云端</p>
+              </div>
             </div>
-            <p class="quota-hint" id="quotaHint">按剩余工作日折算，可用积分取自云端</p>
           </article>
 
         </div>
@@ -628,16 +621,6 @@
                   <option value="5">5 秒</option>
                   <option value="8">8 秒</option>
                   <option value="15">15 秒</option>
-                  <option value="0">不自动切换</option>
-                </select>
-              </div>
-              <div class="set-row">
-                <div class="set-label"><b>小窗卡片切换</b><em>右下角小窗四张卡的翻页间隔，窗口露出后才计时</em></div>
-                <select id="optPopSwipe" class="mini-select">
-                  <option value="5">5 秒</option>
-                  <option value="8">8 秒</option>
-                  <option value="10">10 秒</option>
-                  <option value="20">20 秒</option>
                   <option value="0">不自动切换</option>
                 </select>
               </div>

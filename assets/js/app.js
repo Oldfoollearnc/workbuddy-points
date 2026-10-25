@@ -887,7 +887,8 @@
     const ckChip = $('#' + p + 'CkChip');
     if (ckChip) {
       const done = !!r.checkedIn;
-      ckChip.textContent = done ? '已签到' : (fresh ? '待签到' : '—');
+      // 小窗的 chip 没有标题栏，得自己带前缀；侧栏卡片上方已有「今日签到」
+      ckChip.textContent = (p === 'pop' ? '签到 · ' : '') + (done ? '已签到' : (fresh ? '待签到' : '—'));
       ckChip.className = 'chip' + (done ? ' chip-good' : '');
     }
     const ckNote = $('#' + p + 'CkNote');
@@ -962,7 +963,8 @@
     const tkChip = $('#' + p + 'TkChip');
     if (tkChip) {
       const todo = (tk && tk.total) ? tk.total - tk.completed : null;
-      tkChip.textContent = todo === null ? '—' : (todo > 0 ? todo + ' 个可做' : '全做完');
+      const base = todo === null ? '—' : (todo > 0 ? todo + ' 个可做' : '全做完');
+      tkChip.textContent = (p === 'pop' ? '任务 · ' : '') + base;
       tkChip.className = 'chip' + (todo === 0 ? ' chip-good' : '');
     }
     const tkNote = $('#' + p + 'TkNote');
@@ -1296,6 +1298,14 @@
     const acc = effAccount();
     const configured = hasQuota();
     const stat = todayStat();          // 今日口径：连上云端后 = 积分流水合计
+
+    // 没连账号、也没有本地额度：四张 KPI 全是 0，不如换成一张能点的引导卡
+    const needGuide = !(ACCOUNT && ACCOUNT.status === 'connected') && !configured;
+    const guide = $('#kpiGuide');
+    const kpiGrid = $('.kpi-grid');
+    if (guide) guide.hidden = !needGuide;
+    if (kpiGrid) kpiGrid.hidden = needGuide;
+    if (needGuide) setHTML('#kgLocal', `本机今日 ${F.credit(stat.consumed)} 分 · ${F.fmt(stat.requests)} 次调用`);
 
     renderNotice(stat);
     setText('#kpi1Label', configured ? '可用积分' : '本周期消耗');
@@ -2922,6 +2932,12 @@
         return;
       }
       go('settings');
+    });
+
+    const kgConnect = $('#kgConnect');
+    if (kgConnect) kgConnect.addEventListener('click', () => {
+      if (!bridge.has()) { toast('浏览器预览无法连接账号', 'i-info'); return; }
+      try { bridge.call('account_login'); } catch (e) { toast('打开登录窗口失败', 'i-alert'); }
     });
 
     // 提示条右上角的 ×：点一次就永久收起（偏好走 localStorage，重启仍生效）。
