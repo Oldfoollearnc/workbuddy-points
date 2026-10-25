@@ -686,6 +686,7 @@
       const until = Math.round(Date.now() / 1000) + (t.remainingSec || 0);
       bits.push(`猫猫在${esc(t.location || '旅行中')}，`
         + `<span class="ck-eta" data-until="${until}">${esc(t.remainingText || '过会儿')}回来</span>`);
+      if (t.limitReached) bits.push('今日已派满');
     } else if (t.state === 'arrived') {
       bits.push(`猫猫已到家，<b>${t.reward || 0}</b> 分待领取`);
     } else if (t.state === 'idle' && t.limitReached) {
@@ -904,6 +905,8 @@
         ? `今日已领 ${gotToday} 分 · 明天可再派`
         : '明天 0 点后可再派';
       else if (st === 'idle') tvNote.textContent = '每天可派 1 次';
+      // 派满后猫还在路上：两个事实一起说，别让人以为"还没派"
+      else if (st === 'traveling' && t.limitReached) tvNote.textContent = `今日已派满 · ${t.location || '在路上'}`;
       else tvNote.textContent = t.location || '—';
     }
 
