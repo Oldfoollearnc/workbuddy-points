@@ -157,6 +157,10 @@ class AccountService:
             "usageRows": [],
             "lastSync": None,
             "lastError": None,
+            # 接口可能被服务端改掉：非登录类失败连续多次就置位，界面提示"先看看有没有新版本"。
+            # 单次失败只当网络抖动，连续 3 次才下结论。
+            "failStreak": 0,
+            "suspect": False,
             "interval": 60,
             "origin": "",
             # 用户显式「退出登录」后置 False：下次启动不再自动回填会话。
@@ -542,6 +546,8 @@ class AccountService:
                     "user": mapped["user"],
                     "lastSync": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "lastError": None,
+                    "failStreak": 0,
+                    "suspect": False,
                     "origin": used_origin,
                 })
             self._save_cache()
@@ -557,6 +563,12 @@ class AccountService:
             with self.lock:
                 self.state["status"] = "expired" if auth_like else "error"
                 self.state["lastError"] = msg[:120]
+                if not auth_like:
+                    streak = int(self.state.get("failStreak") or 0) + 1
+                    self.state["failStreak"] = streak
+                    # 非公开接口最容易"悄悄改字段"：报错能看见，字段改了却可能返回 200 空数据。
+                    # 连续 3 次非登录类失败，就在界面上提示去检查版本，别让人一直重试。
+                    self.state["suspect"] = streak >= 3
             self._save_cache()
             _log(f"sync failed ({'auth' if auth_like else 'transient'}): {e}")
             return {"ok": False, "error": msg, "state": self.snapshot()}

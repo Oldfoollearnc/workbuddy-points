@@ -1114,7 +1114,17 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
   cursor: default;
 }
 .legend-row:hover { background: var(--surface-2); }
-.legend-dot { width: 8px; height: 8px; border-radius: 2.5px; }
+.legend-dot { width: 9px; height: 9px; border-radius: 2.5px; }
+
+/* 形状 + 颜色双编码：6 个模型换到色弱视角也能一一对上（顺序与图例一致） */
+.comp-row .dot.pat-1, .legend-dot.pat-1 { border-radius: 2.5px; }
+.comp-row .dot.pat-2, .legend-dot.pat-2 { border-radius: 50%; }
+.comp-row .dot.pat-3, .legend-dot.pat-3 { border-radius: 1px; transform: rotate(45deg) scale(.92); }
+.comp-row .dot.pat-4, .legend-dot.pat-4 { border-radius: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.comp-row .dot.pat-5, .legend-dot.pat-5 { width: 4px; border-radius: 1px; }
+.comp-row .dot.pat-6, .legend-dot.pat-6 {
+  border-radius: 50%; box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .75);
+}
 .legend-name { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .legend-val { color: var(--text-1); font-weight: 600; font-variant-numeric: tabular-nums; }
 .legend-pct { color: var(--text-3); text-align: right; font-variant-numeric: tabular-nums; }
@@ -1534,8 +1544,8 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
   background: var(--surface-3); gap: 2px;
 }
 .comp-bar i { display: block; height: 100%; transition: width 320ms var(--ease-out); }
-.comp-row { display: grid; grid-template-columns: 8px 1fr auto 52px; align-items: center; gap: 8px; font-size: 11px; }
-.comp-row .dot { width: 8px; height: 8px; border-radius: 3px; }
+.comp-row { display: grid; grid-template-columns: 10px 1fr auto 52px; align-items: center; gap: 8px; font-size: 11px; }
+.comp-row .dot { width: 9px; height: 9px; border-radius: 3px; }
 .comp-row .nm { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .comp-row .val { color: var(--text-1); font-weight: 620; font-variant-numeric: tabular-nums; }
 .comp-row .pct { color: var(--text-3); text-align: right; font-variant-numeric: tabular-nums; }
@@ -1684,6 +1694,17 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
   height: 26px; border-radius: 8px; padding: 0 6px;
   border: 1px solid var(--border); background: var(--surface-2);
   color: var(--text-2); font-size: 11px; outline: none;
+}
+.mini-input {
+  width: 92px; height: 26px; border-radius: 8px; padding: 0 8px;
+  border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--text-1); font-size: 11px; text-align: right; outline: none;
+  font-variant-numeric: tabular-nums;
+}
+.mini-input:focus { border-color: var(--brand); }
+.set-unit { font-size: 11px; color: var(--text-3); }
+.btn.is-danger {
+  color: #b91c1c; border-color: rgba(185, 28, 28, .35); background: rgba(185, 28, 28, .08);
 }
 .chip.is-warn { background: rgba(245, 158, 11, .12); color: #b45309; }
 .chip.is-ok { background: rgba(22, 163, 74, .12); color: #15803d; }

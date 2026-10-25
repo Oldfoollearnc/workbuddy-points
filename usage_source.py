@@ -240,6 +240,25 @@ class UsageService:
         self._build_safe()
         return self.get(3)
 
+    def clear_cache(self):
+        """删掉解析缓存（.cache/usage.json）：换过数据目录、或缓存与记录对不上时用。
+
+        删完不必自己重建，下一次 refresh() 发现缓存不在就会全量读一遍（会慢 1 秒左右）。
+        """
+        try:
+            if os.path.exists(CACHE_PATH):
+                os.remove(CACHE_PATH)
+                return True
+            return False
+        except Exception:
+            return False
+
+    def cache_size(self):
+        try:
+            return os.path.getsize(CACHE_PATH)
+        except Exception:
+            return 0
+
     # ---------- 构建 ----------
 
     def _build_safe(self, force=False):

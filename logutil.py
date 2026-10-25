@@ -28,3 +28,32 @@ def log(path, msg, tag=""):
     except Exception:
         # 日志失败不能反过来影响主流程
         pass
+
+
+def size(path):
+    """日志当前大小（含轮转出来的 .1），给设置页显示用。"""
+    total = 0
+    for p in (path, path + ".1"):
+        try:
+            total += os.path.getsize(p)
+        except OSError:
+            pass
+    return total
+
+
+def clear(path):
+    """清空日志（连同 .1）：旧记录一起删掉，排障时不会被历史噪音干扰。
+
+    只截断不删文件：还能继续 append，也不用重新判断目录权限。
+    """
+    try:
+        for p in (path, path + ".1"):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        open(path, "w", encoding="utf-8").close()
+        return True
+    except Exception:
+        return False

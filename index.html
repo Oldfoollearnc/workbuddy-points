@@ -493,7 +493,15 @@
                 <svg class="i"><use href="#i-search"/></svg>
                 <input id="ledgerSearch" type="text" placeholder="搜索模型 / 项目 / 任务" autocomplete="off">
               </label>
-              <button class="btn btn-ghost btn-sm" id="ledgerExport" title="导出云端逐笔流水为 CSV">
+              <select id="ledgerFilter" class="mini-select" title="只看某个模型或项目">
+                <option value="">全部模型 / 项目</option>
+              </select>
+              <select id="ledgerExportKind" class="mini-select" title="导出范围：逐笔，或先汇总">
+                <option value="rows">逐笔</option>
+                <option value="model">按模型汇总</option>
+                <option value="month">按月汇总</option>
+              </select>
+              <button class="btn btn-ghost btn-sm" id="ledgerExport" title="导出为 CSV（Excel 直接打开）">
                 <svg class="i"><use href="#i-download"/></svg>导出
               </button>
             </div>
@@ -540,6 +548,13 @@
               <div class="set-row">
                 <div class="set-label"><b>工作日折算</b><em>剔除周末与法定节假日，计算每日可用积分</em></div>
                 <label class="switch-wrap"><input type="checkbox" id="optHoliday" checked><i class="switch"></i></label>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>可用积分预警</b><em>低于这个数值时提醒一次，每天最多一次；填 0 关闭</em></div>
+                <div class="set-inline">
+                  <input id="optWarnBelow" class="mini-input" type="number" min="0" max="1000000" step="100" value="500">
+                  <span class="set-unit">分</span>
+                </div>
               </div>
             </div>
           </section>
@@ -705,6 +720,29 @@
               <div class="set-row">
                 <div class="set-label"><b>云端同步间隔</b></div>
                 <b class="set-value" id="srcInterval">—</b>
+              </div>
+            </div>
+          </section>
+
+          <!-- 维护 -->
+          <section class="set-group">
+            <header class="set-group-head">
+              <div><h2>维护</h2><p>清理本机缓存与日志；会话记录、账号与今日结论都不会动</p></div>
+            </header>
+            <div class="set-rows">
+              <div class="set-row">
+                <div class="set-label"><b>解析缓存</b><em>读本机 JSONL 时的增量索引；删掉后立刻重建一次，可能慢一两秒</em></div>
+                <div class="set-inline">
+                  <b class="set-value" id="cacheSize">—</b>
+                  <button class="btn btn-ghost btn-sm" id="btnClearCache">清空</button>
+                </div>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>运行日志</b><em>排障用；清空只删历史记录，程序照常继续写</em></div>
+                <div class="set-inline">
+                  <b class="set-value" id="logSize">—</b>
+                  <button class="btn btn-ghost btn-sm" id="btnClearLogs">清空</button>
+                </div>
               </div>
             </div>
           </section>

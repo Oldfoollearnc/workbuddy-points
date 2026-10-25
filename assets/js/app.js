@@ -1,6 +1,18 @@
 /* =========================================================
    应用逻辑：数据接入 / 路由 / 主题 / 渲染 / 双窗口协同
    数据来源：本机 WorkBuddy 会话记录（经 Python 侧 usage_source 聚合）
+
+   2900 行按「段」排列，先看这张目录再搜函数名（行号会变）：
+     1. 偏好与运行态     prefs / ui / state、readPrefs / savePrefs
+     2. 桌面桥           bridge、safeRender（单块渲染失败不拖垮整页）
+     3. 路由与主题       go / setMode / applyTheme / moveIndicator
+     4. 总览             renderOverview / renderComposition / renderTrend
+     5. 额度             allowance / renderQuotaCard / quotaWindow
+     6. 签到与猫猫       renderCheckin / paintActCards / startEtaTicker
+     7. 用量分析         calendarDays / renderAnalytics / renderRows
+     8. 流水             ledgerAll / ledgerRows / renderLedger / buildSummary
+     9. 设置             renderSettings / bindToggle / 维护（清缓存清日志）
+    10. 初始化           boot / init、定时器、Python 推送入口
    ========================================================= */
 (function () {
   'use strict';
@@ -35,6 +47,7 @@
     quotaRange: 'week',
     ledgerType: 'all',
     ledgerQuery: '',
+    ledgerFilter: '',      // 'model:xxx' / 'project:xxx'
     ledgerLimit: 24,
     popQuery: ''
   };
@@ -47,7 +60,7 @@
       holiday: true, signin: true, localRefresh: 60,
       calGlow: true, calIntro: true, groupMinute: true, notice: true,
       checkinAuto: true, checkinTravel: true, checkinDismissed: '',
-      sideSwipeSec: 3, popSwipeSec: 5, warnDismissed: '' },
+      sideSwipeSec: 3, popSwipeSec: 5, warnDismissed: '', warnBelow: 500 },
     readPrefs()
   );
 
@@ -622,7 +635,13 @@
     const iv = ACCOUNT && ACCOUNT.interval;
     const every = iv === 0 ? '手动' : (iv ? iv + ' 分钟' : '60 分钟');
     let txt;
-    if (connected) {
+    if (ACCOUNT && ACCOUNT.suspect) {
+      // 连续多次非登录类失败：多半是服务端改了字段，而不是网络。
+      // 这时候让人"再点一次同步"是浪费，直接指向检查更新。
+      txt = `云端接口连续 <b>${ACCOUNT.failStreak || 3}</b> 次没取到数据，可能是服务端调整了字段。`
+          + '先看看有没有新版本（设置 → 关于），再重新同步一次。'
+          + (ACCOUNT.lastError ? ` <b class="warn-text">${esc(ACCOUNT.lastError)}</b>` : '');
+    } else if (connected) {
       const bucketed = !!(ACCOUNT.cloud && ACCOUNT.cloud.countKind === 'bucket');
       txt = `云端每 ${every}同步（${sync || '—'}）：消耗 / 笔数取<b>${bucketed ? '计费记录' : '逐笔'}</b>`
           + (bucketed ? `（5 分钟 × 模型聚合，一笔 ≠ 一次调用）` : '')
@@ -1213,10 +1232,10 @@
     }
 
     if (list) {
-      list.innerHTML = rows.map(m => {
+      list.innerHTML = rows.map((m, i) => {
         const pct = (m.calls / total) * 100;
         return `<div class="comp-row">
-          <i class="dot" style="background:${C.toneColor(m.tone)}"></i>
+          <i class="dot ${C.tonePat(i)}" style="background-color:${C.toneColor(m.tone)}"></i>
           <span class="nm" title="${esc(m.name)}">${esc(m.name)}</span>
           <span class="val">${F.fmt(m.calls)} ${cloudMode ? '笔' : '次'}</span>
           <span class="pct">${pct.toFixed(1)}%</span>
@@ -1233,7 +1252,10 @@
       if (prefs.warnDismissed === today) return;
       const al = allowance(effAccount());
       const msgs = [];
-      if (al.available > 0 && al.available < 500) {
+      const warnBelow = Number(prefs.warnBelow);
+      // 阈值放在设置里：默认 500 对多数人合适，但消耗大的人永远不触发，
+      // 填 0 表示不提醒可用积分（消耗异常提醒仍然保留）
+      if (warnBelow > 0 && al.available > 0 && al.available < warnBelow) {
         msgs.push(`可用积分只剩 ${F.credit(al.available)} 分`);
       }
       const stat = todayStat();
@@ -1697,31 +1719,76 @@
   let ledgerSource = 'local';
   let ledgerCounts = { cloud: 0, local: 0 };   // 数据源条数（不受筛选影响，用于说明文案）
 
-  function ledgerRows() {
+  function ledgerRows(baseSrc) {
     const q = state.ledgerQuery.trim().toLowerCase();
     const now = new Date();
     const todayKey = `${now.getFullYear()}-${F.pad(now.getMonth() + 1)}-${F.pad(now.getDate())}`;
-    const cloud = cloudLedgerRows();
-    // 云端逐笔 + 同步后的本机逐笔：前者是账号级、跨设备一致，后者负责"这一刻"的实时。
-    // 只有本机记录时（未连接）就是全部本机流水。
-    const tail = cloud ? localTail() : [];
-    const src = cloud ? cloud.concat(tail) : (D.ledger || []);
-    ledgerSource = cloud ? 'cloud+local' : 'local';
-    ledgerCounts = { cloud: cloud ? cloud.length : 0, local: cloud ? tail.length : src.length };
-    src.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+    const src = baseSrc || ledgerAll();
+    const f = state.ledgerFilter || '';
+    const cut = f.indexOf(':');
+    const fKind = cut > 0 ? f.slice(0, cut) : '';
+    const fVal = cut > 0 ? f.slice(cut + 1) : '';
     return src.filter(e => {
       const t = e.time instanceof Date ? e.time : new Date(e.time);
       const key = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())}`;
       if (state.ledgerType === 'today' && key !== todayKey) return false;
       if (state.ledgerType === 'week' && (now - t) > 7 * 86400000) return false;
+      // 模型 / 项目是精确匹配，搜索框是模糊匹配：前者用来"只看这个模型"，
+      // 后者用来翻某次调用的上下文，两种需求不该挤在一个输入框里。
+      if (fKind === 'model' && (e.model || '') !== fVal) return false;
+      if (fKind === 'project' && (e.project || '') !== fVal) return false;
       if (!q) return true;
       return [e.model, e.task, e.project].join(' ').toLowerCase().includes(q);
     });
   }
 
+  /** 未筛选的全集：筛选下拉的选项要基于它生成，否则选中一个模型后其它选项就消失了。 */
+  function ledgerAll() {
+    const cloud = cloudLedgerRows();
+    const tail = cloud ? localTail() : [];
+    const src = cloud ? cloud.concat(tail) : (D.ledger || []);
+    ledgerSource = cloud ? 'cloud+local' : 'local';
+    ledgerCounts = { cloud: cloud ? cloud.length : 0, local: cloud ? tail.length : src.length };
+    src.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+    return src;
+  }
+
+  /** 用全集刷新"按模型 / 按项目"下拉，保留当前选择。 */
+  function syncLedgerFilter(all) {
+    const sel = $('#ledgerFilter');
+    if (!sel) return;
+    const uniq = key => Array.from(new Set(all.map(e => e[key]).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'zh'));
+    const models = uniq('model');
+    const projects = uniq('project');
+    const html = ['<option value="">全部模型 / 项目</option>'];
+    if (models.length) {
+      html.push('<optgroup label="按模型">');
+      models.forEach(m => html.push(`<option value="model:${esc(m)}">${esc(m)}</option>`));
+      html.push('</optgroup>');
+    }
+    if (projects.length) {
+      html.push('<optgroup label="按项目">');
+      projects.forEach(p => html.push(`<option value="project:${esc(p)}">${esc(p)}</option>`));
+      html.push('</optgroup>');
+    }
+    const sig = html.join('');
+    if (sel.dataset.sig !== sig) {
+      sel.innerHTML = sig;
+      sel.dataset.sig = sig;
+    }
+    sel.value = state.ledgerFilter || '';
+    if (sel.value !== (state.ledgerFilter || '')) {
+      // 数据集换了（换数据源 / 云端重登），原来选的模型不存在了：回到全部
+      state.ledgerFilter = '';
+      sel.value = '';
+    }
+  }
+
   function renderLedger(reset) {
     if (reset) state.ledgerLimit = 24;
-    const all = ledgerRows();
+    const full = ledgerAll();
+    syncLedgerFilter(full);
+    const all = ledgerRows(full);
     const rows = all.slice(0, state.ledgerLimit);
     const body = $('#ledgerBody');
     if (!body) return;
@@ -1759,6 +1826,10 @@
       state.ledgerLimit,
       prefs.groupMinute !== false ? 1 : 0,
       ledgerSource,
+      // 筛选条件也要进签名：筛成 0 条时 rows 是空的，只靠行内容判断会以为"没变化"，
+      // 结果表里还挂着上一次的记录。
+      state.ledgerType, state.ledgerQuery, state.ledgerFilter || '',
+      all.length,
       rows.map(e => `${e.id}|${new Date(e.time).getTime()}|${e.points}`).join(',')
     ].join('|');
     const rebuild = ledgerSig !== ui.lastLedgerSig;
@@ -2212,11 +2283,59 @@
     });
     bindToggle('#optCheckinTravel', 'checkinTravel', () => pushCheckinOptions());
 
+    /* ---------- 导出：逐笔，或先按模型 / 按月汇总 ---------- */
+    /** 汇总当前筛选后的流水（与屏幕上看到的完全一致）。 */
+    function buildSummary(kind) {
+      const rows = ledgerRows(ledgerAll());
+      const use = rows.filter(e => e.type !== 'earn');
+      if (!use.length) return null;
+      const map = new Map();
+      let total = 0, tokens = 0;
+      use.forEach(e => {
+        const t = e.time instanceof Date ? e.time : new Date(e.time);
+        const key = kind === 'model' ? (e.model || '未知模型')
+          : `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}`;
+        const m = map.get(key) || { points: 0, calls: 0, tokens: 0 };
+        const p = Number(e.points) || 0;
+        m.points += p;
+        m.calls += 1;
+        m.tokens += Number(e.tokens) || 0;
+        total += p;
+        tokens += Number(e.tokens) || 0;
+        map.set(key, m);
+      });
+      const list = Array.from(map.entries());
+      if (kind === 'model') list.sort((a, b) => b[1].points - a[1].points);
+      else list.sort((a, b) => a[0].localeCompare(b[0]));
+      const head = kind === 'model'
+        ? ['模型', '积分', '条数', 'Token', '积分占比']
+        : ['月份', '积分', '条数', 'Token', '积分占比'];
+      const body = list.map(([k, v]) => [
+        k, v.points.toFixed(2), v.calls, v.tokens,
+        total > 0 ? (v.points / total * 100).toFixed(1) + '%' : '0%'
+      ]);
+      body.push(['合计', total.toFixed(2), use.length, tokens, '100%']);
+      return { name: kind === 'model' ? '按模型汇总' : '按月汇总', head, rows: body };
+    }
+
     const ledgerExport = $('#ledgerExport');
+    const exportKindEl = $('#ledgerExportKind');
     if (ledgerExport) ledgerExport.addEventListener('click', async () => {
-      if (!bridge.has() || !bridge.can('export_ledger_csv')) return;
+      if (!bridge.has()) return;
+      const kind = exportKindEl ? exportKindEl.value : 'rows';
       ledgerExport.disabled = true;
       try {
+        if (kind !== 'rows') {
+          if (!bridge.can('export_rows_csv')) { toast('这个版本不支持汇总导出', 'i-info'); return; }
+          const payload = buildSummary(kind);
+          if (!payload) { toast('当前筛选下没有可导出的记录', 'i-info'); return; }
+          const r = await bridge.call('export_rows_csv', payload.name,
+            JSON.stringify(payload.head), JSON.stringify(payload.rows));
+          if (r && r.ok) toast(`已导出 ${payload.name} ${r.count} 行：` + r.path);
+          else if (!(r && r.cancelled)) toast('导出失败：' + ((r && r.error) || '未知错误'), 'i-alert');
+          return;
+        }
+        if (!bridge.can('export_ledger_csv')) return;
         const r = await bridge.call('export_ledger_csv');
         if (r && r.ok) toast('已导出 ' + r.count + ' 条：' + r.path);
         else if (!(r && r.cancelled)) toast('导出失败：' + ((r && r.error) || '未知错误'), 'i-alert');
@@ -2239,6 +2358,78 @@
         toast('导出失败', 'i-alert');
       } finally {
         diagBtn.disabled = false;
+      }
+    });
+
+    /* ---------- 维护：清缓存 / 清日志（两次点击才算确认，不依赖原生 confirm） ---------- */
+    const bytesText = n => {
+      const v = Number(n) || 0;
+      if (v >= 1048576) return (v / 1048576).toFixed(1) + ' MB';
+      if (v >= 1024) return Math.round(v / 1024) + ' KB';
+      return v + ' B';
+    };
+    const loadMaintenance = async () => {
+      if (!bridge.has() || !bridge.can('maintenance_info')) return;
+      try {
+        const r = await bridge.call('maintenance_info');
+        if (!r) return;
+        setText('#cacheSize', bytesText(r.cacheBytes));
+        setText('#logSize', bytesText(r.logBytes));
+      } catch (e) { /* 只影响设置页的显示 */ }
+    };
+    loadMaintenance();
+
+    function armDanger(btn, label, fn) {
+      let timer = null;
+      btn.addEventListener('click', () => {
+        if (btn.dataset.armed === '1') {
+          clearTimeout(timer);
+          delete btn.dataset.armed;
+          btn.classList.remove('is-danger');
+          btn.textContent = label;
+          fn();
+          return;
+        }
+        btn.dataset.armed = '1';
+        btn.classList.add('is-danger');
+        btn.textContent = '再点一次';
+        timer = setTimeout(() => {
+          delete btn.dataset.armed;
+          btn.classList.remove('is-danger');
+          btn.textContent = label;
+        }, 4000);
+      });
+    }
+
+    const btnClearCache = $('#btnClearCache');
+    if (btnClearCache) armDanger(btnClearCache, '清空', async () => {
+      btnClearCache.disabled = true;
+      try {
+        const r = await bridge.call('clear_usage_cache');
+        if (r && r.ok) {
+          toast(r.removed ? '缓存已清空，已重新读取本机记录' : '缓存本来就是空的');
+          loadMaintenance();
+        } else {
+          toast('清空失败：' + ((r && r.error) || '未知错误'), 'i-alert');
+        }
+      } catch (e) {
+        toast('清空失败', 'i-alert');
+      } finally {
+        btnClearCache.disabled = false;
+      }
+    });
+
+    const btnClearLogs = $('#btnClearLogs');
+    if (btnClearLogs) armDanger(btnClearLogs, '清空', async () => {
+      btnClearLogs.disabled = true;
+      try {
+        const r = await bridge.call('clear_logs');
+        if (r && r.ok) { toast('日志已清空'); loadMaintenance(); }
+        else toast('清空失败：' + ((r && r.error) || '未知错误'), 'i-alert');
+      } catch (e) {
+        toast('清空失败', 'i-alert');
+      } finally {
+        btnClearLogs.disabled = false;
       }
     });
 
@@ -2279,6 +2470,18 @@
     bindToggle('#optHoliday', 'holiday', renderQuotaSurfaces);
     bindToggle('#optSignin', 'signin', renderQuotaSurfaces);
     bindToggle('#optTray', 'tray', () => bridge.call('set_close_to_tray', prefs.tray));
+
+    const warnBelowEl = $('#optWarnBelow');
+    if (warnBelowEl) {
+      warnBelowEl.value = String(prefs.warnBelow == null ? 500 : prefs.warnBelow);
+      warnBelowEl.addEventListener('change', () => {
+        const v = Math.max(0, Math.min(1000000, Math.round(Number(warnBelowEl.value) || 0)));
+        prefs.warnBelow = v;
+        warnBelowEl.value = String(v);
+        savePrefs();
+        toast(v > 0 ? `可用积分低于 ${F.credit(v)} 分时提醒` : '已关闭可用积分提醒');
+      });
+    }
 
     const lr = $('#optLocalRefresh');
     if (lr) lr.addEventListener('change', () => {
@@ -2350,6 +2553,13 @@
       search.addEventListener('input', () => {
         clearTimeout(t);
         t = setTimeout(() => { state.ledgerQuery = search.value; renderLedger(true); }, 140);
+      });
+    }
+    const filterSel = $('#ledgerFilter');
+    if (filterSel) {
+      filterSel.addEventListener('change', () => {
+        state.ledgerFilter = filterSel.value;
+        renderLedger(true);
       });
     }
     const more = $('#ledgerMore');

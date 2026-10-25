@@ -998,6 +998,70 @@ class Api:
             log(f"export_ledger_csv error: {e}")
             return {"ok": False, "error": str(e)[:160]}
 
+    def export_rows_csv(self, name="汇总", head_json="[]", rows_json="[]"):
+        """导出前端算好的汇总表。
+
+        为什么让前端算：抽成"按模型 / 按月"两种口径后，聚合规则必须跟页面上的筛选
+        （今日 / 近 7 天 / 只看某个模型）完全一致；在 Python 再算一遍就会出现
+        "表里和屏幕上对不上"。这里只负责落盘，并把行数卡在 5 万以内。
+        """
+        try:
+            head = json.loads(head_json or "[]")
+            rows = json.loads(rows_json or "[]")
+            if not head or not rows:
+                return {"ok": False, "error": "没有可导出的内容"}
+            win = self._desk.main or self._desk.popup
+            fn = "%s-%s.csv" % (str(name or "汇总")[:24], dt.datetime.now().strftime("%Y%m%d-%H%M"))
+            picked = win.create_file_dialog(webview.SAVE_DIALOG, save_filename=fn)
+            if not picked:
+                return {"ok": False, "cancelled": True}
+            path = picked[0] if isinstance(picked, (list, tuple)) else picked
+            with open(path, "w", encoding="utf-8-sig", newline="") as f:
+                w = csv.writer(f)
+                w.writerow([str(x) for x in head][:20])
+                for r in rows[:50000]:
+                    w.writerow(["" if v is None else v for v in list(r)[:20]])
+            log("export_rows_csv -> %s (%d 行)" % (path, len(rows)))
+            return {"ok": True, "path": path, "count": len(rows)}
+        except Exception as e:
+            log(f"export_rows_csv error: {e}")
+            return {"ok": False, "error": str(e)[:160]}
+
+    # ---------- 维护：清缓存 / 清日志 ----------
+
+    def maintenance_info(self):
+        """设置页「维护」区：先让人看到占多大，再决定要不要清。"""
+        cache_bytes = 0
+        try:
+            cache_bytes = self._desk.usage.cache_size()
+        except Exception:
+            pass
+        return {
+            "cacheBytes": cache_bytes,
+            "logBytes": logutil.size(LOG_PATH),
+            "cachePath": app_paths.data_path(".cache", "usage.json"),
+            "logPath": LOG_PATH,
+        }
+
+    def clear_usage_cache(self):
+        """删掉解析缓存；下次刷新会全量重建（本机记录本身不受影响）。"""
+        try:
+            removed = self._desk.usage.clear_cache()
+            self._desk.refresh_all()      # 立刻重建，别让界面等下一轮定时刷新
+            log("clear_usage_cache -> %s" % removed)
+            return {"ok": True, "removed": bool(removed)}
+        except Exception as e:
+            log(f"clear_usage_cache error: {e}")
+            return {"ok": False, "error": str(e)[:160]}
+
+    def clear_logs(self):
+        try:
+            ok = logutil.clear(LOG_PATH)
+            log("clear_logs -> %s" % ok)
+            return {"ok": bool(ok)}
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:160]}
+
     def export_diagnostics(self):
         """把排障要用的东西打成 zip（不含手机号 / cookie / 登录凭证）。"""
         try:

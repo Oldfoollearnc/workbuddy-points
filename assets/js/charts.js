@@ -578,7 +578,7 @@
         const color = toneColor(d.tone || ('c' + ((i % 6) + 1)));
         if (!legend) return;
         const row = h('div', 'legend-row', '', legend);
-        h('i', 'legend-dot', '', row).style.background = color;
+        h('i', 'legend-dot ' + tonePat(i), '', row).style.backgroundColor = color;
         h('span', 'legend-name', d.name, row);
         h('span', 'legend-val', fmt(d.value), row);
         h('span', 'legend-pct', pct(d.value / total), row);
@@ -1066,8 +1066,12 @@
     });
   }
 
+  // 6 个模型只靠颜色区分，色弱的人分不开：给色点再配一种形状（形状 + 颜色双编码）。
+  // 只影响图例与构成列表，不改变扇区颜色本身。
+  const tonePat = i => 'pat-' + ((i % 6) + 1);
+
   window.Charts = {
     bar, combo, donut, hbar, heatmap, gauge, sparkline, calendar,
-    showTip, hideTip, palette, toneColor, fmt, shortNum, hexToRgba
+    showTip, hideTip, palette, toneColor, tonePat, fmt, shortNum, hexToRgba
   };
 })();
