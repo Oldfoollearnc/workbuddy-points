@@ -981,7 +981,8 @@ body.is-dragging .topbar { cursor: default; }
   border: 1px solid var(--border);
   background: var(--surface);
   box-shadow: var(--shadow-1);
-  /* 不再做整卡入场：天天看几十次，动一下只会烦。图表生长与数字滚动保留 */
+  animation: rise 420ms var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 45ms);
   transition: border-color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out);
 }
 .view.is-active .card { animation-name: rise; }
@@ -1005,65 +1006,6 @@ body.is-dragging .topbar { cursor: default; }
 /* ===================== KPI ===================== */
 
 .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 14px; }
-
-/* ===================== 结论条 + 指标列 ===================== */
-
-.verdict {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 16px;
-  padding: 13px 18px;
-  margin-bottom: 14px;
-  border-radius: var(--r-lg);
-  border: 1px solid color-mix(in srgb, var(--brand) 15%, var(--border));
-  background:
-    linear-gradient(180deg, var(--brand-softer), transparent 72%),
-    var(--surface);
-}
-.v-text { min-width: 0; }
-.v-line { margin: 0; font-size: 15px; line-height: 1.45; color: var(--text-1); }
-.v-line b { font-weight: 650; font-variant-numeric: tabular-nums; }
-.v-sub { margin: 3px 0 0; font-size: 11.5px; color: var(--text-3); }
-.v-sub b { color: var(--text-2); font-weight: 600; }
-
-.kpi-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.kpi-mini {
-  flex: 1; min-height: 0;
-  display: flex; flex-direction: column; justify-content: center; gap: 2px;
-  padding: 10px 16px;
-}
-.km-label { font-size: 11.5px; color: var(--text-3); }
-.km-value {
-  font-size: 24px; font-weight: 650; letter-spacing: -.03em; line-height: 1.15;
-  font-variant-numeric: tabular-nums; color: var(--text-1);
-}
-.km-note { font-size: 11px; color: var(--text-3); }
-
-/* 诊断条：只有出现异常才显示，平时完全不占位置 */
-.diagnose {
-  display: flex; align-items: center; gap: 10px;
-  padding: 9px 14px;
-  margin-bottom: 14px;
-  border-radius: var(--r-md);
-  border: 1px solid color-mix(in srgb, var(--warn) 28%, var(--border));
-  background: color-mix(in srgb, var(--warn) 6%, var(--surface));
-  font-size: 11.5px; color: var(--text-2);
-}
-.diagnose .dg-tag {
-  flex: none; font-size: 10.5px; font-weight: 600;
-  color: var(--warn); letter-spacing: .04em;
-}
-.diagnose .dg-txt { min-width: 0; }
-.diagnose .dg-txt b { color: var(--text-1); font-weight: 600; }
-.diagnose.is-bad {
-  border-color: color-mix(in srgb, var(--bad) 30%, var(--border));
-  background: color-mix(in srgb, var(--bad) 6%, var(--surface));
-}
-.diagnose.is-bad .dg-tag { color: var(--bad); }
-@media (max-width: 1280px) {
-  .verdict { flex-wrap: wrap; row-gap: 10px; }
-  .kpi-col { flex-direction: row; flex-wrap: wrap; }
-  .kpi-mini { flex: 1 1 calc(50% - 6px); }
-}
 
 /* 未连接时的引导卡：替代四张 0 值 KPI */
 .kpi-guide {

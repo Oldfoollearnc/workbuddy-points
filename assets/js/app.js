@@ -1305,82 +1305,87 @@
     const configured = hasQuota();
     const stat = todayStat();          // 今日口径：连上云端后 = 积分流水合计
 
-    // 没连账号、也没有本地额度：与其摆一排 0，不如给一张能点的引导卡
+    // 没连账号、也没有本地额度：四张 KPI 全是 0，不如换成一张能点的引导卡
     const needGuide = !(ACCOUNT && ACCOUNT.status === 'connected') && !configured;
     const guide = $('#kpiGuide');
-    const kpiCol = $('.kpi-col');
+    const kpiGrid = $('.kpi-grid');
     if (guide) guide.hidden = !needGuide;
-    if (kpiCol) kpiCol.hidden = needGuide;
+    if (kpiGrid) kpiGrid.hidden = needGuide;
     if (needGuide) setHTML('#kgLocal', `本机今日 ${F.credit(stat.consumed)} 分 · ${F.fmt(stat.requests)} 次调用`);
 
     renderNotice(stat);
-
-    /* ---------- 结论条：一句话回答「今天怎么样、还能撑多久」 ---------- */
-    const al = allowance(acc);
-    const days7 = dailySeries(7);
-    const prevDays = days7.slice(0, -1);          // 不含今天，避免"自己拉高自己"
-    const avg7 = prevDays.length
-      ? prevDays.reduce((a, b) => a + b.consumed, 0) / prevDays.length
-      : 0;
-    const weekSum = quotaWindow('week').sum;
-    const weekLeft = Math.max(0, al.perWeek - weekSum);
-    const todayUsed = stat.consumed || 0;
-    const dPct = stat.deltaPct || 0;
-    const canDays = avg7 > 0 ? Math.floor(al.available / avg7) : 0;
-    const runOut = avg7 > 0 && al.available > 0 ? addDays(new Date(), canDays) : null;
-    const runOutText = runOut ? `${F.pad(runOut.getMonth() + 1)}-${F.pad(runOut.getDate())}` : '—';
-
-    setHTML('#verdictLine', configured
-      ? `今天已花 <b>${F.credit(todayUsed)} 分</b>，比昨天${dPct >= 0 ? '多' : '少'} ${Math.abs(dPct).toFixed(1)}%；`
-        + (weekLeft > 0
-          ? `本周还剩 <b>${F.credit(weekLeft)} 分</b>`
-          : `本周已超 <b>${F.credit(weekSum - al.perWeek)} 分</b>`)
-      : `今天已花 <b>${F.credit(todayUsed)} 分</b>，比昨天${dPct >= 0 ? '多' : '少'} ${Math.abs(dPct).toFixed(1)}%`);
-    setHTML('#verdictSub', configured
-      ? `近 7 日均值 ${F.credit(avg7)} 分/天 · 可用积分还能撑 <b>${canDays}</b> 天${runOut ? `，预计 ${runOutText} 用完` : ''}`
-      : '当前只有本机记录；连上账号后能看到真实余额与可用天数');
-
-    /* ---------- 诊断条：只在真有事时说，平时不占位 ---------- */
-    const diag = $('#diagnose');
-    if (diag) {
-      const items = [];
-      if (avg7 > 1 && todayUsed > avg7 * 3 && todayUsed > 20) {
-        items.push(`今日消耗是近 7 日均值的 <b>${(todayUsed / avg7).toFixed(1)} 倍</b>`);
-      }
-      const topModel = (stat.models || []).slice().sort((a, b) => b.points - a.points)[0];
-      if (topModel && topModel.points > 0 && todayUsed > 0) {
-        const share = topModel.points / todayUsed;
-        if (share >= 0.4) items.push(`主要来自 <b>${esc(topModel.name)}</b>（${(share * 100).toFixed(0)}%）`);
-      }
-      if (configured && al.available > 0 && avg7 > 0 && al.available / avg7 < 7) {
-        items.push(`按当前速度只剩 <b>${Math.floor(al.available / avg7)} 天</b>`);
-      }
-      diag.hidden = !items.length;
-      if (items.length) {
-        diag.className = 'diagnose' + (avg7 > 0 && todayUsed > avg7 * 5 ? ' is-bad' : '');
-        diag.innerHTML = `<span class="dg-tag">提示</span><span class="dg-txt">${items.join(' · ')}</span>`;
-      }
-    }
-
-    /* ---------- 右侧四个数字 ---------- */
+    setText('#kpi1Label', configured ? '可用积分' : '本周期消耗');
     countUp($('[data-count="available"]'), configured ? acc.available : acc.used, { format: F.credit });
     setText('#kpiAvailSub', configured ? `已用 ${(acc.usedPct * 100).toFixed(1)}%` : `累计 ${D.meta.days || 0} 天`);
-    countUp($('[data-count="todayUsed"]'), todayUsed, { format: F.credit });
+    const syncedAt = (ACCOUNT && ACCOUNT.lastSync) ? String(ACCOUNT.lastSync).slice(11, 16) : '';
+    setText('#kpiAvailNote', configured
+      ? (acc.pending > 0.005
+        ? `云端 ${F.credit(acc.cloudAvailable)} − 同步后已花 ${F.credit(acc.pending)}`
+        : (syncedAt ? `云端 ${syncedAt} 同步` : `总额度 ${F.credit(acc.total)}`))
+      : '未设置额度上限');
+    const availChip = $('#kpiAvailSub');
+    if (availChip) availChip.title = (acc.source === 'cloud')
+      ? `可用积分 = 云端余额 ${F.credit(acc.cloudAvailable)} − 上次同步（${syncedAt || '—'}）之后本机已消耗 ${F.credit(acc.pending)}。`
+        + '云端入账有延迟，先扣掉这段才接近此刻的真实可用；本机记录可能不全，实际未入账只会更多。'
+      : '可用积分来自本地记录（未连接云端）';
+
+    countUp($('[data-count="todayUsed"]'), stat.consumed, { format: F.credit });
     const delta = $('#kpiTodayDelta');
     if (delta) {
-      const up = dPct >= 0;
+      const up = (stat.deltaPct || 0) >= 0;
       delta.className = 'delta' + (up ? '' : ' is-good');
-      delta.innerHTML = `<svg class="i"><use href="#${up ? 'i-up' : 'i-down'}"/></svg>${Math.abs(dPct).toFixed(1)}%`;
+      delta.innerHTML = `<svg class="i"><use href="#${up ? 'i-up' : 'i-down'}"/></svg>${Math.abs(stat.deltaPct || 0).toFixed(1)}%`;
     }
-    setText('#kpiAvg7', F.credit(avg7));
-    setText('#kpiRunOut', runOutText);
-    setText('#kpiRunOutSub', configured ? `约 ${canDays} 天` : '连接账号后计算');
 
-    /* ---------- 时段 / 构成 / 额度 ---------- */
+    countUp($('[data-count="todayReq"]'), stat.requests);
+    // 云端返回的是"计费记录"（近期按 5 分钟 × 模型聚合），不是单次调用：
+    // 拿条数当"调用次数"展示会差一个数量级，所以标签、单位、脚注一起切。
+    const cloudCount = !!stat.cloud;
+    setText('#kpi3Label', cloudCount ? '今日计费笔数' : '今日调用');
+    const reqNode = $('[data-count="todayReq"]');
+    if (reqNode && reqNode.nextElementSibling) reqNode.nextElementSibling.textContent = cloudCount ? '笔' : '次';
+    setText('#kpiEarnedSub', '均价');
+    setText('#kpiNetUnit', cloudCount ? ' 分/笔' : ' 分/次');
+    setText('#kpiNet', (stat.avgPerRequest || 0).toFixed(2));
+
+    const tk = stat.tokens || 0;
+    const useYi = tk >= 1e8;
+    const tkNode = $('[data-count="todayToken"]');
+    countUp(tkNode, useYi ? tk / 1e8 : tk / 1e4, useYi ? { decimals: 2 } : {});
+    if (tkNode && tkNode.nextElementSibling) tkNode.nextElementSibling.textContent = useYi ? '亿' : '万';
+    // Token 只有本机口径，所以"平均上下文"必须用本机的调用次数做分母，
+    // 不能拿云端的请求数去除（云端按请求计，本机按模型调用计，混用会算出离谱值）
+    const reqForToken = (D.today && D.today.requests) || stat.requests;
+    setText('#kpiAvg', `${F.fmtWan(tk / Math.max(1, reqForToken))} / 次`);
+
+    // 四张卡各配一条 14 天迷你趋势：可用余额 / 每日消耗 / 每日调用 / 每日 Token
+    const last14 = D.daily.slice(-14);
+    const sparks = {
+      available: last14.map(d => d.balance),
+      todayUsed: last14.map(d => d.consumed),
+      todayReq: last14.map(d => d.calls || 0),
+      todayToken: last14.map(d => d.tokens || 0)
+    };
+    $$('[data-spark]').forEach(node => {
+      C.sparkline(node, { values: sparks[node.dataset.spark] || [] });
+    });
+
+    const strip = $('#insightStrip');
+    if (strip) {
+      const topTask = (stat.models || [])[0] || D.tasks[0];
+      strip.innerHTML = `
+        <span class="badge"><svg class="i"><use href="#i-spark"/></svg></span>
+        <span class="txt">今日已消耗 <b>${F.credit(stat.consumed)} 分</b> · ${F.fmt(stat.requests)} ${stat.cloud ? '笔计费' : '次调用'} · 峰值 <b>${F.pad(stat.peakHour || 0)}:00</b>${topTask ? ` · 主要来自 <b>${esc(topTask.name)}</b>` : ''}${source === 'demo' ? ' · <b>演示数据</b>' : ''}</span>
+        <button class="link" id="goAnalytics">查看分析 →</button>`;
+      const link = $('#goAnalytics');
+      if (link) link.addEventListener('click', () => go('analytics'));
+    }
+
     setText('#hourlyPeak', stat.peakPoints ? `峰值 ${F.pad(stat.peakHour)}:00 · ${F.credit(stat.peakPoints)} 分` : '今日暂无消耗');
     setHTML('#footReq', F.fmt(stat.requests));
     setHTML('#footAvg', (stat.avgPerRequest || 0).toFixed(2));
     setHTML('#footToken', F.fmtWan(stat.tokens || 0));
+    setHTML('#footNow', D.meta.updated || '—');
 
     const nowHour = (D.meta && D.meta.nowHour != null) ? D.meta.nowHour : new Date().getHours();
     const hourlyEl = $('[data-chart="hourly"]');
@@ -1392,7 +1397,7 @@
           tipTitle: `${F.pad(hr.hour)}:00–${F.pad((hr.hour + 1) % 24)}:00`
         })),
         tone: 'c1', valueName: '消耗', sum: stat.consumed,
-        nowIndex: nowHour, xEvery: 4, showValues: prefs.labels, maxBarW: 22
+        nowIndex: nowHour, xEvery: 3, showValues: prefs.labels, maxBarW: 22
       });
       hourlyEl.__draw();
     }
@@ -1523,31 +1528,27 @@
 
   function renderTrend() {
     // 'month' = 本月 1 号到今天；固定天数则是滚动窗口。
+    // 跨月时"30 天"会把两个月混在一起，看月度趋势需要这个口径。
     const isMonth = state.range === 'month';
     const span = isMonth ? new Date().getDate() : (Number(state.range) || 30);
     const days = dailySeries(span);    // 云端优先、缺失退本机，今天用实时合并值
-
-    // 余额线：以"当前可用"为终点往前推 —— 昨天余额 = 今天 + 今天花掉的。
-    // 签到收入不在本机逐笔里，所以越往前越偏保守，但趋势和拐点是对的。
-    const acc = effAccount();
-    let bal = Number(acc.available) || 0;
-    const balances = new Array(days.length);
-    for (let i = days.length - 1; i >= 0; i--) {
-      balances[i] = Math.round(bal * 100) / 100;
-      bal += days[i].consumed;
+    let run = 0;
+    const cumulative = days.map(d => (run += d.consumed));
+    const card = $('[data-chart="trend"]') && $('[data-chart="trend"]').closest('.chart-card');
+    if (card) {
+      const h2 = card.querySelector('h2');
+      if (h2) h2.textContent = isMonth
+        ? `本月消耗趋势（1–${new Date().getDate()} 日）`
+        : `近 ${span} 天消耗趋势`;
     }
-
-    const total = days.reduce((a, b) => a + b.consumed, 0);
-    setText('#trendSum', `${isMonth ? '本月' : '区间'}合计 ${F.credit(total)} 分`);
-
     const el = $('[data-chart="trend"]');
     if (!el) return;
     el.__draw = () => C.combo(el, {
       labels: days.map(d => d.date),
       days,
       bars: days.map(d => d.consumed),
-      line: balances,
-      lineName: '余额',
+      line: cumulative,
+      lineName: '累计消耗',
       xLabels: span <= 7 ? 1 : span <= 14 ? 2 : 5,
       dimLast: true
     });
@@ -2615,12 +2616,12 @@
       }
     });
 
-    $$('#timeSeg button').forEach(b => {
+    $$('#rangeSeg button').forEach(b => {
       b.addEventListener('click', () => {
         state.range = b.dataset.range === 'month' ? 'month' : +b.dataset.range;
         prefs.trendRange = state.range;      // 记住上次选择，别每次重启都回到 30 天
         savePrefs();
-        $$('#timeSeg button').forEach(x => x.classList.toggle('is-active', x === b));
+        $$('#rangeSeg button').forEach(x => x.classList.toggle('is-active', x === b));
         const el = $('[data-chart="trend"]');
         if (el) el.dataset.anim = '0';
         renderTrend();                 // 先落终态（数据/刻度已经换好）
@@ -3162,7 +3163,7 @@
 
     startBootText();
     bind();
-    $$('#timeSeg button').forEach(b => b.classList.toggle('is-active', String(b.dataset.range) === String(state.range)));
+    $$('#rangeSeg button').forEach(b => b.classList.toggle('is-active', String(b.dataset.range) === String(state.range)));
     setText('#syncTime', D.meta.updated || '—');
 
     if (HASH_MODE || bridge.has()) {
