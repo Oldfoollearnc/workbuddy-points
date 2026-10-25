@@ -1404,6 +1404,22 @@ def main():
         except Exception as e:
             log(f"tray settings error: {e}")
 
+    def _tray_update():
+        """托盘「检查更新」：手动点的就要给结果，不能像设置页那样静默。"""
+        try:
+            Api._update_cache = {"at": 0.0, "data": None}     # 手动点绕过一天缓存
+            r = update_check.check(read_version())
+            if not r.get("ok"):
+                app.notify("检查更新失败：%s" % (r.get("error") or "网络不通"), "warn")
+            elif r.get("hasUpdate"):
+                app.notify("发现新版本 %s（当前 v%s）：设置 → 关于 里下载"
+                           % (r.get("latest"), read_version()), "info")
+            else:
+                app.notify("已经是最新版本 v%s" % read_version(), "info")
+        except Exception as e:
+            log(f"tray update error: {e}")
+            app.notify("检查更新失败，请检查网络或代理", "warn")
+
     tray = Tray(
         ICON,
         on_settings=_open_settings,
@@ -1413,6 +1429,7 @@ def main():
         on_sync=lambda: app.account.sync(),
         on_autostart=_tray_autostart,
         autostart_state=autostart.is_enabled,
+        on_update=_tray_update,
         on_exit=app.quit,
         logger=log,
     )

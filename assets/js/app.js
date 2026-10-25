@@ -60,9 +60,12 @@
       holiday: true, signin: true, localRefresh: 60,
       calGlow: true, calIntro: true, groupMinute: true, notice: true,
       checkinAuto: true, checkinTravel: true, checkinDismissed: '',
-      sideSwipeSec: 3, popSwipeSec: 5, warnDismissed: '', warnBelow: 500 },
+      sideSwipeSec: 3, popSwipeSec: 5, warnDismissed: '', warnBelow: 500,
+      trendRange: 30 },
     readPrefs()
   );
+  // 趋势图区间也记住：上次看的是"本月"，重开程序还应该是"本月"
+  state.range = prefs.trendRange || 30;
 
   function readPrefs() {
     try { return JSON.parse(localStorage.getItem(PREF_KEY) || '{}'); } catch (e) { return {}; }
@@ -664,6 +667,16 @@
       txt += ` · 逐笔与已用差 <b>${(c.driftPct * 100).toFixed(1)}%</b>（入账时序，以云端为准）`;
     }
     el.innerHTML = txt;
+
+    // 未连接时整屏没有主按钮，引导只写在正文里（"点右上角头像"）。
+    // 把这条提示的按钮直接变成入口，省得新人找不到下一步。
+    const srcBtn = $('#noticeSource');
+    if (srcBtn) {
+      const needLogin = !connected;
+      srcBtn.textContent = needLogin ? '扫码连接账号' : '数据源';
+      srcBtn.dataset.act = needLogin ? 'login' : 'source';
+      srcBtn.title = needLogin ? '打开扫码窗口，连上后自动显示余额与周期' : '去设置里查看数据目录';
+    }
   }
 
   /* ---------------- 每日签到结果条 ---------------- */
@@ -758,7 +771,13 @@
     box.classList.toggle('is-bad', failed);
     setCheckinIcon(failed ? 'i-info' : 'i-check');
     if (txt) txt.innerHTML = buildCheckinText(r);
-    if (retry) retry.hidden = !failed;
+    if (retry) {
+      // 没连账号时点「重试」必然再失败一次：这个按钮应该是「连接账号」
+      const needLogin = failed && (r.reason === 'no_account' || r.reason === 'logged_out');
+      retry.hidden = !failed;
+      retry.textContent = needLogin ? '连接账号' : '重试';
+      retry.dataset.act = needLogin ? 'login' : 'run';
+    }
   }
 
   async function loadCheckin() {
@@ -1380,6 +1399,27 @@
 
   /* ---------------- 额度与消耗：今日 / 本周 / 本月 三个口径 ---------------- */
 
+  /** 上月 1 号到"上月同日"的消耗，用来做本月参照。云端只保留 29 天，覆盖不到就返回 null。 */
+  function prevMonthSame() {
+    const now = new Date();
+    const from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastDay = new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+    const to = new Date(now.getFullYear(), now.getMonth() - 1,
+      Math.min(now.getDate(), lastDay), 23, 59, 59);
+    const rows = cloudRows();
+    if (!rows || !rows.length) return null;
+    let earliest = Infinity, sum = 0;
+    rows.forEach(r => {
+      const t = rowTime(r);
+      if (isNaN(t.getTime())) return;
+      earliest = Math.min(earliest, t.getTime());
+      if (t >= from && t <= to) sum += Number(r.credit) || 0;
+    });
+    // 记录还没覆盖到上月 1 号，算出来的数会偏低，不如不给
+    if (!isFinite(earliest) || earliest > from.getTime()) return null;
+    return round2(sum);
+  }
+
   const QUOTA_LABEL = { day: '今日', week: '本周', month: '本月', cycle: '本期' };
 
   /** 区间内已消耗多少分：云端优先（与流水同源），否则回退 D.daily（只带 MM-DD） */
@@ -1449,8 +1489,16 @@
       const scope = al.holidayOn
         ? `按 ${al.spendDays} 个工作日折算 / 共 ${al.leftDays} 天`
         : `按 ${al.leftDays} 个自然日折算`;
+      // 本月页签补一个参照：上月同期花了多少。没有数据就直说，不拿偏低值凑数。
+      let extra = '';
+      if (configured && kind === 'month') {
+        const prev = prevMonthSame();
+        extra = prev == null
+          ? ' · 上月同期不在云端覆盖范围'
+          : ` · 上月同期 ${F.credit(prev)} 分（截至同日）`;
+      }
       qh.textContent = configured
-        ? `${scope} · ${prefs.signin !== false ? '含每日签到 +' + F.credit(al.signin) + ' 分' : '不含签到'}`
+        ? `${scope} · ${prefs.signin !== false ? '含每日签到 +' + F.credit(al.signin) + ' 分' : '不含签到'}${extra}`
         : '连接账号后可计算每日可用额度';
     }
   }
@@ -1464,13 +1512,19 @@
   }
 
   function renderTrend() {
-    const days = dailySeries(state.range);    // 云端优先、缺失退本机，今天用实时合并值
+    // 'month' = 本月 1 号到今天；固定天数则是滚动窗口。
+    // 跨月时"30 天"会把两个月混在一起，看月度趋势需要这个口径。
+    const isMonth = state.range === 'month';
+    const span = isMonth ? new Date().getDate() : (Number(state.range) || 30);
+    const days = dailySeries(span);    // 云端优先、缺失退本机，今天用实时合并值
     let run = 0;
     const cumulative = days.map(d => (run += d.consumed));
     const card = $('[data-chart="trend"]') && $('[data-chart="trend"]').closest('.chart-card');
     if (card) {
       const h2 = card.querySelector('h2');
-      if (h2) h2.textContent = `近 ${state.range} 天消耗趋势`;
+      if (h2) h2.textContent = isMonth
+        ? `本月消耗趋势（1–${new Date().getDate()} 日）`
+        : `近 ${span} 天消耗趋势`;
     }
     const el = $('[data-chart="trend"]');
     if (!el) return;
@@ -1480,7 +1534,7 @@
       bars: days.map(d => d.consumed),
       line: cumulative,
       lineName: '累计消耗',
-      xLabels: state.range <= 7 ? 1 : state.range <= 14 ? 2 : 5,
+      xLabels: span <= 7 ? 1 : span <= 14 ? 2 : 5,
       dimLast: true
     });
     el.__draw();
@@ -1676,7 +1730,7 @@
     setText('#projTotal', projItems.length
       ? `近 7 天 ${cloudMode ? '本机 ' : ''}${F.credit(pTotal)} 分`
       : '暂无数据');
-    renderRows($('#projectRank'), projItems, { limit: 6, empty: '近 7 天暂无项目消耗' });
+    renderRows($('#projectRank'), projItems, { limit: 6, empty: '近 7 天暂无项目消耗（项目只来自本机会话记录）' });
 
     // 说明：这段在用量分析页，历史上也没有 #insightList 容器，一直未生效；
     // 额度预警已改到总览用 toast 提示（见 maybeWarnQuota）。
@@ -1816,7 +1870,7 @@
 
     const hasCloud = ledgerSource !== 'local';
     setHTML('#ledgerSub', hasCloud
-      ? `云端逐笔 ${F.fmt(ledgerCounts.cloud)} 条 + 同步后本机 ${F.fmt(ledgerCounts.local)} 条（账号级 + 本机实时补足；项目与 Token 云端不返回）`
+      ? `云端逐笔 ${F.fmt(ledgerCounts.cloud)} 条（仅最近 29 天、最多 1500 条）+ 同步后本机 ${F.fmt(ledgerCounts.local)} 条；项目与 Token 云端不返回`
       : `本机记录 · 共 ${F.fmt(D.meta.records || 0)} 次调用，覆盖 ${D.meta.days || 0} 天`);
     const sum = $('#ledgerSummary');
     if (sum) {
@@ -2064,7 +2118,7 @@
     setText('#srcRecords', F.fmt(D.meta.records || 0) + ' 条'
       + (D.meta.coverDays ? ` / 共 ${F.fmt(D.meta.recordsTotal || 0)}` : ''));
     setText('#srcDays', `${D.meta.days || 0} 天有消耗`);
-    setText('#srcInterval', (+ACCOUNT.interval === 0 ? '仅手动' : (ACCOUNT.interval || 60) + ' 分钟'));
+    // 云端同步间隔只在「运行与刷新」里出现一次，数据源组不再重复显示只读值
     setText('#aboutVersion', appVersion);
     loadUpdate();     // 打开设置页时顺手查一次版本（一天缓存）
     setText('#appVersion', appVersion);
@@ -2549,7 +2603,9 @@
 
     $$('#rangeSeg button').forEach(b => {
       b.addEventListener('click', () => {
-        state.range = +b.dataset.range;
+        state.range = b.dataset.range === 'month' ? 'month' : +b.dataset.range;
+        prefs.trendRange = state.range;      // 记住上次选择，别每次重启都回到 30 天
+        savePrefs();
         $$('#rangeSeg button').forEach(x => x.classList.toggle('is-active', x === b));
         const el = $('[data-chart="trend"]');
         if (el) el.dataset.anim = '0';
@@ -2858,17 +2914,25 @@
     });
 
     const noticeLink = $('#noticeSource');
-    if (noticeLink) noticeLink.addEventListener('click', () => go('settings'));
+    if (noticeLink) noticeLink.addEventListener('click', () => {
+      // 同一颗按钮两种用途：没连账号时是"扫码连接"，连上了才是"数据源"
+      if (noticeLink.dataset.act === 'login') {
+        if (!bridge.has()) { toast('浏览器预览无法连接账号', 'i-info'); return; }
+        try { bridge.call('account_login'); } catch (e) { /* 登录窗打不开时不影响页面 */ }
+        return;
+      }
+      go('settings');
+    });
 
     // 提示条右上角的 ×：点一次就永久收起（偏好走 localStorage，重启仍生效）。
-    // 不是"关掉就再也找不回来"：设置 → 显示与行为 → 数据源提示 还能重新打开。
+    // 不是"关掉就再也找不回来"：设置 → 图表与交互 → 顶部数据提示条 还能重新打开。
     const noticeClose = $('#noticeClose');
     if (noticeClose) noticeClose.addEventListener('click', () => {
       prefs.notice = false;
       savePrefs();
       renderActive(true);
       pushPrefs();
-      toast('已隐藏顶部提示，可在「设置 → 显示与行为」重新打开', 'i-check');
+      toast('已隐藏顶部提示，可在「设置 → 图表与交互」重新打开', 'i-check');
     });
 
     // 签到结果条：「我知道了」按天记，当天不再出现，次日自动恢复。
@@ -2883,6 +2947,10 @@
     const ckRetry = $('#checkinRetry');
     if (ckRetry) ckRetry.addEventListener('click', async () => {
       if (!bridge.has()) { toast('浏览器预览无法签到', 'i-info'); return; }
+      if (ckRetry.dataset.act === 'login') {
+        try { bridge.call('account_login'); } catch (e) { toast('打开登录窗口失败', 'i-alert'); }
+        return;
+      }
       ckRetry.disabled = true;
       CHECKIN = Object.assign({}, CHECKIN, { status: 'running' });
       renderCheckin();
@@ -3074,7 +3142,7 @@
 
     startBootText();
     bind();
-    $$('#rangeSeg button').forEach(b => b.classList.toggle('is-active', +b.dataset.range === state.range));
+    $$('#rangeSeg button').forEach(b => b.classList.toggle('is-active', String(b.dataset.range) === String(state.range)));
     setText('#syncTime', D.meta.updated || '—');
 
     if (HASH_MODE || bridge.has()) {

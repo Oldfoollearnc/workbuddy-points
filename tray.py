@@ -63,6 +63,7 @@ VK_ESCAPE = 0x1B
 
 ID_OPEN_POPUP, ID_OPEN_MAIN, ID_REFRESH, ID_EXIT = 1, 2, 3, 4
 ID_SYNC, ID_AUTOSTART, ID_SETTINGS = 5, 6, 7
+ID_UPDATE = 8
 
 # 菜单尺寸（逻辑像素；进程 DPI 无关，和界面 1:1 对应）
 MENU_W = 158        # 比原来小一圈：9 行压到 178px 高（原来 204）
@@ -234,6 +235,7 @@ class Tray:
 
     def __init__(self, icon_path, on_click=None, on_open_main=None, on_refresh=None, on_exit=None,
                  on_sync=None, on_autostart=None, autostart_state=None, on_settings=None,
+                 on_update=None,
                  tooltip="WorkBuddy 积分观测台 · 单击查看今日积分", logger=None):
         self.log = logger or (lambda msg: None)
         self.icon_path = icon_path
@@ -245,6 +247,7 @@ class Tray:
         self.on_autostart = on_autostart
         self.autostart_state = autostart_state      # 返回 bool，用来画勾
         self.on_settings = on_settings
+        self.on_update = on_update
         self.tooltip = tooltip[:120]
 
         self.hwnd = None
@@ -463,6 +466,7 @@ class Tray:
             (ID_REFRESH, "刷新数据", "#10B981"),
             (ID_SYNC, "立即同步云端", "#7C3AED"),
             (ID_SETTINGS, "设置", "#0EA5E9"),
+            (ID_UPDATE, "检查更新", "#F59E0B"),
             (0, None, None),
             (ID_AUTOSTART, ("✓ 开机自启" if auto_on else "开机自启"), "#64748B"),
             (0, None, None),
@@ -621,6 +625,7 @@ class Tray:
         user32.AppendMenuW(menu, MF_STRING, ID_REFRESH, "刷新数据")
         user32.AppendMenuW(menu, MF_STRING, ID_SYNC, "立即同步云端")
         user32.AppendMenuW(menu, MF_STRING, ID_SETTINGS, "设置")
+        user32.AppendMenuW(menu, MF_STRING, ID_UPDATE, "检查更新")
         user32.AppendMenuW(menu, MF_STRING | MF_SEPARATOR, 0, None)
         user32.AppendMenuW(menu, MF_STRING, ID_AUTOSTART, "开机自启（切换）")
         user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
@@ -650,6 +655,8 @@ class Tray:
             self._safe(self.on_autostart)
         elif cmd == ID_SETTINGS:
             self._safe(self.on_settings)
+        elif cmd == ID_UPDATE:
+            self._safe(self.on_update)
         elif cmd == ID_EXIT:
             self._safe(self.on_exit)
 
