@@ -901,7 +901,13 @@
     if (tvChip) {
       tvChip.textContent = st === 'traveling' ? '旅行中'
         : (st === 'arrived' ? '可领取' : (st === 'idle' ? (t.limitReached ? '今日已派' : '空闲') : '—'));
-      tvChip.className = 'chip' + (st === 'arrived' ? ' chip-good' : '');
+      // 今天的猫猫已经派过/收回，也算"完成"，和「已签到」一样给绿色
+      tvChip.className = 'chip' + ((st === 'arrived' || (st === 'idle' && t.limitReached)) ? ' chip-good' : '');
+    }
+    // 小窗的猫猫不是独立 chip（和大数字挤在一起），单独同步一次颜色
+    if (p === 'pop') {
+      const etaChip = $('.pop-chip-eta');
+      if (etaChip) etaChip.classList.toggle('chip-good', st === 'idle' && !!t.limitReached);
     }
     const tvMain = $('#' + p + 'TvMain');
     const tvUnit = $('#' + p + 'TvUnit');

@@ -1185,24 +1185,18 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
 .quota-stats b { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .quota-stats--flat { margin-top: 12px; }
 
-/* 额度带：一句话结论 + 细进度 + 脚注细节 */
-.quota-strip {
-  display: flex; flex-direction: column; gap: 9px;
-  padding: 13px 16px 11px;
-  margin-bottom: 14px;
-}
-.qs-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+/* 额度卡：竖向排布，和趋势卡同行等高 —— 恢复到原来的栅格节奏 */
+.quota-card { gap: 10px; }
+.quota-seg { display: flex; width: 100%; }
+.quota-seg button { flex: 1; text-align: center; }
+.quota-body { display: flex; flex-direction: column; gap: 9px; flex: 1; min-height: 0; }
 .qs-lead { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .qs-eyebrow { font-size: 11px; color: var(--text-3); white-space: nowrap; }
 .qs-lead b {
-  font-size: 20px; font-weight: 650; letter-spacing: -.02em;
+  font-size: 24px; font-weight: 650; letter-spacing: -.02em;
   font-variant-numeric: tabular-nums; color: var(--text-1);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.qs-right { display: flex; align-items: center; gap: 12px; flex: none; }
-.qs-pct { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.qs-pct.is-warn { color: var(--warn); }
-.qs-pct.is-over { color: var(--bad); }
 .qs-track { height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
 .qs-track i {
   display: block; width: 0; height: 100%; border-radius: 99px;
@@ -1211,35 +1205,19 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
 }
 .qs-track i.is-warn { background: linear-gradient(90deg, #f59e0b, #f97316); }
 .qs-track i.is-over { background: linear-gradient(90deg, #dc2626, #ef4444); }
-.qs-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.qs-stats { display: flex; gap: 18px; }
-.qs-stats > div { display: flex; align-items: baseline; gap: 5px; }
-.qs-stats span { font-size: 10.5px; color: var(--text-3); white-space: nowrap; }
-.qs-stats b { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.quota-strip .quota-hint { margin: 0; font-size: 10.5px; color: var(--text-3); text-align: right; }
-@media (max-width: 1024px) {
-  .qs-top { flex-wrap: wrap; row-gap: 8px; }
-  .qs-foot { flex-direction: column; align-items: flex-start; gap: 4px; }
-  .qs-stats { flex-wrap: wrap; }
-  .quota-strip .quota-hint { text-align: left; }
+.qs-meta { display: flex; justify-content: flex-end; margin-top: -4px; }
+.qs-pct { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.qs-pct.is-warn { color: var(--warn); }
+.qs-pct.is-over { color: var(--bad); }
+.qs-stats { display: flex; flex-direction: column; margin-top: auto; }
+.qs-stats > div {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 2px; border-top: 1px dashed var(--border);
 }
-
-/* 全宽额度卡：仪表在左、三项统计横排在右 —— 竖着一条太窄，横过来才用得上整行 */
-.quota-wide .quota-body {
-  display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
-  gap: 24px;
-  align-items: center;
-}
-.quota-wide .quota-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
-.quota-wide .quota-stats { flex-direction: row; gap: 10px; }
-.quota-wide .quota-stats > div {
-  flex: 1; flex-direction: column; align-items: flex-start; gap: 4px;
-  padding: 10px 12px; border-top: 0;
-  border-radius: var(--r-md); background: var(--surface-2);
-}
-.quota-wide .quota-stats b { font-size: 15px; }
-.quota-wide .quota-hint { margin: 0; }
+.qs-stats > div:first-child { border-top: 0; }
+.qs-stats span { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.qs-stats b { font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.quota-card .quota-hint { margin: 0; font-size: 10.5px; color: var(--text-3); }
 
 /* ===================== 排行榜 ===================== */
 

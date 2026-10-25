@@ -689,10 +689,12 @@ class Desktop:
         return {"ok": True}
 
     def _snap_on_release(self, hwnd):
-        """松手时贴边：顶边最大化、左右各占半屏。
+        """松手时贴边：四角各四分之一屏、左右半屏、顶边最大化。
 
-        自绘拖动拿不到系统 Snap，只能按窗口最终位置自己判断；
-        阈值 10px，松手时稍微靠边就能吸附，不需要精确对齐。
+        两个要点：
+        1. 判据用**光标位置**而不是窗口位置 —— Windows 自己也是光标贴边就触发；
+           用窗口边缘判，用户把鼠标甩到右下角但窗口没贴边时就什么都不发生。
+        2. 热区 24px，比窗口边框宽一点；10px 太苛刻，几乎贴死才会触发。
         """
         try:
             mon = user32.MonitorFromWindow(hwnd, 2)      # MONITOR_DEFAULTTONEAREST
@@ -701,22 +703,36 @@ class Desktop:
             if not user32.GetMonitorInfoW(mon, ctypes.byref(mi)):
                 return
             wa = mi.rcWork
-            rc = RECT()
-            user32.GetWindowRect(hwnd, ctypes.byref(rc))
-            snap = 10
+            pt = wintypes.POINT()
+            user32.GetCursorPos(ctypes.byref(pt))
+            snap = 24
             ww, wh = wa.right - wa.left, wa.bottom - wa.top
-            if rc.top <= wa.top + snap:
-                self._maxed = True
-                user32.SetWindowPos(hwnd, None, wa.left, wa.top, ww, wh,
-                                    SWP_NOZORDER | SWP_NOACTIVATE)
-            elif rc.left <= wa.left + snap:
-                self._maxed = False
-                user32.SetWindowPos(hwnd, None, wa.left, wa.top, ww // 2, wh,
-                                    SWP_NOZORDER | SWP_NOACTIVATE)
-            elif rc.right >= wa.right - snap:
-                self._maxed = False
-                user32.SetWindowPos(hwnd, None, wa.left + ww // 2, wa.top, ww // 2, wh,
-                                    SWP_NOZORDER | SWP_NOACTIVATE)
+            hw2, hh2 = ww // 2, wh // 2
+            left = pt.x <= wa.left + snap
+            right = pt.x >= wa.right - snap
+            top = pt.y <= wa.top + snap
+            bottom = pt.y >= wa.bottom - snap
+
+            if top and left:
+                box = (wa.left, wa.top, hw2, hh2)
+            elif top and right:
+                box = (wa.left + hw2, wa.top, ww - hw2, hh2)
+            elif bottom and left:
+                box = (wa.left, wa.top + hh2, hw2, wh - hh2)
+            elif bottom and right:
+                box = (wa.left + hw2, wa.top + hh2, ww - hw2, wh - hh2)
+            elif top:
+                box = (wa.left, wa.top, ww, wh)          # 顶边中间：最大化
+            elif left:
+                box = (wa.left, wa.top, hw2, wh)
+            elif right:
+                box = (wa.left + hw2, wa.top, ww - hw2, wh)
+            else:
+                return
+            self._maxed = box[3] >= wh - 2
+            user32.SetWindowPos(hwnd, None, box[0], box[1], box[2], box[3],
+                                SWP_NOZORDER | SWP_NOACTIVATE)
+            log("snap -> %s" % (box,))
         except Exception as e:
             log(f"snap on release error: {e}")
 
