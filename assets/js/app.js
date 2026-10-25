@@ -2226,6 +2226,7 @@
     if (state.view === view) return;
     state.view = view;
     $$('.nav-item, .tb-nav-item').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
+    requestAnimationFrame(moveTbPill);
     moveIndicator();
     const [t, s] = TITLES[view] || ['', ''];
     setText('#pageTitle', t);
@@ -2353,6 +2354,27 @@
      事件
      ========================================================= */
 
+  /* ---------------- 导航方式：胶囊滑块 / 侧栏 ---------------- */
+
+  /** 把白色滑块挪到当前选中项下面（带一点回弹，切换有"滑过去"的感觉）。 */
+  function moveTbPill() {
+    const nav = $('#tbNav'), pill = $('#tbNavPill');
+    if (!nav || !pill) return;
+    const active = nav.querySelector('.tb-nav-item.is-active');
+    if (!active || !active.offsetWidth) { pill.style.opacity = '0'; return; }
+    pill.style.opacity = '1';
+    pill.style.width = active.offsetWidth + 'px';
+    pill.style.transform = `translateX(${active.offsetLeft}px)`;
+  }
+
+  function applyNav(mode) {
+    const m = ['a', 'b', 'c'].includes(mode) ? mode : 'b';
+    document.body.dataset.nav = m;
+    $$('#navSeg button').forEach(b => b.classList.toggle('is-active', b.dataset.navChoice === m));
+    requestAnimationFrame(moveTbPill);
+    setTimeout(moveTbPill, 260);      // 字体就位后再量一次宽度，避免滑块偏一点
+  }
+
   /* ---------------- 命令面板（C 方案） ---------------- */
   function setupCmdk() {
     const box = $('#cmdk'), input = $('#cmdkInput'), list = $('#cmdkList');
@@ -2420,10 +2442,18 @@
   function bind() {
     $$('.nav-item, .tb-nav-item').forEach(b => b.addEventListener('click', () => go(b.dataset.view)));
 
-    /* ---------- 导航方案切换（?nav=a|b|c，默认 b：顶部胶囊） ---------- */
+    /* ---------- 导航方式：胶囊（默认）/ 侧栏（可在设置里切） ---------- */
     const navParam = qs.get('nav');
-    const navMode = ['a', 'b', 'c'].includes(navParam) ? navParam : 'b';
-    document.body.dataset.nav = navMode;
+    const navMode = ['a', 'b', 'c'].includes(navParam)
+      ? navParam
+      : (prefs.navMode === 'a' ? 'a' : 'b');
+    applyNav(navMode);
+    $$('#navSeg button').forEach(b => b.addEventListener('click', () => {
+      prefs.navMode = b.dataset.navChoice;
+      savePrefs();
+      applyNav(prefs.navMode);
+      setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+    }));
     if (prefs.navCollapsed) document.body.classList.add('nav-collapsed');
 
     const collapseBtn = $('#navCollapse');
@@ -3155,7 +3185,7 @@
     let rt;
     window.addEventListener('resize', () => {
       clearTimeout(rt);
-      rt = setTimeout(() => { moveIndicator(); renderActive(); }, 180);
+      rt = setTimeout(() => { moveIndicator(); moveTbPill(); renderActive(); }, 180);
     });
 
     // 滚动到视野里再长：首屏看不见的图表（趋势、构成、日历）滚到跟前才播动画

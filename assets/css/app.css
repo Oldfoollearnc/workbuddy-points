@@ -671,22 +671,36 @@ body.nav-collapsed .nav-collapse { justify-content: center; }
 
 /* ---------- 顶部胶囊导航（B 方案） ---------- */
 .tb-nav {
+  position: relative;
   display: none; align-items: center; gap: 2px;
   padding: 3px; margin-left: 4px;
   border-radius: 999px;
   background: var(--surface-2);
 }
+/* 滑块：选中项背后那一块白色，切换时带一点回弹地滑过去 */
+.tb-nav-pill {
+  position: absolute; top: 3px; bottom: 3px; left: 0;
+  width: 0; border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(9, 9, 11, .08);
+  opacity: 0;
+  transition: transform 360ms cubic-bezier(.34, 1.22, .48, 1),
+              width 360ms cubic-bezier(.34, 1.22, .48, 1),
+              opacity 160ms linear;
+  will-change: transform, width;
+}
 .tb-nav-item {
+  position: relative; z-index: 1;
   border: 0; background: none;
   padding: 5px 13px; border-radius: 999px;
   font-size: 12.5px; font-family: inherit; color: var(--text-2);
   cursor: pointer; white-space: nowrap;
-  transition: background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
+  transition: color var(--dur-2) var(--ease-out);
 }
 .tb-nav-item:hover { color: var(--text-1); }
 .tb-nav-item.is-active {
-  background: var(--surface); color: var(--text-1); font-weight: 600;
-  box-shadow: 0 1px 2px rgba(9, 9, 11, .07);
+  background: none; color: var(--text-1); font-weight: 600;
+  box-shadow: none;
 }
 
 body[data-nav="b"] .sidebar { display: none; }

@@ -123,6 +123,7 @@
 
     <!-- B 方案：顶部胶囊导航（只在 nav=b 时显示） -->
     <nav class="tb-nav" id="tbNav" aria-label="主导航">
+      <span class="tb-nav-pill" id="tbNavPill"></span>
       <button class="tb-nav-item is-active" data-view="overview">总览</button>
       <button class="tb-nav-item" data-view="analytics">用量分析</button>
       <button class="tb-nav-item" data-view="ledger">积分流水</button>
@@ -713,6 +714,13 @@
                   <button data-motion-choice="full">完整</button>
                   <button data-motion-choice="reduced">精简</button>
                   <button data-motion-choice="off">关闭</button>
+                </div>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>导航方式</b><em>顶部胶囊是默认样式；习惯左侧栏可以切回去（这个开关后续版本可能会去掉）</em></div>
+                <div class="segmented segmented-sm" id="navSeg">
+                  <button data-nav-choice="b">胶囊</button>
+                  <button data-nav-choice="a">侧栏</button>
                 </div>
               </div>
             </div>
