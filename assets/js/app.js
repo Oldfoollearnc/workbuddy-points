@@ -2225,7 +2225,7 @@
   function go(view) {
     if (state.view === view) return;
     state.view = view;
-    $$('.nav-item').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
+    $$('.nav-item, .tb-nav-item').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
     moveIndicator();
     const [t, s] = TITLES[view] || ['', ''];
     setText('#pageTitle', t);
@@ -2353,8 +2353,91 @@
      事件
      ========================================================= */
 
+  /* ---------------- 命令面板（C 方案） ---------------- */
+  function setupCmdk() {
+    const box = $('#cmdk'), input = $('#cmdkInput'), list = $('#cmdkList');
+    if (!box || !input || !list) return;
+    let rows = [], on = 0;
+
+    const cmds = () => [
+      { label: '总览', kind: '页面', run: () => go('overview') },
+      { label: '用量分析', kind: '页面', run: () => go('analytics') },
+      { label: '积分流水', kind: '页面', run: () => go('ledger') },
+      { label: '账户', kind: '页面', run: () => go('account') },
+      { label: '设置', kind: '页面', run: () => go('settings') },
+      { label: '刷新本地数据', kind: '动作', run: () => refresh() },
+      {
+        label: '同步云端', kind: '动作',
+        run: () => { if (bridge.has()) bridge.call('account_sync').then(() => loadAccount()).then(() => renderActive(true)); }
+      },
+      {
+        label: '立即签到 / 看猫猫', kind: '动作',
+        run: () => {
+          if (!bridge.has()) return;
+          bridge.call('checkin_run').then(r => { if (r) { CHECKIN = r; renderCheckin(); } });
+        }
+      },
+      { label: '切换浅色 / 深色', kind: '动作', run: () => { const b = $('#themeBtn'); if (b) b.click(); } },
+      { label: '收起 / 展开侧栏', kind: '动作', run: () => { const b = $('#navCollapse'); if (b) b.click(); } }
+    ];
+
+    const paint = () => {
+      const kw = input.value.trim().toLowerCase();
+      rows = cmds().filter(c => !kw || c.label.toLowerCase().includes(kw));
+      on = 0;
+      list.innerHTML = rows.length
+        ? rows.map((c, i) => `<div class="cmdk-row${i === 0 ? ' is-on' : ''}" data-i="${i}">${esc(c.label)}<span class="cmdk-kind">${c.kind}</span></div>`).join('')
+        : '<div class="cmdk-empty">没有匹配的命令</div>';
+    };
+    const open = () => { box.hidden = false; input.value = ''; paint(); input.focus(); };
+    const close = () => { box.hidden = true; };
+    const runAt = i => { const c = rows[i]; if (!c) return; close(); c.run(); };
+
+    input.addEventListener('input', paint);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { close(); return; }
+      if (e.key === 'Enter') { e.preventDefault(); runAt(on); return; }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!rows.length) return;
+        on = (on + (e.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length;
+        $$('.cmdk-row', list).forEach((r, i) => r.classList.toggle('is-on', i === on));
+      }
+    });
+    list.addEventListener('mousedown', e => {
+      const r = e.target.closest('.cmdk-row');
+      if (r) runAt(+r.dataset.i);
+    });
+    box.addEventListener('mousedown', e => { if (e.target === box) close(); });
+
+    const btn = $('#cmdBtn');
+    if (btn) btn.addEventListener('click', open);
+    document.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); open(); }
+    });
+  }
+
   function bind() {
-    $$('.nav-item').forEach(b => b.addEventListener('click', () => go(b.dataset.view)));
+    $$('.nav-item, .tb-nav-item').forEach(b => b.addEventListener('click', () => go(b.dataset.view)));
+
+    /* ---------- 导航方案切换（?nav=a|b|c） ---------- */
+    const navParam = qs.get('nav');
+    const navMode = ['a', 'b', 'c'].includes(navParam) ? navParam : 'a';
+    document.body.dataset.nav = navMode;
+    if (prefs.navCollapsed) document.body.classList.add('nav-collapsed');
+
+    const collapseBtn = $('#navCollapse');
+    if (collapseBtn) collapseBtn.addEventListener('click', () => {
+      const on = document.body.classList.toggle('nav-collapsed');
+      prefs.navCollapsed = on;
+      savePrefs();
+      setTimeout(() => {
+        moveIndicator();
+        window.dispatchEvent(new Event('resize'));   // 宽度变了，图表要重排
+      }, 220);
+    });
+
+    setupCmdk();
 
     const toggle = el => () => setTheme(resolved() === 'dark' ? 'light' : 'dark', el);
     const tb = $('#themeBtn'); if (tb) tb.addEventListener('click', toggle(tb));
@@ -3115,7 +3198,7 @@
       renderPopup();
     } else {
       if (state.view !== 'overview') {
-        $$('.nav-item').forEach(b => b.classList.toggle('is-active', b.dataset.view === state.view));
+        $$('.nav-item, .tb-nav-item').forEach(b => b.classList.toggle('is-active', b.dataset.view === state.view));
         $$('.view').forEach(v => v.classList.toggle('is-active', v.dataset.view === state.view));
         const [t, s] = TITLES[state.view] || ['', ''];
         setText('#pageTitle', t);

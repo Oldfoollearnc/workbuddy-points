@@ -120,7 +120,20 @@
       <h1 id="pageTitle">总览</h1>
       <p id="pageSub">WorkBuddy 账号的积分余额与今日使用情况</p>
     </div>
+
+    <!-- B 方案：顶部胶囊导航（只在 nav=b 时显示） -->
+    <nav class="tb-nav" id="tbNav" aria-label="主导航">
+      <button class="tb-nav-item is-active" data-view="overview">总览</button>
+      <button class="tb-nav-item" data-view="analytics">用量分析</button>
+      <button class="tb-nav-item" data-view="ledger">积分流水</button>
+      <button class="tb-nav-item" data-view="account">账户</button>
+      <button class="tb-nav-item" data-view="settings">设置</button>
+    </nav>
+
     <div class="dock">
+      <button class="dock-btn tb-cmd" id="cmdBtn" title="搜索与命令（Ctrl+K）" aria-label="搜索与命令">
+        <svg class="i"><use href="#i-search"/></svg>
+      </button>
       <button class="dock-btn" id="refreshBtn" title="刷新本地记录（Ctrl+R，不请求云端）" aria-label="刷新本地记录">
         <svg class="i"><use href="#i-refresh"/></svg>
       </button>
@@ -195,6 +208,7 @@
   <aside class="sidebar">
     <nav class="nav" id="nav" aria-label="主导航">
       <span class="nav-indicator" id="navIndicator"></span>
+      <span class="nav-group">数据</span>
       <button class="nav-item is-active" data-view="overview">
         <span class="nav-ico"><svg class="i"><use href="#i-grid"/></svg></span>
         <span class="nav-txt">总览</span>
@@ -207,6 +221,7 @@
         <span class="nav-ico"><svg class="i"><use href="#i-list"/></svg></span>
         <span class="nav-txt">积分流水</span>
       </button>
+      <span class="nav-group">系统</span>
       <button class="nav-item" data-view="account">
         <span class="nav-ico"><svg class="i"><use href="#i-bolt"/></svg></span>
         <span class="nav-txt">账户</span>
@@ -216,6 +231,12 @@
         <span class="nav-txt">设置</span>
       </button>
     </nav>
+
+    <!-- A 方案：折叠成图标栏（只在 nav=a 时可用） -->
+    <button class="nav-collapse" id="navCollapse" title="收起/展开侧栏" aria-label="收起或展开侧栏">
+      <svg class="i"><use href="#i-collapse"/></svg>
+      <span>收起侧栏</span>
+    </button>
 
     <!-- 左侧底部：同尺寸卡片轮播（额度 / 签到 / 猫猫 / 任务） -->
     <div class="swipe side-swipe" id="sideSwipe">
@@ -789,6 +810,18 @@
 </div>
 
 <div class="tooltip" id="tooltip" role="tooltip"></div>
+
+<!-- C 方案：命令面板（Ctrl+K） -->
+<div class="cmdk" id="cmdk" hidden>
+  <div class="cmdk-box" role="dialog" aria-label="搜索与命令">
+    <div class="cmdk-head">
+      <svg class="i"><use href="#i-search"/></svg>
+      <input id="cmdkInput" type="text" placeholder="跳转页面、执行动作…" autocomplete="off" spellcheck="false">
+      <kbd>Esc</kbd>
+    </div>
+    <div class="cmdk-list" id="cmdkList"></div>
+  </div>
+</div>
 
 <!-- 加载遮罩：首屏读取、手动同步、切数据目录时显示 -->
 <div class="loading-veil" id="loadingVeil" hidden>
