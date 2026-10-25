@@ -1185,28 +1185,25 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
 .quota-stats b { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .quota-stats--flat { margin-top: 12px; }
 
-/* 额度带：横过来贴在 KPI 下面，不再占一整块图表位 */
+/* 额度带：一句话结论 + 细进度 + 脚注细节 */
 .quota-strip {
   display: flex; flex-direction: column; gap: 9px;
   padding: 13px 16px 11px;
   margin-bottom: 14px;
 }
-.qs-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.qs-title h2 { font-size: 14px; font-weight: 600; color: var(--text-1); }
-.qs-title p { margin: 2px 0 0; font-size: 10.5px; color: var(--text-3); }
-.qs-main {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 20px; align-items: center;
-}
-.qs-pct { display: flex; align-items: baseline; gap: 6px; min-width: 116px; }
-.qs-pct b {
-  font-size: 28px; font-weight: 650; letter-spacing: -.03em;
+.qs-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.qs-lead { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.qs-eyebrow { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+.qs-lead b {
+  font-size: 20px; font-weight: 650; letter-spacing: -.02em;
   font-variant-numeric: tabular-nums; color: var(--text-1);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.qs-pct em { font-style: normal; font-size: 10.5px; color: var(--text-3); }
-.qs-pct.is-warn b { color: var(--warn); }
-.qs-pct.is-over b { color: var(--bad); }
-.qs-track { height: 8px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.qs-right { display: flex; align-items: center; gap: 12px; flex: none; }
+.qs-pct { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.qs-pct.is-warn { color: var(--warn); }
+.qs-pct.is-over { color: var(--bad); }
+.qs-track { height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
 .qs-track i {
   display: block; width: 0; height: 100%; border-radius: 99px;
   background: var(--brand-gradient);
@@ -1214,14 +1211,17 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
 }
 .qs-track i.is-warn { background: linear-gradient(90deg, #f59e0b, #f97316); }
 .qs-track i.is-over { background: linear-gradient(90deg, #dc2626, #ef4444); }
-.qs-stats { display: flex; gap: 22px; }
-.qs-stats > div { display: flex; flex-direction: column; gap: 2px; }
+.qs-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.qs-stats { display: flex; gap: 18px; }
+.qs-stats > div { display: flex; align-items: baseline; gap: 5px; }
 .qs-stats span { font-size: 10.5px; color: var(--text-3); white-space: nowrap; }
-.qs-stats b { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.quota-strip .quota-hint { margin: 0; }
+.qs-stats b { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.quota-strip .quota-hint { margin: 0; font-size: 10.5px; color: var(--text-3); text-align: right; }
 @media (max-width: 1024px) {
-  .qs-main { grid-template-columns: 1fr; gap: 10px; }
-  .qs-stats { justify-content: space-between; }
+  .qs-top { flex-wrap: wrap; row-gap: 8px; }
+  .qs-foot { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .qs-stats { flex-wrap: wrap; }
+  .quota-strip .quota-hint { text-align: left; }
 }
 
 /* 全宽额度卡：仪表在左、三项统计横排在右 —— 竖着一条太窄，横过来才用得上整行 */

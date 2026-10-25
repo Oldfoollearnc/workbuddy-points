@@ -340,26 +340,28 @@
           </article>
         </div>
 
-        <!-- 额度带：紧贴 KPI，横向一条，不再占一整块图表位 -->
+        <!-- 额度带：一句话结论 + 细进度 + 脚注细节，不抢 KPI 的戏 -->
         <article class="card quota-strip" style="--i:1">
-          <header class="qs-head">
-            <div class="qs-title">
-              <h2>额度与消耗</h2>
-              <p>按区间查看已用与剩余</p>
+          <div class="qs-top">
+            <div class="qs-lead">
+              <span class="qs-eyebrow" id="quotaLeadLabel">本周</span>
+              <b id="quotaLead">—</b>
             </div>
-            <div class="segmented segmented-sm" id="quotaSeg" role="tablist" aria-label="额度区间">
-              <button data-quota="day">今日</button>
-              <button class="is-active" data-quota="week">本周</button>
-              <button data-quota="month">本月</button>
-              <button data-quota="cycle">本期</button>
+            <div class="qs-right">
+              <span class="qs-pct" id="quotaPct">—</span>
+              <div class="segmented segmented-sm" id="quotaSeg" role="tablist" aria-label="额度区间">
+                <button data-quota="day">今日</button>
+                <button class="is-active" data-quota="week">本周</button>
+                <button data-quota="month">本月</button>
+                <button data-quota="cycle">本期</button>
+              </div>
             </div>
-          </header>
-          <div class="qs-main">
-            <div class="qs-pct"><b id="quotaPct">—</b><em id="quotaPctLabel">本周已用</em></div>
-            <div class="qs-track"><i id="quotaBar"></i></div>
-            <div class="qs-stats" id="quotaStats"></div>
           </div>
-          <p class="quota-hint" id="quotaHint">按剩余工作日折算，可用积分取自云端</p>
+          <div class="qs-track"><i id="quotaBar"></i></div>
+          <div class="qs-foot">
+            <div class="qs-stats" id="quotaStats"></div>
+            <span class="quota-hint" id="quotaHint">按剩余工作日折算，可用积分取自云端</span>
+          </div>
         </article>
 
         <div class="insight-strip" id="insightStrip"></div>

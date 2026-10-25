@@ -1459,24 +1459,21 @@
     // 超支/接近上限时，仪表盘换色（蓝 → 琥珀 → 红），不再"用超了还是一片安心绿"
     const tone = rawPct >= 1 ? 'over' : rawPct >= 0.85 ? 'warn' : 'ok';
     const over = Math.max(0, used - budget);
-    const sub = !configured ? '点头像连接账号'
-      : kind === 'cycle' ? `周期剩余 ${F.credit(cycleLeft)} · 已用 ${F.credit(cycleUsed)}`
-        : kind === 'month'
-          // 本月的分母是"已花 + 剩下还能花"，不是月初定的额度，所以百分比天然偏高。
-          // 把两个数并排写出来，避免 88% 被当成"快超支"。
-          ? `已花 ${F.credit(used)} · 剩 ${F.credit(Math.max(0, budget - used))}`
-          : budget > 0
-            ? `额度 ${F.credit(budget)} · ${over > 0 ? '超 ' + F.credit(over) : '剩 ' + F.credit(budget - used)}`
-            : '额度为 0';
 
-    // 额度带：百分比 + 横向进度条。圆盘太高，夹在两张高卡之间会显得节奏断裂
+    // 结论在前：先回答「还剩多少」，百分比和三项统计退到脚注。
+    // 之前把 94.6% 做成 28px 大字，周初就一片橙色，看着像快超支。
+    const diff = budget - used;
+    const leadText = !configured ? '连接账号后显示可用额度'
+      : kind === 'cycle' ? `还剩 ${F.credit(cycleLeft)} 分`
+        : kind === 'month' ? `已花 ${F.credit(used)} 分`
+          : diff >= 0 ? `还剩 ${F.credit(diff)} 分` : `已超 ${F.credit(-diff)} 分`;
+    setText('#quotaLeadLabel', configured ? lb : '额度');
+    setText('#quotaLead', leadText);
     const pctEl = $('#quotaPct');
     if (pctEl) {
-      pctEl.textContent = configured ? `${(rawPct * 100).toFixed(rawPct >= 1 ? 0 : 1)}%` : '—';
-      const box = pctEl.parentElement;
-      if (box) box.className = 'qs-pct' + (tone === 'over' ? ' is-over' : tone === 'warn' ? ' is-warn' : '');
+      pctEl.textContent = configured ? `已用 ${(rawPct * 100).toFixed(rawPct >= 1 ? 0 : 1)}%` : '';
+      pctEl.className = 'qs-pct' + (tone === 'over' ? ' is-over' : tone === 'warn' ? ' is-warn' : '');
     }
-    setText('#quotaPctLabel', configured ? `${lb}已用` : '未连接云端');
     const barEl = $('#quotaBar');
     if (barEl) {
       barEl.style.width = (configured ? pct * 100 : 0).toFixed(1) + '%';

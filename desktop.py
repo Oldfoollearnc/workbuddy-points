@@ -54,7 +54,7 @@ from win32_utils import (      # noqa: E402  Win32 底层工具（拆分自本�
     RECT, POINT, MONITORINFO,
     dpi_scale, work_area, virtual_screen, clamp_main_pos,
     set_app_id, find_hwnd, on_taskbar, round_corners, strip_nonclient,
-    enable_snap_support,
+    enable_snap_support, MONITORINFO,
     single_instance, signal_show,
     SW_MINIMIZE, SW_MAXIMIZE, SW_RESTORE,
     SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE, SWP_FRAMECHANGED,
@@ -672,30 +672,53 @@ class Desktop:
             return {"ok": False}
 
     def win_drag_start(self):
-        """开始拖动主窗：交给系统模拟「按住标题栏拖」。
+        """开始拖动主窗：原生循环（GetCursorPos + SetWindowPos），立刻返回。
 
-        为什么不再自己跑 GetCursorPos 循环：
-        自绘拖动拿不到 Windows 的贴边布局 —— 拖到屏幕边缘分屏、Win+方向键、
-        双击标题栏最大化全都不会发生。改成 ReleaseCapture + WM_NCLBUTTONDOWN(HTCAPTION)
-        后，系统就按"拖标题栏"处理，Snap 那一套自然回来。
-        SendMessage 会阻塞到松手，所以丢到后台线程，前端立刻返回。
+        为什么又改回自绘拖动：
+        上一版改用系统 WM_NCLBUTTONDOWN(HTCAPTION) 想白拿 Aero Snap，实测窗口直接拖不动
+        —— pywebview 的 frameless 窗口收到这条消息后并不进入系统拖动循环。
+        现在回到原生循环保证「一定能拖」，贴边在松手时自己判（见 _snap_on_release）。
         """
         hwnd = find_hwnd(MAIN_TITLE)
         if not hwnd:
             return {"ok": False}
-        try:
-            user32.ReleaseCapture()
-        except Exception:
-            pass
-
-        def _drag():
-            try:
-                user32.SendMessageW(hwnd, 0x00A1, 2, 0)     # WM_NCLBUTTONDOWN / HTCAPTION
-            except Exception as e:
-                log(f"native drag error: {e}")
-
-        threading.Thread(target=_drag, daemon=True).start()
+        if getattr(self, "_dragging", False):
+            return {"ok": True, "busy": True}
+        self._dragging = True
+        threading.Thread(target=self._drag_loop, args=(hwnd,), daemon=True).start()
         return {"ok": True}
+
+    def _snap_on_release(self, hwnd):
+        """松手时贴边：顶边最大化、左右各占半屏。
+
+        自绘拖动拿不到系统 Snap，只能按窗口最终位置自己判断；
+        阈值 10px，松手时稍微靠边就能吸附，不需要精确对齐。
+        """
+        try:
+            mon = user32.MonitorFromWindow(hwnd, 2)      # MONITOR_DEFAULTTONEAREST
+            mi = MONITORINFO()
+            mi.cbSize = ctypes.sizeof(MONITORINFO)
+            if not user32.GetMonitorInfoW(mon, ctypes.byref(mi)):
+                return
+            wa = mi.rcWork
+            rc = RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(rc))
+            snap = 10
+            ww, wh = wa.right - wa.left, wa.bottom - wa.top
+            if rc.top <= wa.top + snap:
+                self._maxed = True
+                user32.SetWindowPos(hwnd, None, wa.left, wa.top, ww, wh,
+                                    SWP_NOZORDER | SWP_NOACTIVATE)
+            elif rc.left <= wa.left + snap:
+                self._maxed = False
+                user32.SetWindowPos(hwnd, None, wa.left, wa.top, ww // 2, wh,
+                                    SWP_NOZORDER | SWP_NOACTIVATE)
+            elif rc.right >= wa.right - snap:
+                self._maxed = False
+                user32.SetWindowPos(hwnd, None, wa.left + ww // 2, wa.top, ww // 2, wh,
+                                    SWP_NOZORDER | SWP_NOACTIVATE)
+        except Exception as e:
+            log(f"snap on release error: {e}")
 
     def _drag_loop(self, hwnd):
         pt = wintypes.POINT()
@@ -730,6 +753,7 @@ class Desktop:
             self._dragging = False
             if moved:
                 log(f"drag end: {moved} steps -> ({rc.left},{rc.top})")
+                self._snap_on_release(hwnd)
             # 结束态交回前端：解除拖动光标、补一次窗口状态
             self._safe_js(self.main, "window.App && App.__dragEnd()")
 
