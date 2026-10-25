@@ -555,17 +555,14 @@ class Desktop:
         if hwnd:
             user32.ShowWindow(hwnd, 5)
             if not getattr(self, "resize_frame_on", False):
-                # 恢复 Windows 贴边布局：拖到屏幕边缘可以分屏，Win+方向键也生效。
-                # 内部会顺带压平非客户区，所以不再需要 strip_nonclient。
-                if enable_snap_support(hwnd):
-                    # 加回 WS_THICKFRAME 后客户区会被边框吃掉一圈，按创建时的目标尺寸补回来
-                    size = getattr(self, "main_size", None)
-                    if size:
-                        user32.SetWindowPos(hwnd, None, 0, 0,
-                                            int(size[0] * self.scale), int(size[1] * self.scale),
-                                            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)
-                else:
-                    strip_nonclient(hwnd)
+                # 贴边/分屏/系统最大化那套已经全部去掉：只要纯客户区无边框窗口。
+                strip_nonclient(hwnd)
+                # pywebview 的 width/height 是外框尺寸，剥掉边框后客户区会小一圈，补回来
+                size = getattr(self, "main_size", None)
+                if size:
+                    user32.SetWindowPos(hwnd, None, 0, 0,
+                                        int(size[0] * self.scale), int(size[1] * self.scale),
+                                        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)
                 self.resize_frame_on = True
             self._ensure_on_screen(hwnd)
             if not was_visible:
@@ -586,21 +583,29 @@ class Desktop:
         threading.Timer(0.3, set_window_icons).start()
 
     def _ensure_on_screen(self, hwnd):
-        """窗口只要有一条边出了屏幕，就整窗拉回来。
+        """唤回主窗时兜一次：只有几乎整块都在屏幕外，才拉回工作区居中。
 
-        以前只在"几乎完全跑丢"时才居中，部分出屏不管；结果拖出去一半后
-        点右下角小窗唤回主窗，窗口虽然在屏幕上，但大半在工作区外，看起来像没打开。
+        拖动过程中不做任何限制（要的就是自由拖动）；
+        但拖出去以后点右下角小窗唤回，必须能完整看见，所以在这里补一次。
         """
         try:
             rc = RECT()
             user32.GetWindowRect(hwnd, ctypes.byref(rc))
             w, h = rc.right - rc.left, rc.bottom - rc.top
-            nx, ny = clamp_main_pos(rc.left, rc.top, w, h)
-            if nx == rc.left and ny == rc.top:
+            if w <= 0 or h <= 0:
                 return
+            vl, vt, vr, vb = virtual_screen()
+            ix = max(0, min(rc.right, vr) - max(rc.left, vl))
+            iy = max(0, min(rc.bottom, vb) - max(rc.top, vt))
+            visible = (ix * iy) / float(w * h)
+            if visible >= 0.3:
+                return                      # 还能看见三成，就不动它
+            wa = work_area()
+            nx = wa[0] + max(0, ((wa[2] - wa[0]) - w) // 2)
+            ny = wa[1] + max(0, ((wa[3] - wa[1]) - h) // 2)
             user32.SetWindowPos(hwnd, None, nx, ny, 0, 0,
                                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
-            log(f"ensure_on_screen: ({rc.left},{rc.top}) -> ({nx},{ny})")
+            log(f"ensure_on_screen: visible={visible:.0%} -> ({nx},{ny})")
         except Exception as e:
             log(f"ensure_on_screen error: {e}")
 
@@ -673,14 +678,11 @@ class Desktop:
             return {"ok": False}
 
     def win_drag_start(self):
-        """开始拖动：先请系统接管（能拿到 Snap 预览），系统不接再退回自绘。
+        """开始拖动主窗：只做拖动，跟手为准。
 
-        为什么之前没有预览：自绘 SetWindowPos 循环里 Windows 根本不知道在拖窗口，
-        所以拖到边缘/顶部不会画半透明预览框，只有松手后我们自己判的吸附。
-        现在先 PostMessage(WM_NCLBUTTONDOWN, HTCAPTION) 模拟"按住标题栏"，
-        系统一旦接管，预览、Win+方向键、双击最大化全都回来；
-        180ms 后窗口还没动，说明它没接（pywebview 的 frameless 窗口可能吞消息），
-        再跑自绘循环兜底，保证"一定能拖"。
+        一路试过系统拖动（想白拿 Snap 预览）、贴边吸附、四角分屏、范围钳制，
+        结果都是"看着花哨、用着不跟手"。现在只保留最朴素的一条：
+        GetCursorPos 跟着光标 SetWindowPos，鼠标在哪窗口就在哪，不做任何吸附和限制。
         """
         hwnd = find_hwnd(MAIN_TITLE)
         if not hwnd:
@@ -688,91 +690,8 @@ class Desktop:
         if getattr(self, "_dragging", False):
             return {"ok": True, "busy": True}
         self._dragging = True
-
-        rc = RECT()
-        user32.GetWindowRect(hwnd, ctypes.byref(rc))
-        origin = (rc.left, rc.top)
-        try:
-            pt = wintypes.POINT()
-            user32.GetCursorPos(ctypes.byref(pt))
-            lp = ((pt.y & 0xFFFF) << 16) | (pt.x & 0xFFFF)
-            user32.PostMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, lp)
-        except Exception as e:
-            log(f"native drag post error: {e}")
-
-        threading.Thread(target=self._drag_fallback, args=(hwnd, origin), daemon=True).start()
+        threading.Thread(target=self._drag_loop, args=(hwnd,), daemon=True).start()
         return {"ok": True}
-
-    def _drag_fallback(self, hwnd, origin):
-        """系统拖动没接管时，才用自绘循环。"""
-        time.sleep(0.18)
-        try:
-            if not (user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000):
-                self._dragging = False
-                return
-            if user32.GetCapture() == hwnd:
-                self._dragging = False      # 系统已经接管，别插手
-                return
-            rc = RECT()
-            user32.GetWindowRect(hwnd, ctypes.byref(rc))
-            if (rc.left, rc.top) != origin:
-                self._dragging = False      # 窗口已经动了，说明系统在拖
-                return
-            self._drag_loop(hwnd)           # 兜底：自绘，finally 里复位 _dragging
-        except Exception as e:
-            self._dragging = False
-            log(f"drag fallback error: {e}")
-
-    def _snap_on_release(self, hwnd):
-        """松手时贴边：四角各四分之一屏、左右半屏、顶边最大化。
-
-        用**光标所在显示器**的工作区判断（不能按窗口所在屏：双屏上拖到另一块屏边缘，
-        窗口还在原屏，按窗口算就会吸错屏）。热区收到 12px，避免"只是摆在边缘附近"也被吸。
-        """
-        try:
-            pt = wintypes.POINT()
-            user32.GetCursorPos(ctypes.byref(pt))
-            mon = user32.MonitorFromPoint(pt, 2)         # MONITOR_DEFAULTTONEAREST
-            mi = MONITORINFO()
-            mi.cbSize = ctypes.sizeof(MONITORINFO)
-            if not mon or not user32.GetMonitorInfoW(mon, ctypes.byref(mi)):
-                return
-            wa = mi.rcWork
-            snap = 12
-            ww, wh = wa.right - wa.left, wa.bottom - wa.top
-            hw2, hh2 = ww // 2, wh // 2
-            left = pt.x <= wa.left + snap
-            right = pt.x >= wa.right - snap
-            top = pt.y <= wa.top + snap
-            bottom = pt.y >= wa.bottom - snap
-
-            if top and left:
-                box = (wa.left, wa.top, hw2, hh2)
-            elif top and right:
-                box = (wa.left + hw2, wa.top, ww - hw2, hh2)
-            elif bottom and left:
-                box = (wa.left, wa.top + hh2, hw2, wh - hh2)
-            elif bottom and right:
-                box = (wa.left + hw2, wa.top + hh2, ww - hw2, wh - hh2)
-            elif top:
-                box = (wa.left, wa.top, ww, wh)          # 顶边中间：最大化
-            elif left:
-                box = (wa.left, wa.top, hw2, wh)
-            elif right:
-                box = (wa.left + hw2, wa.top, ww - hw2, wh)
-            else:
-                return
-            # 吸附前先记住原尺寸：贴到顶边相当于最大化，之后点「还原」要能回到这里
-            if not getattr(self, "_maxed", False):
-                rc = RECT()
-                user32.GetWindowRect(hwnd, ctypes.byref(rc))
-                self._normal_rect = (rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top)
-            self._maxed = box[3] >= wh - 2
-            user32.SetWindowPos(hwnd, None, box[0], box[1], box[2], box[3],
-                                SWP_NOZORDER | SWP_NOACTIVATE)
-            log("snap -> %s" % (box,))
-        except Exception as e:
-            log(f"snap on release error: {e}")
 
     def _drag_loop(self, hwnd):
         pt = wintypes.POINT()
@@ -794,7 +713,9 @@ class Desktop:
                     break
                 if not user32.GetCursorPos(ctypes.byref(pt)):
                     break
-                x, y = clamp_main_pos(pt.x - off_x, pt.y - off_y, w, h)
+                # 不做任何范围限制：拖到哪儿就是哪儿，鼠标和窗口严格 1:1。
+                # 以前在这里 clamp，窗口一到边界就停住、鼠标继续走，看着就是"拖不动/不跟手"。
+                x, y = int(pt.x - off_x), int(pt.y - off_y)
                 if x != rc.left or y != rc.top:
                     user32.SetWindowPos(hwnd, None, x, y, 0, 0,
                                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
@@ -807,7 +728,6 @@ class Desktop:
             self._dragging = False
             if moved:
                 log(f"drag end: {moved} steps -> ({rc.left},{rc.top})")
-                self._snap_on_release(hwnd)
             # 结束态交回前端：解除拖动光标、补一次窗口状态
             self._safe_js(self.main, "window.App && App.__dragEnd()")
 
