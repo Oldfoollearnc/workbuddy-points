@@ -178,6 +178,10 @@ window.buildDemoData = function () {
       weekday: '日一二三四五六'[d.getDay()],
       consumed,
       earned,
+      // 日历悬停要显示"当天几次、多少 Token"：演示数据也得有，
+      // 否则预览模式永远显示「—」，看不出效果
+      calls: Math.max(1, Math.round(consumed / 22)),
+      tokens: Math.round(consumed * (480 + rnd() * 160)),
       balance: 0
     });
   }

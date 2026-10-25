@@ -1542,7 +1542,7 @@
     const calTotal = calDays.reduce((a, b) => a + b.points, 0);
     const activeDays = calDays.filter(d => d.points > 0).length;
     setText('#weekSum', `区间合计 ${F.credit(calTotal)} 分`);
-    setText('#calSub', `每格一天，从当月起按整月对齐 · 颜色越深消耗越多 · 悬停查看积分 / Token / ${cloudMode ? '计费笔数' : '调用次数'}`);
+    setText('#calSub', `每格一天，从当月起按整月对齐 · 颜色越深消耗越多 · 悬停查看积分 / 次数 / Token`);
 
     const srcChip = $('#calSource');
     if (srcChip) {

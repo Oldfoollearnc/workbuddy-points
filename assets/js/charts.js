@@ -882,7 +882,19 @@
       const hotColors = alpha.map((a, i) => hexToRgba(base, Math.min(1, i === 0 ? .24 : a * 1.18 + .05)));
       const GLOW_R = 2.4;                     // 光斑半径，单位=一个格子
 
-      const fmtTokens = v => (v == null ? '—' : shortNum(v) + ' Token');
+      // Token 只有本机有：万以下给原值，万级保留一位，过亿改用「亿」——
+      // 一万亿的位数太多，扫一眼数不出量级。
+      const fmtTokens = v => {
+        if (v == null) return '—';
+        const n = Number(v) || 0;
+        // 接近 1 亿就提前进位，别出现「10000 万」这种更难看数的写法
+        if (n >= 9.9995e7) return (n / 1e8).toFixed(1).replace(/\.0$/, '') + ' 亿 Token';
+        if (n >= 1e4) {
+          const s = n >= 1e5 ? (n / 1e4).toFixed(0) : (n / 1e4).toFixed(1).replace(/\.0$/, '');
+          return s + ' 万 Token';
+        }
+        return fmt(n) + ' Token';
+      };
       const fmtCalls = v => (v == null ? '—' : fmt(v) + ' 次');
       const glowOn = cfg.glow !== false && motionLevel() !== 'off';
 
@@ -976,8 +988,8 @@
         const wd = '日一二三四五六'[d.getDay()];
         const rowsTip = [
           { color: colors[lv], name: '消耗积分', value: fmt(v) + ' 分' },
-          { name: '消耗 Token', value: fmtTokens(rec ? rec.tokens : null) },
-          { name: '调用次数', value: fmtCalls(rec ? rec.calls : null) }
+          { name: '调用次数', value: fmtCalls(rec ? rec.calls : null) },
+          { name: '消耗 Token', value: fmtTokens(rec ? rec.tokens : null) }
         ];
         const title = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} 周${wd}${future ? ' · 未到' : ''}${rec && rec.src === 'local' ? ' · 本机记录' : ''}`;
         rect.addEventListener('mouseenter', ev => {
