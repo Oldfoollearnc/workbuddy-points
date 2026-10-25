@@ -1185,39 +1185,7 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
 .quota-stats b { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .quota-stats--flat { margin-top: 12px; }
 
-/* 额度卡：竖向排布，和趋势卡同行等高 —— 恢复到原来的栅格节奏 */
-.quota-card { gap: 10px; }
-.quota-seg { display: flex; width: 100%; }
-.quota-seg button { flex: 1; text-align: center; }
-.quota-body { display: flex; flex-direction: column; gap: 9px; flex: 1; min-height: 0; }
-.qs-lead { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.qs-eyebrow { font-size: 11px; color: var(--text-3); white-space: nowrap; }
-.qs-lead b {
-  font-size: 24px; font-weight: 650; letter-spacing: -.02em;
-  font-variant-numeric: tabular-nums; color: var(--text-1);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.qs-track { height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
-.qs-track i {
-  display: block; width: 0; height: 100%; border-radius: 99px;
-  background: var(--brand-gradient);
-  transition: width 360ms var(--ease-out);
-}
-.qs-track i.is-warn { background: linear-gradient(90deg, #f59e0b, #f97316); }
-.qs-track i.is-over { background: linear-gradient(90deg, #dc2626, #ef4444); }
-.qs-meta { display: flex; justify-content: flex-end; margin-top: -4px; }
-.qs-pct { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.qs-pct.is-warn { color: var(--warn); }
-.qs-pct.is-over { color: var(--bad); }
-.qs-stats { display: flex; flex-direction: column; margin-top: auto; }
-.qs-stats > div {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 7px 2px; border-top: 1px dashed var(--border);
-}
-.qs-stats > div:first-child { border-top: 0; }
-.qs-stats span { font-size: 11px; color: var(--text-3); white-space: nowrap; }
-.qs-stats b { font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
-.quota-card .quota-hint { margin: 0; font-size: 10.5px; color: var(--text-3); }
+/* 额度卡：回到仪表盘 + 三项统计的原结构（栅格 4 栏，与时段卡同行） */
 
 /* ===================== 排行榜 ===================== */
 
