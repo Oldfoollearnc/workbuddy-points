@@ -445,6 +445,10 @@
       const items = (cfg.items || []).filter(d => d.value > 0);
       const total = items.reduce((s, d) => s + d.value, 0) || 1;
       const layout = cfg.layout || 'bottom';
+      // 环的数值不一定都是「积分」：今日构成按笔数/次数画，tooltip 必须跟着换标签与单位，
+      // 否则 19 次那一块弹「4 分」，口径自相矛盾。
+      const valLabel = cfg.valueLabel || '消耗';
+      const valUnit = cfg.valueUnit || '分';
       const wrap = h('div', 'donut-wrap', '', container);
       wrap.style.cssText = 'display:flex;height:100%;width:100%;align-items:center;justify-content:center;';
       if (layout === 'side') { wrap.style.flexDirection = 'row'; wrap.style.gap = '8px'; }
@@ -469,9 +473,17 @@
       let acc = 0;
       items.forEach((d, i) => {
         const share = d.value / total;
+        const color = toneColor(d.tone || ('c' + ((i % 6) + 1)));
+        // tooltip 与环同口径：主行是环上的数值，附加行（如消耗积分）由调用方补
+        const tipHTML = () => {
+          const rows = [{ color, name: valLabel, value: `${fmt(d.value)} ${valUnit}` }];
+          if (typeof cfg.extraTip === 'function') rows.push(...(cfg.extraTip(d) || []));
+          rows.push({ name: '占比', value: pct(share) });
+          return `<div class="tt-title">${d.name}</div>${tipRows(rows)}`;
+        };
         const seg = el('circle', {
           cx, cy, r, fill: 'none',
-          stroke: toneColor(d.tone || ('c' + ((i % 6) + 1))),
+          stroke: color,
           'stroke-width': thick,
           'stroke-linecap': 'butt',
           transform: `rotate(-90 ${cx} ${cy})`,
@@ -516,17 +528,11 @@
         }
 
         seg.addEventListener('mouseenter', ev => {
-          showTip(`<div class="tt-title">${d.name}</div>${tipRows([
-            { color: toneColor(d.tone || ('c' + ((i % 6) + 1))), name: '消耗', value: fmt(d.value) + ' 分' },
-            { name: '占比', value: pct(share) }
-          ])}`, ev.clientX, ev.clientY);
+          showTip(tipHTML(), ev.clientX, ev.clientY);
           segs.forEach(s => { s.node.style.opacity = s === segs[i] ? '1' : '.42'; });
           seg.setAttribute('stroke-width', thick + 4);
         });
-        seg.addEventListener('mousemove', ev => showTip(`<div class="tt-title">${d.name}</div>${tipRows([
-          { color: toneColor(d.tone || ('c' + ((i % 6) + 1))), name: '消耗', value: fmt(d.value) + ' 分' },
-          { name: '占比', value: pct(share) }
-        ])}`, ev.clientX, ev.clientY));
+        seg.addEventListener('mousemove', ev => showTip(tipHTML(), ev.clientX, ev.clientY));
         seg.addEventListener('mouseleave', () => {
           hideTip();
           segs.forEach(s => { s.node.style.opacity = '1'; });

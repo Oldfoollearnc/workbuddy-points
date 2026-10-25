@@ -1197,7 +1197,11 @@
           hRatio: 0.84,
           hideCenter: true,                  // 环内不留任何文字，靠图例说明
           centerLabel: '',
-          centerUnit: '次',
+          centerUnit: cloudMode ? '笔' : '次',
+          // 环按笔数/次数拆分，tooltip 就说同一件事；积分只作附加信息，不抢主行
+          valueLabel: cloudMode ? '计费笔数' : '调用次数',
+          valueUnit: cloudMode ? '笔' : '次',
+          extraTip: m => [{ name: '消耗', value: `${F.credit(m.points || 0)} 分` }],
           centerFormat: v => F.fmt(Math.round(v))
         });
       };
@@ -1211,7 +1215,7 @@
         return `<div class="comp-row">
           <i class="dot" style="background:${C.toneColor(m.tone)}"></i>
           <span class="nm" title="${esc(m.name)}">${esc(m.name)}</span>
-          <span class="val">${F.fmt(m.calls)} 次</span>
+          <span class="val">${F.fmt(m.calls)} ${cloudMode ? '笔' : '次'}</span>
           <span class="pct">${pct.toFixed(1)}%</span>
         </div>`;
       }).join('') || '<div class="comp-empty">今日暂无调用</div>';

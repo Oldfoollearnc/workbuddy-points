@@ -376,27 +376,18 @@
             </footer>
           </article>
 
-          <article class="card quota-card span-4" style="--i:5">
+          <article class="card chart-card span-4 comp-card" style="--i:5">
             <header class="card-head">
               <div>
-                <h2>额度与消耗</h2>
-                <p>按今日 / 本周 / 本月查看额度消耗进度</p>
+                <h2>今日消耗构成</h2>
+                <p id="compSub">按模型调用次数拆分 · 颜色对应下方模型</p>
               </div>
-              <div class="card-tools">
-                <div class="segmented segmented-sm" id="quotaSeg" role="tablist" aria-label="额度区间">
-                  <button data-quota="day">今日</button>
-                  <button class="is-active" data-quota="week">本周</button>
-                  <button data-quota="cycle">本期</button>
-                </div>
-              </div>
+              <div class="card-tools"><span class="chip" id="compCount">—</span></div>
             </header>
-            <div class="chart chart-gauge" data-chart="gauge"></div>
-            <div class="quota-stats">
-              <div><span id="quotaK1">本周已用</span><b id="quotaWeek">—</b></div>
-              <div><span id="quotaK2">本周额度</span><b id="quotaLeft">—</b></div>
-              <div><span id="quotaK3">每日可用</span><b id="quotaDay" class="warn">—</b></div>
+            <div class="comp-wrap">
+              <div class="comp-donut" id="compDonut" data-chart="comp"></div>
+              <div class="comp-list" id="compList"></div>
             </div>
-            <p class="quota-hint" id="quotaHint">按剩余工作日折算，可用积分取自云端</p>
           </article>
         </div>
 
@@ -418,18 +409,27 @@
             <div class="chart chart-trend" data-chart="trend"></div>
           </article>
 
-          <article class="card chart-card span-4 comp-card" style="--i:7">
+          <article class="card quota-card span-4" style="--i:7">
             <header class="card-head">
               <div>
-                <h2>今日消耗构成</h2>
-                <p id="compSub">按模型调用次数拆分 · 颜色对应下方模型</p>
+                <h2>额度与消耗</h2>
+                <p>按今日 / 本周 / 本月查看额度消耗进度</p>
               </div>
-              <div class="card-tools"><span class="chip" id="compCount">—</span></div>
+              <div class="card-tools">
+                <div class="segmented segmented-sm" id="quotaSeg" role="tablist" aria-label="额度区间">
+                  <button data-quota="day">今日</button>
+                  <button class="is-active" data-quota="week">本周</button>
+                  <button data-quota="cycle">本期</button>
+                </div>
+              </div>
             </header>
-            <div class="comp-wrap">
-              <div class="comp-donut" id="compDonut" data-chart="comp"></div>
-              <div class="comp-list" id="compList"></div>
+            <div class="chart chart-gauge" data-chart="gauge"></div>
+            <div class="quota-stats">
+              <div><span id="quotaK1">本周已用</span><b id="quotaWeek">—</b></div>
+              <div><span id="quotaK2">本周额度</span><b id="quotaLeft">—</b></div>
+              <div><span id="quotaK3">每日可用</span><b id="quotaDay" class="warn">—</b></div>
             </div>
+            <p class="quota-hint" id="quotaHint">按剩余工作日折算，可用积分取自云端</p>
           </article>
 
         </div>
