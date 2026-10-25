@@ -632,14 +632,14 @@ body.is-desktop[data-mode="popup"] .popup-card {
   z-index: 1;
   border-radius: 0 3px 3px 0;
   background: var(--brand-gradient);
-  /* 40px 行高、20px 指示条：往下让 10px 才是垂直居中 */
-  transform: translateY(calc(var(--nav-y, 0px) + 10px));
+  /* 38px 行高、20px 指示条：往下让 9px 才是垂直居中 */
+  transform: translateY(calc(var(--nav-y, 0px) + 9px));
   transition: transform 400ms cubic-bezier(.3, 1.28, .45, 1);
   will-change: transform;
 }
 .nav-item {
   display: flex; align-items: center; gap: 10px;
-  height: 40px;
+  height: 38px;
   padding: 0 9px;
   border-radius: 10px;
   font-size: 12.5px;
@@ -1020,9 +1020,28 @@ body.is-dragging .topbar { cursor: default; }
 .tint-green { color: var(--good); background: var(--good-soft); }
 .tint-violet { color: var(--c3); background: color-mix(in srgb, var(--c3) 12%, transparent); }
 
-.kpi-value { display: flex; align-items: baseline; gap: 4px; margin: 9px 0 5px; line-height: 1; }
+.kpi-value { display: flex; align-items: baseline; gap: 4px; margin: 11px 0 6px; line-height: 1; }
 .kpi-value span { font-size: 29px; font-weight: 650; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
-.kpi-value em { font-style: normal; font-size: 10.5px; color: var(--text-3); font-weight: 500; }
+.kpi-value em { font-style: normal; font-size: 11px; color: var(--text-3); font-weight: 500; }
+.kpi.is-primary .kpi-value em { font-size: 12.5px; color: var(--text-2); }
+
+/* KPI 分级：只有「可用积分」是主卡，其余三张降权 —— 四张一样大等于没有重点 */
+.kpi.is-primary {
+  background:
+    linear-gradient(180deg, var(--brand-soft), transparent 62%),
+    var(--surface);
+  border-color: color-mix(in srgb, var(--brand) 20%, var(--border));
+}
+.kpi.is-primary::before {
+  content: "";
+  position: absolute; left: 0; top: 14px; bottom: 14px;
+  width: 3px; border-radius: 0 3px 3px 0;
+  background: var(--brand-gradient);
+}
+.kpi.is-primary .kpi-value span { font-size: 36px; }
+.kpi.is-primary .kpi-label { color: var(--text-2); font-weight: 500; }
+.kpi:not(.is-primary) .kpi-value span { font-size: 25px; color: var(--text-1); }
+.kpi:not(.is-primary) .kpi-spark { opacity: .55; }   /* 副卡的迷你趋势退到背景里 */
 .kpi-foot { display: flex; align-items: center; gap: 8px; font-size: 10.5px; }
 .kpi-foot .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kpi-foot b { color: var(--text-2); font-variant-numeric: tabular-nums; }
