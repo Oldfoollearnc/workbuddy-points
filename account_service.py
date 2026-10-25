@@ -857,6 +857,9 @@ class AccountService:
         with self.lock:
             self.state.update({"status": "disconnected", "user": None, "cloud": None,
                                "packages": [], "daily": [], "cloudWeek": None, "cloudModels": [],
+                               # usageRows 也要清：否则退出登录后流水页还挂着上一个账号的逐笔记录，
+                               # 连导出 CSV 都能把它带出去
+                               "usageRows": [],
                                "lastSync": None, "lastError": None, "autoLogin": False})
             keep = {k: self.state[k] for k in ("interval", "autoLogin")}
         try:

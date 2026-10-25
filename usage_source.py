@@ -38,7 +38,7 @@ CACHE_PATH = app_paths.data_path(".cache", "usage.json")
 LOG_PATH = app_paths.data_path("logs", "app.log")
 # v5：缓存从"聚合结果快照"改成"按文件的逐笔记录 + 已读字节偏移"。
 # 这样 refresh 只需要从上次读到的位置往后读新增字节，不用每次重扫全部会话文件。
-CACHE_VER = 5
+CACHE_VER = 6
 
 
 def log(msg):
@@ -133,11 +133,13 @@ def _mix(points_map, total):
     return out
 
 
-def _head_sig(path, n=512):
-    """文件头指纹：只读前 512 字节，用来区分"末尾追加"和"整文件被重写"。
+def _head_sig(path, n=4096):
+    """文件头指纹：读前 4KB 做哈希，用来区分"末尾追加"和"整文件被重写"。
 
     mtime/size 都相同或变大，也可能是压缩、备份覆盖、客户端重建文件；
     这时候 offset 已经不在行边界，继续增量读会丢掉前半段记录。
+    512 字节太短：首行是一条带长 prompt 的事件时，头和正文前半段几乎不变，
+    重写后指纹照样相同，还是会被当成"追加"。
     """
     try:
         with open(path, "rb") as f:
@@ -349,6 +351,8 @@ class UsageService:
                 # 文件没动过：直接复用上次的逐笔
                 recs, offset = ent.get("records") or [], int(ent.get("offset") or 0)
                 sig = ent.get("head") or _head_sig(path)
+                if not ent.get("head") and sig:
+                    dirty = True          # 旧缓存缺指纹：顺手补写一次，下次才能校验
             elif (ent and size >= int(ent.get("size") or 0)
                   and int(ent.get("offset") or 0) <= size
                   and mtime >= float(ent.get("mtime") or 0)):
@@ -357,7 +361,8 @@ class UsageService:
                 # 此时 offset 已不在行边界，从那里读会从半截 JSON 开始，前半段永远丢。
                 # 所以先比一下文件头部指纹，变了就整文件重扫。
                 sig = _head_sig(path)
-                if ent.get("head") and sig and ent.get("head") != sig:
+                # 没有旧指纹也算"可能变了"：宁可整文件重扫一次，也不要从半行开始读
+                if sig and ent.get("head") != sig:
                     recs, offset = _scan_file(path, 0)
                     dirty = True
                 else:
@@ -371,7 +376,9 @@ class UsageService:
                 sig = _head_sig(path)
                 dirty = True
             stats[path] = {"mtime": mtime, "size": size, "offset": offset,
-                           "records": recs, "head": sig}
+                           "records": recs,
+                           # 指纹读取失败时保留旧值，别写个空串进去导致这个文件以后永不校验
+                           "head": sig or (ent or {}).get("head") or ""}
             for r in recs:
                 merged.setdefault(r["mid"], r)      # 同一 message 可能跨文件重复
         if set(stats) != set(prev):

@@ -648,6 +648,11 @@
     if (!el) return;
     const seg = $('#sbData');
     if (seg) seg.hidden = prefs.notice === false;   // 设置里可关掉，把首屏留给数字
+    // 数据段自己的两个按钮跟着一起收，否则条上只剩按钮、点 × 也不会消失
+    ['#noticeSource', '#noticeClose'].forEach(s => {
+      const n = $(s);
+      if (n) n.hidden = prefs.notice === false;
+    });
     const connected = ACCOUNT && ACCOUNT.status === 'connected';
     const sync = ACCOUNT && ACCOUNT.lastSync ? F.relTime(ACCOUNT.lastSync) : '';
     const iv = ACCOUNT && ACCOUNT.interval;
@@ -690,7 +695,7 @@
       const needLogin = !connected;
       srcBtn.textContent = needLogin ? '扫码连接账号' : '数据源';
       srcBtn.dataset.act = needLogin ? 'login' : 'source';
-      srcBtn.title = needLogin ? '打开扫码窗口，连上后自动显示余额与周期' : '去设置里查看数据目录';
+      srcBtn.title = needLogin ? '打开扫码窗口，连上后自动显示余额与周期' : '去「账户」查看数据目录';
     }
     syncStatusbar();
   }
@@ -756,12 +761,19 @@
     const seg = $('#sbCheckin');
     if (!seg) return;
     const bar = $('#statusbar');
-    // 开关关了、或今天点过「我知道了」—— 签到那段不占位置
+    const retryEarly = $('#checkinRetry');
+    const okEarly = $('#checkinOk');
+    // 开关关了、或今天点过「我知道了」—— 签到那段整体收掉，
+    // 连同「重试/我知道了」和整条的绿红边框一起复位，别留下一个孤零零的按钮。
     if (!prefs.checkinAuto || prefs.checkinDismissed === todayKey()) {
       seg.hidden = true;
+      if (retryEarly) retryEarly.hidden = true;
+      if (okEarly) okEarly.hidden = true;
+      if (bar) bar.classList.remove('is-ok', 'is-bad');
       syncStatusbar();
       return;
     }
+    if (okEarly) okEarly.hidden = false;
 
     const r = CHECKIN && CHECKIN.result;
     const today = todayKey();
@@ -1004,6 +1016,8 @@
   }
 
   function renderSideSwipe() {
+    // 胶囊导航下侧栏整条不显示，没必要再刷新不可见的 DOM
+    if (document.body.dataset.nav === 'b') return;
     paintActCards('side', 'lastSideWeekSig');
   }
 
@@ -2117,9 +2131,15 @@
   }
 
   /** 打开设置页时查一次版本（有缓存就不发请求）。有新版本才改副标题。 */
+  let updateCheckedAt = 0;      // 上次真正请求的时间戳：同一小时内只查一次
+
   async function loadUpdate() {
     const note = $('#updateNote');
     if (!note || !bridge.has() || !bridge.can('check_update')) return;
+    // 账户 / 设置页每轮渲染都会走到这里（60 秒刷新、切主题、切页），
+    // 而失败不写缓存 —— 断网时不停重发请求，还会 8 秒超时。这里做 1 小时节流。
+    if (Date.now() - updateCheckedAt < 60 * 60 * 1000) return;
+    updateCheckedAt = Date.now();
     try {
       const r = await bridge.call('check_update');
       if (!r || !r.ok) return;
@@ -3015,6 +3035,15 @@
       drag = { sx: e.screenX, sy: e.screenY, wx: pos.x, wy: pos.y, dpr: window.devicePixelRatio || 1 };
     };
     if (topbar) topbar.addEventListener('mousedown', startDrag);
+    // 系统拖动时后面不会回调 __dragEnd，靠 mouseup 兜一次，别把拖动光标留在地上
+    window.addEventListener('mouseup', () => {
+      if (document.body.classList.contains('is-dragging')) {
+        setTimeout(() => { 
+          document.body.classList.remove('is-dragging');
+          readWinState();
+        }, 80);
+      }
+    });
     window.addEventListener('mousemove', e => {
       if (!drag) return;
       queueMove(
@@ -3066,7 +3095,7 @@
         try { bridge.call('account_login'); } catch (e) { /* 登录窗打不开时不影响页面 */ }
         return;
       }
-      go('settings');
+      go('account');     // 数据目录/重新检测都在账户页，别再跳到设置
     });
 
     const kgConnect = $('#kgConnect');

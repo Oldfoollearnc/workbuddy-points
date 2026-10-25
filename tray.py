@@ -623,7 +623,6 @@ class Tray:
         user32.AppendMenuW(menu, MF_STRING, ID_SETTINGS, "设置")
         user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
         user32.AppendMenuW(menu, MF_STRING, ID_EXIT, "退出")
-        user32.SetMenuDefaultItem(menu, ID_OPEN_POPUP, 0)
         pt = wintypes.POINT()
         user32.GetCursorPos(ctypes.byref(pt))
         user32.SetForegroundWindow(self.hwnd)
@@ -636,15 +635,9 @@ class Tray:
         self._dispatch(cmd)
 
     def _dispatch(self, cmd):
-        if cmd == ID_OPEN_POPUP:
-            self._safe(self.on_click)
-        elif cmd == ID_OPEN_MAIN:
-            self._safe(self.on_open_main)
-        elif cmd == ID_REFRESH:
-            self._safe(self.on_refresh)
-        elif cmd == ID_SYNC:
-            self._safe(self.on_sync)
-        elif cmd == ID_AUTOSTART:
+        # 菜单只剩四项：自启 / 更新 / 设置 / 退出。
+        # 打开面板、刷新、同步都改成在界面里做，这里不再保留死分支。
+        if cmd == ID_AUTOSTART:
             self._safe(self.on_autostart)
         elif cmd == ID_SETTINGS:
             self._safe(self.on_settings)

@@ -101,6 +101,9 @@ user32.ClientToScreen.argtypes = [wintypes.HWND, ctypes.c_void_p]
 user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
                                 ctypes.c_int, ctypes.c_int, wintypes.UINT]
 user32.SetWindowPos.restype = wintypes.BOOL
+user32.IsZoomed.argtypes = [wintypes.HWND]
+user32.IsZoomed.restype = wintypes.BOOL
+user32.GetCapture.restype = wintypes.HWND
 user32.GetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int]
 user32.GetWindowLongW.restype = ctypes.c_long
 user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
@@ -126,6 +129,8 @@ SWP_FRAMECHANGED = 0x0020
 SW_MINIMIZE = 6
 SW_MAXIMIZE = 3
 SW_RESTORE = 9
+WM_NCLBUTTONDOWN = 0x00A1
+HTCAPTION = 2
 
 VK_LBUTTON = 0x01
 HWND_TOP = 0
@@ -556,7 +561,8 @@ class Desktop:
                     # 加回 WS_THICKFRAME 后客户区会被边框吃掉一圈，按创建时的目标尺寸补回来
                     size = getattr(self, "main_size", None)
                     if size:
-                        user32.SetWindowPos(hwnd, None, 0, 0, size[0], size[1],
+                        user32.SetWindowPos(hwnd, None, 0, 0,
+                                            int(size[0] * self.scale), int(size[1] * self.scale),
                                             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)
                 else:
                     strip_nonclient(hwnd)
@@ -580,23 +586,18 @@ class Desktop:
         threading.Timer(0.3, set_window_icons).start()
 
     def _ensure_on_screen(self, hwnd):
-        """主窗只剩一条边留在屏幕外/完全跑丢时，拉回工作区居中。
+        """窗口只要有一条边出了屏幕，就整窗拉回来。
 
-        "拖没了只能重启软件"是最伤体验的失败模式：这里给它兜底，
-        用户点托盘「打开主界面」就能把窗口找回来。
+        以前只在"几乎完全跑丢"时才居中，部分出屏不管；结果拖出去一半后
+        点右下角小窗唤回主窗，窗口虽然在屏幕上，但大半在工作区外，看起来像没打开。
         """
         try:
             rc = RECT()
             user32.GetWindowRect(hwnd, ctypes.byref(rc))
             w, h = rc.right - rc.left, rc.bottom - rc.top
-            vl, vt, vr, vb = virtual_screen()
-            lost = (rc.right < vl + 120 or rc.left > vr - 120
-                    or rc.bottom < vt + 60 or rc.top > vb - 60)
-            if not lost:
+            nx, ny = clamp_main_pos(rc.left, rc.top, w, h)
+            if nx == rc.left and ny == rc.top:
                 return
-            wa = work_area()
-            nx = wa[0] + max(0, ((wa[2] - wa[0]) - w) // 2)
-            ny = wa[1] + max(0, ((wa[3] - wa[1]) - h) // 2)
             user32.SetWindowPos(hwnd, None, nx, ny, 0, 0,
                                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
             log(f"ensure_on_screen: ({rc.left},{rc.top}) -> ({nx},{ny})")
@@ -672,12 +673,14 @@ class Desktop:
             return {"ok": False}
 
     def win_drag_start(self):
-        """开始拖动主窗：原生循环（GetCursorPos + SetWindowPos），立刻返回。
+        """开始拖动：先请系统接管（能拿到 Snap 预览），系统不接再退回自绘。
 
-        为什么又改回自绘拖动：
-        上一版改用系统 WM_NCLBUTTONDOWN(HTCAPTION) 想白拿 Aero Snap，实测窗口直接拖不动
-        —— pywebview 的 frameless 窗口收到这条消息后并不进入系统拖动循环。
-        现在回到原生循环保证「一定能拖」，贴边在松手时自己判（见 _snap_on_release）。
+        为什么之前没有预览：自绘 SetWindowPos 循环里 Windows 根本不知道在拖窗口，
+        所以拖到边缘/顶部不会画半透明预览框，只有松手后我们自己判的吸附。
+        现在先 PostMessage(WM_NCLBUTTONDOWN, HTCAPTION) 模拟"按住标题栏"，
+        系统一旦接管，预览、Win+方向键、双击最大化全都回来；
+        180ms 后窗口还没动，说明它没接（pywebview 的 frameless 窗口可能吞消息），
+        再跑自绘循环兜底，保证"一定能拖"。
         """
         hwnd = find_hwnd(MAIN_TITLE)
         if not hwnd:
@@ -685,27 +688,57 @@ class Desktop:
         if getattr(self, "_dragging", False):
             return {"ok": True, "busy": True}
         self._dragging = True
-        threading.Thread(target=self._drag_loop, args=(hwnd,), daemon=True).start()
+
+        rc = RECT()
+        user32.GetWindowRect(hwnd, ctypes.byref(rc))
+        origin = (rc.left, rc.top)
+        try:
+            pt = wintypes.POINT()
+            user32.GetCursorPos(ctypes.byref(pt))
+            lp = ((pt.y & 0xFFFF) << 16) | (pt.x & 0xFFFF)
+            user32.PostMessageW(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, lp)
+        except Exception as e:
+            log(f"native drag post error: {e}")
+
+        threading.Thread(target=self._drag_fallback, args=(hwnd, origin), daemon=True).start()
         return {"ok": True}
+
+    def _drag_fallback(self, hwnd, origin):
+        """系统拖动没接管时，才用自绘循环。"""
+        time.sleep(0.18)
+        try:
+            if not (user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000):
+                self._dragging = False
+                return
+            if user32.GetCapture() == hwnd:
+                self._dragging = False      # 系统已经接管，别插手
+                return
+            rc = RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(rc))
+            if (rc.left, rc.top) != origin:
+                self._dragging = False      # 窗口已经动了，说明系统在拖
+                return
+            self._drag_loop(hwnd)           # 兜底：自绘，finally 里复位 _dragging
+        except Exception as e:
+            self._dragging = False
+            log(f"drag fallback error: {e}")
 
     def _snap_on_release(self, hwnd):
         """松手时贴边：四角各四分之一屏、左右半屏、顶边最大化。
 
-        两个要点：
-        1. 判据用**光标位置**而不是窗口位置 —— Windows 自己也是光标贴边就触发；
-           用窗口边缘判，用户把鼠标甩到右下角但窗口没贴边时就什么都不发生。
-        2. 热区 24px，比窗口边框宽一点；10px 太苛刻，几乎贴死才会触发。
+        用**光标所在显示器**的工作区判断（不能按窗口所在屏：双屏上拖到另一块屏边缘，
+        窗口还在原屏，按窗口算就会吸错屏）。热区收到 12px，避免"只是摆在边缘附近"也被吸。
         """
         try:
-            mon = user32.MonitorFromWindow(hwnd, 2)      # MONITOR_DEFAULTTONEAREST
-            mi = MONITORINFO()
-            mi.cbSize = ctypes.sizeof(MONITORINFO)
-            if not user32.GetMonitorInfoW(mon, ctypes.byref(mi)):
-                return
-            wa = mi.rcWork
             pt = wintypes.POINT()
             user32.GetCursorPos(ctypes.byref(pt))
-            snap = 24
+            mon = user32.MonitorFromPoint(pt, 2)         # MONITOR_DEFAULTTONEAREST
+            mi = MONITORINFO()
+            mi.cbSize = ctypes.sizeof(MONITORINFO)
+            if not mon or not user32.GetMonitorInfoW(mon, ctypes.byref(mi)):
+                return
+            wa = mi.rcWork
+            snap = 12
             ww, wh = wa.right - wa.left, wa.bottom - wa.top
             hw2, hh2 = ww // 2, wh // 2
             left = pt.x <= wa.left + snap
@@ -729,6 +762,11 @@ class Desktop:
                 box = (wa.left + hw2, wa.top, ww - hw2, wh)
             else:
                 return
+            # 吸附前先记住原尺寸：贴到顶边相当于最大化，之后点「还原」要能回到这里
+            if not getattr(self, "_maxed", False):
+                rc = RECT()
+                user32.GetWindowRect(hwnd, ctypes.byref(rc))
+                self._normal_rect = (rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top)
             self._maxed = box[3] >= wh - 2
             user32.SetWindowPos(hwnd, None, box[0], box[1], box[2], box[3],
                                 SWP_NOZORDER | SWP_NOACTIVATE)
@@ -811,6 +849,14 @@ class Desktop:
         try:
             if not hwnd:
                 return {"ok": False}
+            # Win+↑ 是系统最大化：这时 _maxed 仍是 False，必须先认 IsZoomed，
+            # 否则会把"满屏矩形"当成普通尺寸记进 _normal_rect，之后再也还原不回去。
+            if user32.IsZoomed(hwnd):
+                user32.ShowWindow(hwnd, SW_RESTORE)
+                self._maxed = False
+                log("win_max -> restore from system zoom")
+                threading.Timer(0.12, lambda: self._safe_js(self.main, "App.refreshLayout()")).start()
+                return {"ok": True, "maximized": False}
             if getattr(self, "_maxed", False):
                 r = getattr(self, "_normal_rect", None)
                 if r:

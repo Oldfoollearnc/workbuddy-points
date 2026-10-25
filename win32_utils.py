@@ -139,14 +139,17 @@ def virtual_screen():
 
 
 def clamp_main_pos(x, y, w, h):
-    """把主窗位置限制在"还能抓得到"的范围里。
+    """把主窗位置限制在**整块屏幕可见**的范围内。
 
-    拖到屏幕外不是致命的，但用户找不回来就只能重启 —— 所以水平方向至少留
-    KEEP_VISIBLE_X 宽、垂直方向保证标题栏（顶部 KEEP_VISIBLE_Y）始终在屏内。
+    以前是"至少留 160px 可抓"，结果窗口能被拖到屏幕外大半：
+    再点右下角小窗唤回主窗时，窗口虽然显示出来了，却在工作区之外，
+    看起来就是"打不开 / 卡住"。现在整窗都不许出屏。
     """
     vl, vt, vr, vb = virtual_screen()
-    x = int(max(vl - w + KEEP_VISIBLE_X, min(x, vr - KEEP_VISIBLE_X)))
-    y = int(max(vt, min(y, vb - KEEP_VISIBLE_Y)))
+    max_x = max(vl, vr - int(w))
+    max_y = max(vt, vb - int(h))
+    x = int(min(max(vl, x), max_x))
+    y = int(min(max(vt, y), max_y))
     return x, y
 
 
@@ -288,14 +291,65 @@ def enable_snap_support(hwnd):
         return False
 
 
+WM_GETMINMAXINFO = 0x0024
+WS_MAXIMIZE = 0x01000000
+
+
+class MINMAXINFO(ctypes.Structure):
+    _fields_ = [("ptReserved", POINT), ("ptMaxSize", POINT), ("ptMaxPosition", POINT),
+                ("ptMinTrackSize", POINT), ("ptMaxTrackSize", POINT)]
+
+
+class NCCALCSIZE_PARAMS(ctypes.Structure):
+    _fields_ = [("rgrc", RECT * 3), ("lppos", ctypes.c_void_p)]
+
+
+def _frame_pad():
+    """WS_THICKFRAME 那圈不可见边框的厚度（含 padded border）。"""
+    try:
+        return (user32.GetSystemMetrics(32) + user32.GetSystemMetrics(92),   # SM_CXSIZEFRAME + SM_CXPADDEDBORDER
+                user32.GetSystemMetrics(33) + user32.GetSystemMetrics(92))
+    except Exception:
+        return (8, 8)
+
+
 def _snap_wndproc(hwnd, msg, wparam, lparam):
-    """窗口过程：只拦 WM_NCCALCSIZE，其余原样转回原过程。"""
+    """窗口过程：压平标题栏，并让最大化正好落在工作区里。"""
+    old = _SNAP_OLD.get(hwnd)
     try:
         if msg == WM_NCCALCSIZE and wparam:
+            # 非最大化：客户区 = 整个窗口（没有标题栏）。
+            # 最大化：系统给的建议矩形是"工作区 + 一圈边框"，不内缩就会盖住任务栏。
+            style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+            if style & WS_MAXIMIZE:
+                p = ctypes.cast(lparam, ctypes.POINTER(NCCALCSIZE_PARAMS)).contents
+                bx, by = _frame_pad()
+                p.rgrc[0].left += bx
+                p.rgrc[0].top += by
+                p.rgrc[0].right -= bx
+                p.rgrc[0].bottom -= by
+            return 0
+        if msg == WM_GETMINMAXINFO:
+            # 只把最大化尺寸限定到工作区；边框补偿交给上面的 NCCALCSIZE
+            if old:
+                user32.CallWindowProcW(old, hwnd, msg, wparam, lparam)
+            else:
+                user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+            user32.MonitorFromWindow.restype = wintypes.HANDLE
+            user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+            mon = user32.MonitorFromWindow(hwnd, 2)      # MONITOR_DEFAULTTONEAREST
+            mi = MONITORINFO()
+            mi.cbSize = ctypes.sizeof(MONITORINFO)
+            if mon and user32.GetMonitorInfoW(mon, ctypes.byref(mi)):
+                m, wa = mi.rcMonitor, mi.rcWork
+                info = ctypes.cast(lparam, ctypes.POINTER(MINMAXINFO)).contents
+                info.ptMaxPosition.x = wa.left - m.left
+                info.ptMaxPosition.y = wa.top - m.top
+                info.ptMaxSize.x = wa.right - wa.left
+                info.ptMaxSize.y = wa.bottom - wa.top
             return 0
     except Exception:
         pass
-    old = _SNAP_OLD.get(hwnd)
     try:
         if old:
             return user32.CallWindowProcW(old, hwnd, msg, wparam, lparam)

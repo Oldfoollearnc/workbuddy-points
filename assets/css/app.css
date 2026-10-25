@@ -318,7 +318,7 @@ body.is-desktop[data-mode="popup"] .popup-card {
   animation: barFill 600ms cubic-bezier(.35, .9, .2, 1) both;
 }
 @keyframes barFill { to { transform: scaleX(1); } }
-.popup-card.is-refreshing .pop-slide .big span {
+.popup-card.is-refreshing .pop-hero .big span {
   display: inline-block;
   animation: numPulse 600ms var(--ease-out) both;
 }
