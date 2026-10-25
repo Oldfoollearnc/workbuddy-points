@@ -2442,18 +2442,9 @@
   function bind() {
     $$('.nav-item, .tb-nav-item').forEach(b => b.addEventListener('click', () => go(b.dataset.view)));
 
-    /* ---------- 导航方式：胶囊（默认）/ 侧栏（可在设置里切） ---------- */
+    /* ---------- 导航方式：固定顶部胶囊（旧版侧栏已下掉，?nav=a 仅作调试） ---------- */
     const navParam = qs.get('nav');
-    const navMode = ['a', 'b', 'c'].includes(navParam)
-      ? navParam
-      : (prefs.navMode === 'a' ? 'a' : 'b');
-    applyNav(navMode);
-    $$('#navSeg button').forEach(b => b.addEventListener('click', () => {
-      prefs.navMode = b.dataset.navChoice;
-      savePrefs();
-      applyNav(prefs.navMode);
-      setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
-    }));
+    applyNav(['a', 'b', 'c'].includes(navParam) ? navParam : 'b');
     if (prefs.navCollapsed) document.body.classList.add('nav-collapsed');
 
     const collapseBtn = $('#navCollapse');
