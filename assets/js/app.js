@@ -2420,9 +2420,9 @@
   function bind() {
     $$('.nav-item, .tb-nav-item').forEach(b => b.addEventListener('click', () => go(b.dataset.view)));
 
-    /* ---------- 导航方案切换（?nav=a|b|c） ---------- */
+    /* ---------- 导航方案切换（?nav=a|b|c，默认 b：顶部胶囊） ---------- */
     const navParam = qs.get('nav');
-    const navMode = ['a', 'b', 'c'].includes(navParam) ? navParam : 'a';
+    const navMode = ['a', 'b', 'c'].includes(navParam) ? navParam : 'b';
     document.body.dataset.nav = navMode;
     if (prefs.navCollapsed) document.body.classList.add('nav-collapsed');
 
