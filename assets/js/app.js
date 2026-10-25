@@ -646,6 +646,8 @@
       txt = `云端每 ${every}同步（${sync || '—'}）：消耗 / 笔数取<b>${bucketed ? '计费记录' : '逐笔'}</b>`
           + (bucketed ? `（5 分钟 × 模型聚合，一笔 ≠ 一次调用）` : '')
           + `，Token 取本机。`
+          + (ACCOUNT.softFail
+              ? ` <b class="warn-text">⚠ 上次同步没成功（${esc(ACCOUNT.softFail)}），先显示上一次的数据</b>` : '')
           + (ACCOUNT.cloud && ACCOUNT.cloud.stale
               ? ` <b class="warn-text">⚠ ${esc(ACCOUNT.cloud.stale)}</b>` : '');
     } else {
@@ -2615,7 +2617,9 @@
       await loadAccount();
       renderAccountCard();
       renderActive(true);
-      toast(r && r.ok ? '账号数据已同步' : '同步失败，登录态可能已过期');
+      toast(r && r.ok ? '账号数据已同步'
+        : (r && r.busy ? '正在同步中，稍等一下'
+          : '同步失败：' + ((r && r.error) || '登录态可能已过期')));
     });
     const ci = $('#cloudInterval');
     if (ci) ci.addEventListener('change', async () => {
@@ -2640,10 +2644,15 @@
       if (!bridge.has()) { toast('浏览器预览无法同步账号', 'i-info'); return; }
       showLoading('正在同步云端账号…');
       toast('正在同步云端账号…');
-      try { await bridge.call('account_sync'); } finally { hideLoading(); }
+      let rr = null;
+      try { rr = await bridge.call('account_sync'); } finally { hideLoading(); }
       await loadAccount();
       renderAccountCard(); renderActive(true);
-      toast(ACCOUNT.status === 'connected' ? '云端数据已同步' : '同步失败，请检查登录状态');
+      // 不能再用 status 判断结果：软失败（断网 / 5xx）会保留 connected，
+      // 拿状态判断就会把一次失败说成"已同步"。
+      toast(rr && rr.ok ? '云端数据已同步'
+        : (rr && rr.busy ? '正在同步中，稍等一下'
+          : '同步失败：' + ((rr && rr.error) || '请检查登录状态')));
     });
     const rb = $('#refreshBtn'); if (rb) rb.addEventListener('click', refresh);
     const pr = $('#popRefresh'); if (pr) pr.addEventListener('click', refresh);
@@ -2890,11 +2899,14 @@
       if (!bridge.has()) { toast('浏览器预览无法同步云端', 'i-info'); return; }
       showLoading('正在同步云端账号…');
       toast('正在同步云端账号…');
-      try { await bridge.call('account_sync'); } finally { hideLoading(); }
+      let rr = null;
+      try { rr = await bridge.call('account_sync'); } finally { hideLoading(); }
       await loadAccount();
       renderPopup();
       renderAccountCard();
-      toast(ACCOUNT.status === 'connected' ? '云端数据已同步' : '同步失败，请检查登录状态');
+      toast(rr && rr.ok ? '云端数据已同步'
+        : (rr && rr.busy ? '正在同步中，稍等一下'
+          : '同步失败：' + ((rr && rr.error) || '请检查登录状态')));
     });
 
     document.addEventListener('keydown', e => {

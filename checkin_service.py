@@ -149,9 +149,12 @@ class CheckinService:
 
     def _save_cache(self):
         try:
+            today = self.state.get("today")
             fsutil.save_json(CACHE, {"at": self.state["at"], "result": self.state["result"],
-                                 "options": self.options,
-                                 "today": self.state.get("today") or {},
+                                 "options": dict(self.options),
+                                 # 拷一份再序列化：后台线程可能正在往 today 里写，
+                                 # 直接传引用会 json.dump 时 "dict changed size during iteration"
+                                 "today": dict(today) if isinstance(today, dict) else {},
                                  "signedDate": self.state.get("signedDate"),
                                  "streak": self.state.get("streak"),
                                  "week": self.state.get("week"),
@@ -186,6 +189,18 @@ class CheckinService:
         except Exception:
             return 0
 
+    @staticmethod
+    def _int0(v):
+        """缓存里的数字可能被写成字符串、带千分位、甚至整段时间文本。
+
+        这里一律降级成 0：宁可少显示一个倒计时，也不能让 snapshot() 抛异常
+        —— 那会让前端永远卡在「正在准备签到…」。
+        """
+        try:
+            return int(float(str(v).replace(",", "").strip()))
+        except Exception:
+            return 0
+
     def _migrate_day_cache(self, d):
         """把老缓存的散字段（signedDate / claimedDate / result.travel）并进 today 块。
 
@@ -201,7 +216,7 @@ class CheckinService:
                 if v is not None:
                     t[k] = v
         if self.state.get("claimedDate") == today or d.get("claimedDate") == today:
-            got = int(self.state.get("claimedToday") or d.get("claimedToday") or 0)
+            got = self._int0(self.state.get("claimedToday") or d.get("claimedToday"))
             if got > 0:
                 t.update(claimed=True, reward=got, dispatched=True, limitReached=True)
 
@@ -216,18 +231,25 @@ class CheckinService:
             if tv.get("limitReached"):
                 t["limitReached"] = True
             if st == "traveling" and not t.get("arriveAt"):
-                arrive = self._ts_of(res.get("at")) + int(tv.get("remainingSec") or 0)
+                arrive = self._ts_of(res.get("at")) + self._int0(tv.get("remainingSec"))
                 if arrive > 0:
                     t["arriveAt"] = arrive
                     t.setdefault("departAt", self._ts_of(res.get("at")))
             if tv.get("reward"):
-                t.setdefault("pending", int(tv.get("reward") or 0))
+                t.setdefault("pending", self._int0(tv.get("reward")))
             if st in ("traveling", "arrived"):
                 t.setdefault("dispatchedAt", res.get("at"))
 
     def _absorb(self, res):
         """把一轮结果沉淀成今日结论：以后启动直接读它，不再问远端。"""
         if not isinstance(res, dict):
+            return
+        # 一轮可能跨过零点（_ensure_page 最长 12s + 多次请求）。结果里的 date 是
+        # 开跑那一刻的日期，而 _today() 取的是此刻的日期 —— 23:59 跑的那一轮
+        # 会把"昨天签过"写进今天的块，第二天直接判定"已完成"，整天不签到。
+        day = str(res.get("date") or "")[:10]
+        if day and day != self._day_key():
+            _log("absorb skipped: 本轮属于 %s，已跨天" % day)
             return
         t = self._today()
         c = res.get("checkin") or {}
@@ -249,29 +271,29 @@ class CheckinService:
                 t["location"] = tv.get("location")
             if st == "traveling":
                 if tv.get("arriveAt"):
-                    t["arriveAt"] = int(tv.get("arriveAt"))
+                    t["arriveAt"] = self._int0(tv.get("arriveAt"))
                 elif tv.get("remainingSec"):
-                    t["arriveAt"] = int(time.time()) + int(tv.get("remainingSec") or 0)
+                    t["arriveAt"] = int(time.time()) + self._int0(tv.get("remainingSec"))
                 if tv.get("departAt"):
-                    t["departAt"] = int(tv.get("departAt"))
+                    t["departAt"] = self._int0(tv.get("departAt"))
                 if tv.get("reward"):
-                    t["pending"] = int(tv.get("reward") or 0)
+                    t["pending"] = self._int0(tv.get("reward"))
             elif st == "arrived":
                 t["arrived"] = True
                 if tv.get("reward"):
-                    t["pending"] = int(tv.get("reward") or 0)
+                    t["pending"] = self._int0(tv.get("reward"))
 
         if tv.get("limitReached"):
             t["dispatched"] = True
             t["limitReached"] = True
 
-        got = int(tv.get("claimed") or 0)
+        got = self._int0(tv.get("claimed"))
         if got > 0 or tv.get("claimedToday"):
             # claimedToday 是当天累计（_note_travel_claim 维护），直接取它，
             # 免得本轮 claimed 与累计值叠加成双倍
-            total = int(tv.get("claimedToday") or 0)
+            total = self._int0(tv.get("claimedToday"))
             t["claimed"] = True
-            t["reward"] = max(int(t.get("reward") or 0) + got, total)
+            t["reward"] = max(self._int0(t.get("reward")) + got, total)
             t["pending"] = 0
             t["limitReached"] = True
             t.pop("arriveAt", None)     # 已收回，倒计时到此为止
@@ -280,8 +302,8 @@ class CheckinService:
     def _travel_view(self, t):
         """用今日结论还原一张旅行卡，字段与接口返回保持一致（前端不用改）。"""
         now = int(time.time())
-        reward = int(t.get("reward") or 0)          # 今天已领
-        pending = int(t.get("pending") or 0)        # 到家待领
+        reward = self._int0(t.get("reward"))          # 今天已领
+        pending = self._int0(t.get("pending"))        # 到家待领
         v = {"error": None, "departed": False, "claimed": 0,
              "claimedToday": reward, "limitReached": bool(t.get("limitReached")),
              "location": "", "reward": pending, "durationHours": 0, "progress": 0.0,
@@ -290,12 +312,12 @@ class CheckinService:
             v.update(state="idle", stateText="空闲", limitReached=True)
             return v
 
-        arrive = int(t.get("arriveAt") or 0)
+        arrive = self._int0(t.get("arriveAt"))
         if arrive and now < arrive:
             left = arrive - now
             v.update(state="traveling", stateText="旅行中", location=t.get("location") or "",
                      remainingSec=left, remainingText=_dur_text(left))
-            dep = int(t.get("departAt") or 0)
+            dep = self._int0(t.get("departAt"))
             if dep and arrive > dep:
                 v["progress"] = max(0.0, min(1.0, (now - dep) / float(arrive - dep)))
             return v
@@ -346,7 +368,15 @@ class CheckinService:
 
     def snapshot(self):
         with self.lock:
-            return self._snapshot()
+            try:
+                return self._snapshot()
+            except Exception as e:
+                # 合成失败不能把整个接口打死：退回原始 result，界面至少还有东西显示。
+                # 以前这里没兜底，一个坏字段就让前端永远停在「正在准备签到…」。
+                _log("snapshot 合成失败：%s" % e)
+                return {"status": self.state.get("status"), "result": self.state.get("result"),
+                        "at": self.state.get("at"), "error": self.state.get("error"),
+                        "running": self._running}
 
     def _snapshot(self):
         return {
@@ -688,12 +718,10 @@ class CheckinService:
 
         # 今天该做的都做完了（签过 + 猫已收回）：本地结论就是最终答案。
         # 连页面都不用叫醒，启动那一刻界面就有正确状态。
-        # "收回"包括领到 0 分的情况：派满又不在路上，今天不会再变。
+        # 只有 claimed 才算"收回"：limitReached 在派出那一刻就为 true，
+        # 拿它当已完成会漏掉"到家没领"的那 9 分。
         t = self._today(create=False)
-        today_done = bool(t.get("checkedIn")) and (
-            bool(t.get("claimed"))
-            or (bool(t.get("limitReached")) and not t.get("arriveAt") and not t.get("pending"))
-        )
+        today_done = bool(t.get("checkedIn")) and bool(t.get("claimed"))
         if today_done:
             res.update({
                 "ok": True,
@@ -773,6 +801,14 @@ class CheckinService:
                         week[now.weekday()] = True      # 点阵是周一为 0，与界面一致
                     res["week"] = week
                     self._refresh_after_checkin(res)
+                elif res["checkin"].get("unknown"):
+                    # 服务端 200 但没给 code：不能当成功（会把 signedDate 锁死一整天），
+                    # 回读一次状态，服务端说签了就算签了。
+                    self._refresh_after_checkin(res)
+                    if res["checkedIn"]:
+                        res["checkin"]["done"] = True
+                        res["checkin"]["new"] = False
+                        res["checkin"]["message"] = "今天已经签过，没有重复打卡"
 
                 # 记下"哪一天签成了"，当天余下的轮询就不必再问签到接口
                 if res["checkedIn"]:
@@ -799,7 +835,7 @@ class CheckinService:
     def _do_checkin(self, data):
         """返回 {done, new, gain, message, error}。"""
         out = {"done": bool(data.get("today_checked_in")), "new": False,
-               "gain": 0, "message": "", "error": None,
+               "gain": 0, "message": "", "error": None, "unknown": False,
                "dailyCredit": data.get("daily_credit") or 100}
         if out["done"]:
             out["message"] = "今天已经签过，没有重复打卡"
@@ -807,11 +843,17 @@ class CheckinService:
 
         r = self._call(CHECKIN_PATH, "POST")
         code = self._code(r)
-        if r.get("status") == 200 and code in (CODE_OK, None):
+        if r.get("status") == 200 and code == CODE_OK:
             out["done"] = True
             out["new"] = True
             out["gain"] = out["dailyCredit"]
             out["message"] = "签到成功"
+            return out
+        if r.get("status") == 200 and code is None:
+            # 200 但没有 code：字段可能变了，也可能只是响应结构不同。
+            # 直接当成功会把 signedDate 写死一整天，宁可回读一次状态再定论。
+            out["unknown"] = True
+            out["message"] = "签到请求已发出，服务端没有返回结果码"
             return out
         if code == CODE_ALREADY:
             # 幂等返回：服务端认为已签（多端同时开程序时会遇到），不是错误
@@ -924,10 +966,10 @@ class CheckinService:
         if self.state.get("claimedDate") != today:
             self.state["claimedDate"] = today
             self.state["claimedToday"] = 0
-        got = int(travel.get("claimed") or 0)
+        got = self._int0(travel.get("claimed"))
         if got:
-            self.state["claimedToday"] = int(self.state.get("claimedToday") or 0) + got
-        travel["claimedToday"] = int(self.state.get("claimedToday") or 0)
+            self.state["claimedToday"] = self._int0(self.state.get("claimedToday")) + got
+        travel["claimedToday"] = self._int0(self.state.get("claimedToday"))
 
     def _travel_locations(self):
         r = self._call(TRAVEL_CONFIG, "GET")

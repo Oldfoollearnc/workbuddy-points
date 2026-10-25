@@ -133,6 +133,37 @@ class TodayCacheTest(unittest.TestCase):
         self.assertEqual(block["date"], self.today)
         self.assertNotIn("checkedIn", block)
 
+    # ---------- 子代理评审补的边界 ----------
+
+    def test_absorb_ignores_previous_day_result(self):
+        """23:59 开跑、00:00 之后收尾的那一轮，不能写进"今天"的块。"""
+        yday = (dt.date.today() - dt.timedelta(days=1)).isoformat()
+        svc = self.service()
+        svc._absorb({"date": yday, "checkedIn": True, "checkin": {"done": True},
+                     "travel": {"state": "idle", "limitReached": True, "claimedToday": 6}})
+        block = svc.state.get("today") or {}
+        self.assertFalse(block.get("checkedIn"))
+        self.assertFalse(block.get("claimed"))
+
+    def test_limit_reached_alone_does_not_short_circuit(self):
+        """派出那一刻 limitReached 就是 true：没领到就不能算"今日已完成"。"""
+        self.write_cache({"state": "idle", "limitReached": True, "reward": 0,
+                          "claimed": 0, "claimedToday": 0})
+        out = self.service()._run_inner(travel_auto=True)
+        self.assertNotEqual(out.get("reason"), "local_done")
+        self.assertEqual(out.get("reason"), "no_window")
+
+    def test_bad_types_do_not_break_snapshot(self):
+        """缓存里的数字被写成时间串也要能出快照，不能让接口整体抛错。"""
+        self.write_cache({}, cache_today={
+            "date": self.today, "checkedIn": True, "dispatched": True,
+            "arriveAt": "2026-10-25 10:00:00", "departAt": None,
+            "reward": "6", "pending": "abc",
+        })
+        travel = self.service().snapshot()["result"]["travel"]
+        self.assertIn(travel["state"], ("arrived", "idle", "traveling"))
+        self.assertEqual(travel["claimedToday"], 6)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -546,6 +546,7 @@ class AccountService:
                     "user": mapped["user"],
                     "lastSync": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "lastError": None,
+                    "softFail": None,
                     "failStreak": 0,
                     "suspect": False,
                     "origin": used_origin,
@@ -561,7 +562,17 @@ class AccountService:
             # 界面会一直显示"登录已失效"，用户只能重新扫码 —— 这是误判，不是事实。
             auth_like = any(k in msg for k in ("401", "403", "登录", "会话"))
             with self.lock:
-                self.state["status"] = "expired" if auth_like else "error"
+                had_cloud = bool(self.state.get("cloud"))
+                if auth_like:
+                    self.state["status"] = "expired"
+                elif had_cloud:
+                    # 断网 / 超时 / 接口 5xx 不该把界面打回"未连接"：
+                    # 上次的云端数据仍然有效，继续用，只是标明"这一轮没取到"。
+                    # 以前无条件置 error，结果 60 分钟轮询直接停摆，只能手动重启。
+                    self.state["status"] = "connected"
+                    self.state["softFail"] = msg[:120]
+                else:
+                    self.state["status"] = "error"
                 self.state["lastError"] = msg[:120]
                 if not auth_like:
                     streak = int(self.state.get("failStreak") or 0) + 1
@@ -806,7 +817,9 @@ class AccountService:
         def loop():
             while not self._stop:
                 time.sleep(30)
-                if self.state["status"] != "connected":
+                # 门槛用"有没有云端数据"而不是"状态是不是 connected"：
+                # 一次网络失败会把状态改成 error，用状态判断就再也不重试了。
+                if self.state.get("cloud") is None:
                     continue
                 if self.interval_min <= 0:        # 0 = 仅手动，不做任何自动请求
                     continue

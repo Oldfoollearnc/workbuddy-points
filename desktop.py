@@ -26,6 +26,7 @@ import faulthandler
 import json
 import datetime as dt
 import os
+import re
 import sys
 import threading
 import time
@@ -159,6 +160,17 @@ class MONITORINFO(ctypes.Structure):
 
 def log(msg):
     logutil.log(LOG_PATH, msg)
+
+
+def _csv_cell(v):
+    """CSV 单元格转义：Excel 会把 = + - @ 开头的值当公式执行（DDE / 外链）。
+
+    模型名、用途都来自服务端，不能当可信输入；前置单引号让它按文本显示。
+    """
+    s = "" if v is None else v
+    if isinstance(s, str) and s[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + s
+    return s
 
 
 def read_version():
@@ -990,8 +1002,8 @@ class Api:
                 w = csv.writer(f)
                 w.writerow(["时间", "模型", "用途", "积分"])
                 for r in rows:
-                    w.writerow([r.get("t") or "", r.get("model") or "",
-                                r.get("purpose") or "", r.get("credit") or 0])
+                    w.writerow([_csv_cell(r.get("t")), _csv_cell(r.get("model")),
+                                _csv_cell(r.get("purpose")), r.get("credit") or 0])
             log("export_ledger_csv -> %s (%d 行)" % (path, len(rows)))
             return {"ok": True, "path": path, "count": len(rows)}
         except Exception as e:
@@ -1006,23 +1018,36 @@ class Api:
         "表里和屏幕上对不上"。这里只负责落盘，并把行数卡在 5 万以内。
         """
         try:
+            # 先把体积卡住再解析：一个超长 IPC 字符串足以把主进程内存顶上去
+            if len(head_json or "") > 64 * 1024 or len(rows_json or "") > 4 * 1024 * 1024:
+                return {"ok": False, "error": "导出内容过大，请缩小筛选范围"}
             head = json.loads(head_json or "[]")
             rows = json.loads(rows_json or "[]")
             if not head or not rows:
                 return {"ok": False, "error": "没有可导出的内容"}
+
+            # Excel 会把 = + - @ 开头的单元格当公式执行（DDE / 外链）。
+            # 模型名、用途都来自服务端，不能信，统一前置单引号当文本。
+            cell = _csv_cell
+
             win = self._desk.main or self._desk.popup
-            fn = "%s-%s.csv" % (str(name or "汇总")[:24], dt.datetime.now().strftime("%Y%m%d-%H%M"))
+            safe_name = re.sub(r'[\\/:*?"<>|\r\n]+', "", str(name or "汇总"))[:24] or "汇总"
+            fn = "%s-%s.csv" % (safe_name, dt.datetime.now().strftime("%Y%m%d-%H%M"))
             picked = win.create_file_dialog(webview.SAVE_DIALOG, save_filename=fn)
             if not picked:
                 return {"ok": False, "cancelled": True}
             path = picked[0] if isinstance(picked, (list, tuple)) else picked
             with open(path, "w", encoding="utf-8-sig", newline="") as f:
                 w = csv.writer(f)
-                w.writerow([str(x) for x in head][:20])
+                w.writerow([cell(x) for x in head][:20])
+                n = 0
                 for r in rows[:50000]:
-                    w.writerow(["" if v is None else v for v in list(r)[:20]])
-            log("export_rows_csv -> %s (%d 行)" % (path, len(rows)))
-            return {"ok": True, "path": path, "count": len(rows)}
+                    if not isinstance(r, (list, tuple)):
+                        continue          # dict 会被写成键名，宁可跳过也不产一张错表
+                    w.writerow([cell(v) for v in list(r)[:20]])
+                    n += 1
+            log("export_rows_csv -> %s (%d 行)" % (path, n))
+            return {"ok": True, "path": path, "count": n}
         except Exception as e:
             log(f"export_rows_csv error: {e}")
             return {"ok": False, "error": str(e)[:160]}
