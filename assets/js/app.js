@@ -627,12 +627,25 @@
   let localTimer = null;
   /* ---------------- 总览提示条 ---------------- */
 
+  /** 两段都隐藏时整条状态栏也收起来，别留一条空壳 */
+  function syncStatusbar() {
+    const bar = $('#statusbar');
+    if (!bar) return;
+    const data = $('#sbData');
+    const ck = $('#sbCheckin');
+    const dot = $('#sbDot');
+    const showData = !!(data && !data.hidden);
+    const showCk = !!(ck && !ck.hidden);
+    if (dot) dot.hidden = !(showData && showCk);
+    bar.hidden = !showData && !showCk;
+  }
+
   /** 顶部那条明确提示：说清"哪个数字是实时的、哪个有延迟、当前读的是哪份数据"。 */
   function renderNotice(stat) {
     const el = $('#noticeText');
     if (!el) return;
-    const box = $('#dataNotice');
-    if (box) box.hidden = prefs.notice === false;   // 设置里可关掉，把首屏留给数字
+    const seg = $('#sbData');
+    if (seg) seg.hidden = prefs.notice === false;   // 设置里可关掉，把首屏留给数字
     const connected = ACCOUNT && ACCOUNT.status === 'connected';
     const sync = ACCOUNT && ACCOUNT.lastSync ? F.relTime(ACCOUNT.lastSync) : '';
     const iv = ACCOUNT && ACCOUNT.interval;
@@ -677,6 +690,7 @@
       srcBtn.dataset.act = needLogin ? 'login' : 'source';
       srcBtn.title = needLogin ? '打开扫码窗口，连上后自动显示余额与周期' : '去设置里查看数据目录';
     }
+    syncStatusbar();
   }
 
   /* ---------------- 每日签到结果条 ---------------- */
@@ -737,11 +751,13 @@
   }
 
   function renderCheckin() {
-    const box = $('#checkinNotice');
-    if (!box) return;
-    // 开关关了、或今天点过「我知道了」—— 都不占位置
+    const seg = $('#sbCheckin');
+    if (!seg) return;
+    const bar = $('#statusbar');
+    // 开关关了、或今天点过「我知道了」—— 签到那段不占位置
     if (!prefs.checkinAuto || prefs.checkinDismissed === todayKey()) {
-      box.hidden = true;
+      seg.hidden = true;
+      syncStatusbar();
       return;
     }
 
@@ -756,19 +772,22 @@
     // 今天的结论还没出来（启动阶段要等账号同步把页面导好）：先站个位，
     // 直接把昨天那条结果摆上去会让人误以为是今天的。
     if (!isToday || running) {
-      box.hidden = false;
-      box.classList.remove('is-ok', 'is-bad');
+      seg.hidden = false;
+      if (bar) bar.classList.remove('is-ok', 'is-bad');
       setCheckinIcon('i-clock');
       if (txt) txt.innerHTML = running ? '正在签到并看猫猫…' : '正在准备签到…';
       if (retry) retry.hidden = true;
+      syncStatusbar();
       return;
     }
 
     const failed = r.ok === false;
     const gotDaily = !!(r.ok && (r.checkin || {}).new);
-    box.hidden = false;
-    box.classList.toggle('is-ok', gotDaily);
-    box.classList.toggle('is-bad', failed);
+    seg.hidden = false;
+    if (bar) {
+      bar.classList.toggle('is-ok', gotDaily);
+      bar.classList.toggle('is-bad', failed);
+    }
     setCheckinIcon(failed ? 'i-info' : 'i-check');
     if (txt) txt.innerHTML = buildCheckinText(r);
     if (retry) {
@@ -778,6 +797,7 @@
       retry.textContent = needLogin ? '连接账号' : '重试';
       retry.dataset.act = needLogin ? 'login' : 'run';
     }
+    syncStatusbar();
   }
 
   async function loadCheckin() {
@@ -1370,17 +1390,8 @@
       C.sparkline(node, { values: sparks[node.dataset.spark] || [] });
     });
 
-    const strip = $('#insightStrip');
-    if (strip) {
-      const topTask = (stat.models || [])[0] || D.tasks[0];
-      strip.innerHTML = `
-        <span class="badge"><svg class="i"><use href="#i-spark"/></svg></span>
-        <span class="txt">今日已消耗 <b>${F.credit(stat.consumed)} 分</b> · ${F.fmt(stat.requests)} ${stat.cloud ? '笔计费' : '次调用'} · 峰值 <b>${F.pad(stat.peakHour || 0)}:00</b>${topTask ? ` · 主要来自 <b>${esc(topTask.name)}</b>` : ''}${source === 'demo' ? ' · <b>演示数据</b>' : ''}</span>
-        <button class="link" id="goAnalytics">查看分析 →</button>`;
-      const link = $('#goAnalytics');
-      if (link) link.addEventListener('click', () => go('analytics'));
-    }
-
+    // 洞察横条已删：同样的信息（今日消耗 / 峰值 / 主要模型）在 KPI 与构成卡里都有，
+    // 再挂一条只会让首屏连着两条横幅。
     setText('#hourlyPeak', stat.peakPoints ? `峰值 ${F.pad(stat.peakHour)}:00 · ${F.credit(stat.peakPoints)} 分` : '今日暂无消耗');
     setHTML('#footReq', F.fmt(stat.requests));
     setHTML('#footAvg', (stat.avgPerRequest || 0).toFixed(2));

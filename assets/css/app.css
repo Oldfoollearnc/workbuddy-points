@@ -958,7 +958,16 @@ body.is-dragging .topbar { cursor: default; }
 .win-btn--close:active { background: #c50f1f; color: #fff; }
 
 /* 内容区顶部内边距收窄：配合 54px 顶栏，整块内容整体上移 */
-.views { flex: 1 1 auto; overflow-y: auto; overflow-x: hidden; padding: 12px 24px 26px; scroll-behavior: smooth; }
+.views {
+  flex: 1 1 auto;
+  overflow-y: auto; overflow-x: hidden;
+  padding: 12px 24px 26px;
+  scroll-behavior: smooth;
+  /* 一层极淡的蓝光晕：让内容区不是一块死白，滚动时也不跟着动 */
+  background:
+    radial-gradient(1100px 380px at 18% -10%, var(--glow-1), transparent 62%),
+    radial-gradient(900px 340px at 92% -14%, var(--glow-2), transparent 60%);
+}
 
 .view { display: none; }
 .view.is-active { display: block; animation: viewIn 300ms var(--ease-out) both; }
@@ -990,7 +999,7 @@ body.is-dragging .topbar { cursor: default; }
 .card:hover { border-color: var(--border-2); box-shadow: var(--shadow-2); transform: translateY(-2px); }
 
 .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.card-head h2 { font-size: 13.5px; font-weight: 600; letter-spacing: .005em; }
+.card-head h2 { font-size: 14.5px; font-weight: 650; letter-spacing: -.006em; }
 .card-head p { font-size: 11px; color: var(--text-3); margin-top: 2px; }
 .card-tools { display: flex; align-items: center; gap: 6px; flex: none; }
 
@@ -2088,6 +2097,43 @@ body.is-loading .boot-mask { display: flex; }
 .acct-pop-note { margin: 10px 0 0; font-size: 9.5px; color: var(--text-3); line-height: 1.55; }
 
 /* ===================== 总览提示条 ===================== */
+
+/* ===================== 状态栏（数据来源 + 签到合成一条） ===================== */
+
+.statusbar {
+  display: flex; align-items: center; gap: 10px;
+  min-height: 32px;
+  padding: 5px 10px 5px 12px;
+  margin-bottom: 14px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 11px;
+  color: var(--text-3);
+}
+.statusbar .sb-ico { flex: none; display: grid; place-items: center; color: var(--text-3); }
+.statusbar .sb-ico .i { width: 13px; height: 13px; }
+.statusbar .sb-body {
+  flex: 1; min-width: 0;
+  display: flex; align-items: baseline; gap: 6px; overflow: hidden;
+}
+.statusbar .sb-seg { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.statusbar .sb-seg b { color: var(--text-2); font-weight: 600; }
+.statusbar .sb-dot { flex: none; opacity: .55; }
+.statusbar.is-ok { border-color: color-mix(in srgb, var(--good) 24%, var(--border)); background: color-mix(in srgb, var(--good) 4%, var(--surface)); }
+.statusbar.is-bad { border-color: color-mix(in srgb, var(--bad) 26%, var(--border)); background: color-mix(in srgb, var(--bad) 4%, var(--surface)); }
+.statusbar.is-bad .sb-ico, .statusbar.is-bad .sb-checkin { color: var(--bad); }
+.statusbar .sb-link {
+  flex: none; border: 0; background: none; padding: 0 2px;
+  color: var(--brand); font-size: 11px; cursor: pointer; font-family: inherit;
+}
+.statusbar .sb-link:hover { text-decoration: underline; }
+.statusbar .sb-x {
+  flex: none; width: 18px; height: 18px;
+  border: 0; border-radius: 4px; background: none;
+  color: var(--text-3); font-size: 14px; line-height: 1; cursor: pointer;
+}
+.statusbar .sb-x:hover { background: var(--surface-3); color: var(--text-1); }
 
 .notice {
   display: flex;

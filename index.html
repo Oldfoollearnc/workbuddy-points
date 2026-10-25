@@ -267,22 +267,18 @@
 
       <!-- ---------- 总览 ---------- -->
       <section class="view is-active" data-view="overview">
-        <!-- 数据来源与延迟说明：放在数字旁边，不放顶栏 -->
-        <div class="notice" id="dataNotice">
-          <span class="notice-icon"><svg class="i"><use href="#i-info"/></svg></span>
-          <p class="notice-text" id="noticeText">正在读取数据…</p>
-          <button class="notice-link" id="noticeSource">数据源</button>
-          <button class="notice-close" id="noticeClose" title="不再显示（可在设置里重新打开）" aria-label="不再显示">
-            <svg class="i"><use href="#i-close"/></svg>
-          </button>
-        </div>
-
-        <!-- 每日签到结果：启动时自动签到 + 派猫，结论就摆在这条里，可「我知道了」收起 -->
-        <div class="notice notice-checkin" id="checkinNotice" hidden>
-          <span class="notice-icon" id="checkinIcon"><svg class="i"><use href="#i-check"/></svg></span>
-          <p class="notice-text" id="checkinText"></p>
-          <button class="notice-link" id="checkinRetry" hidden>重试</button>
-          <button class="notice-link" id="checkinOk">我知道了</button>
+        <!-- 一条状态栏装下「数据来源 + 今日签到/猫猫」：原来两条横幅白白吃掉两行高度 -->
+        <div class="statusbar" id="statusbar">
+          <span class="sb-ico" id="checkinIcon"><svg class="i"><use href="#i-info"/></svg></span>
+          <div class="sb-body">
+            <span class="sb-seg" id="sbData"><span id="noticeText">正在读取数据…</span></span>
+            <span class="sb-dot" id="sbDot" hidden>·</span>
+            <span class="sb-seg sb-checkin" id="sbCheckin" hidden><span id="checkinText"></span></span>
+          </div>
+          <button class="sb-link" id="checkinRetry" hidden>重试</button>
+          <button class="sb-link" id="noticeSource">数据源</button>
+          <button class="sb-link" id="checkinOk">我知道了</button>
+          <button class="sb-x" id="noticeClose" title="不再显示数据说明" aria-label="不再显示">×</button>
         </div>
 
         <!-- 未连接账号时的首屏引导：与其摆四张 0，不如给一个明确动作 -->
@@ -339,8 +335,6 @@
             <div class="kpi-spark" data-spark="todayToken"></div>
           </article>
         </div>
-
-        <div class="insight-strip" id="insightStrip"></div>
 
         <div class="grid">
           <article class="card chart-card span-8" style="--i:0">
