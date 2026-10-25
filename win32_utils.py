@@ -35,9 +35,18 @@ KEEP_VISIBLE_X = 160     # 水平方向至少保留这么宽在屏幕内，避�
 KEEP_VISIBLE_Y = 48      # 垂直方向至少保留标题栏高度
 
 GWL_STYLE = -16
+GWL_WNDPROC = -4
 WS_THICKFRAME = 0x00040000
 WS_MAXIMIZEBOX = 0x00010000
 WS_CAPTION = 0x00C00000
+WS_SYSMENU = 0x00080000
+WM_NCCALCSIZE = 0x0083
+
+LRESULT = ctypes.c_ssize_t
+WNDPROC = ctypes.WINFUNCTYPE(LRESULT, wintypes.HWND, ctypes.c_uint,
+                             wintypes.WPARAM, wintypes.LPARAM)
+_SNAP_PROC = None
+_SNAP_OLD = {}
 
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
@@ -237,7 +246,66 @@ def strip_nonclient(hwnd):
         _log(f"strip_nonclient error: {e}")
 
 
+def enable_snap_support(hwnd):
+    """让无边框窗口重新获得 Windows 贴边布局（拖边分屏 / Win+方向键 / 双击最大化）。
+
+    为什么必须两件事一起做：
+      只加 WS_THICKFRAME，系统会画一圈非客户区（深色主题下就是用户看到的「顶部黑边」），
+      而且拖到边缘仍然不吸附 —— 窗口类没处理 WM_NCCALCSIZE，系统仍认为它有非客户区。
+      所以这里同时子类化窗口过程，把 WM_NCCALCSIZE 的客户区压成整个窗口：
+      样式上它是标准可缩放窗口，视觉上仍然没有标题栏。
+    失败返回 False，窗口保持原来的纯客户区行为，不影响启动。
+    """
+    global _SNAP_PROC
+    try:
+        if os.environ.get("WB_NO_SNAP"):    # 出问题时的回退开关：置 1 即恢复纯客户区
+            return False
+        if hwnd in _SNAP_OLD:
+            return True
+        if _SNAP_PROC is None:
+            _SNAP_PROC = WNDPROC(_snap_wndproc)
+        user32.SetWindowLongPtrW.restype = ctypes.c_void_p
+        user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+        user32.CallWindowProcW.restype = LRESULT
+        user32.CallWindowProcW.argtypes = [ctypes.c_void_p, wintypes.HWND, ctypes.c_uint,
+                                           wintypes.WPARAM, wintypes.LPARAM]
+
+        style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+        want = (style | WS_THICKFRAME | WS_CAPTION | WS_MAXIMIZEBOX) & ~WS_SYSMENU
+        if style != want:
+            user32.SetWindowLongW(hwnd, GWL_STYLE, want)
+        old = user32.SetWindowLongPtrW(hwnd, GWL_WNDPROC, ctypes.cast(_SNAP_PROC, ctypes.c_void_p))
+        if not old:
+            return False
+        _SNAP_OLD[hwnd] = old
+        user32.SetWindowPos(hwnd, None, 0, 0, 0, 0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)
+        round_corners(hwnd)      # 去掉标题栏后仍是直角，Win11 用 DWM 补回圆角
+        _log("snap support on: style %s" % hex(want))
+        return True
+    except Exception as e:
+        _log("enable_snap_support error: %s" % e)
+        return False
+
+
+def _snap_wndproc(hwnd, msg, wparam, lparam):
+    """窗口过程：只拦 WM_NCCALCSIZE，其余原样转回原过程。"""
+    try:
+        if msg == WM_NCCALCSIZE and wparam:
+            return 0
+    except Exception:
+        pass
+    old = _SNAP_OLD.get(hwnd)
+    try:
+        if old:
+            return user32.CallWindowProcW(old, hwnd, msg, wparam, lparam)
+        return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+    except Exception:
+        return 0
+
+
 # ---------------- 单实例 ----------------
+
 
 def single_instance():
     """同一时刻只允许一个实例，避免两个进程争用 WebView2 用户数据目录。"""

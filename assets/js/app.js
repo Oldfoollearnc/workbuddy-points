@@ -1469,16 +1469,18 @@
             ? `额度 ${F.credit(budget)} · ${over > 0 ? '超 ' + F.credit(over) : '剩 ' + F.credit(budget - used)}`
             : '额度为 0';
 
-    const gaugeEl = $('[data-chart="gauge"]');
-    if (gaugeEl) {
-      gaugeEl.__draw = () => C.gauge(gaugeEl, {
-        value: configured ? pct : 0,
-        countTo: configured ? rawPct : 0,
-        tone: configured ? tone : 'ok',
-        label: configured ? `${lb}已用` : '未连接云端',
-        sub
-      });
-      gaugeEl.__draw();
+    // 额度带：百分比 + 横向进度条。圆盘太高，夹在两张高卡之间会显得节奏断裂
+    const pctEl = $('#quotaPct');
+    if (pctEl) {
+      pctEl.textContent = configured ? `${(rawPct * 100).toFixed(rawPct >= 1 ? 0 : 1)}%` : '—';
+      const box = pctEl.parentElement;
+      if (box) box.className = 'qs-pct' + (tone === 'over' ? ' is-over' : tone === 'warn' ? ' is-warn' : '');
+    }
+    setText('#quotaPctLabel', configured ? `${lb}已用` : '未连接云端');
+    const barEl = $('#quotaBar');
+    if (barEl) {
+      barEl.style.width = (configured ? pct * 100 : 0).toFixed(1) + '%';
+      barEl.className = tone === 'over' ? 'is-over' : tone === 'warn' ? 'is-warn' : '';
     }
 
     // 三项统计：固定口径，按数值从小到大排序（小的在前）
@@ -1487,7 +1489,7 @@
       { id: 'quotaLeft', label: '周期剩余', value: al.available },
       { id: 'quotaDay', label: '每日可用', value: al.perDay, warn: true }
     ].sort((a, b) => (a.value || 0) - (b.value || 0));
-    const statsBox = $('.quota-stats');
+    const statsBox = $('#quotaStats');
     if (statsBox) {
       statsBox.innerHTML = stats.map(s =>
         `<div><span>${s.label}</span><b id="${s.id}"${s.warn ? ' class="warn"' : ''}>${configured ? F.credit(s.value) : '—'}</b></div>`

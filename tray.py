@@ -52,7 +52,7 @@ MF_STRING, MF_SEPARATOR = 0, 0x800
 TPM_RETURNCMD, TPM_RIGHTBUTTON, TPM_BOTTOMALIGN = 0x100, 0x2, 0x20
 
 TRANSPARENT_BK = 1
-DT_SINGLELINE, DT_VCENTER, DT_LEFT = 0x20, 0x4, 0x0
+DT_SINGLELINE, DT_VCENTER, DT_LEFT, DT_CENTER = 0x20, 0x4, 0x0, 0x1
 NULL_BRUSH, NULL_PEN = 5, 8
 CS_VREDRAW, CS_HREDRAW, CS_DROPSHADOW = 0x0001, 0x0002, 0x00020000
 WS_POPUP = 0x80000000
@@ -461,14 +461,11 @@ class Tray:
         except Exception:
             auto_on = False
         self._menu_items = [
-            (ID_OPEN_POPUP, "打开快捷面板", "#2563EB"),
-            (ID_OPEN_MAIN, "展开完整主界面", "#06B6D4"),
-            (ID_REFRESH, "刷新数据", "#10B981"),
-            (ID_SYNC, "立即同步云端", "#7C3AED"),
-            (ID_SETTINGS, "设置", "#0EA5E9"),
-            (ID_UPDATE, "检查更新", "#F59E0B"),
-            (0, None, None),
+            # 只留真正会用到的四个：自启 / 更新 / 设置 / 退出。
+            # 打开面板、刷新、同步都能在界面里一步点到，塞进这里只是噪音。
             (ID_AUTOSTART, ("✓ 开机自启" if auto_on else "开机自启"), "#64748B"),
+            (ID_UPDATE, "检查更新", "#F59E0B"),
+            (ID_SETTINGS, "设置", "#0EA5E9"),
             (0, None, None),
             (ID_EXIT, "退出", "#DC2626"),
         ]
@@ -607,9 +604,10 @@ class Tray:
                 else:
                     color = pal["text"]
                 gdi32.SetTextColor(hdc, _rgb(color))
-                tr = RECT(18, y0, w - 12, y1)
+                # 文字整行居中：菜单本来就不宽，左对齐会显得左边重、右边空
+                tr = RECT(0, y0, w, y1)
                 user32.DrawTextW(hdc, label, -1, ctypes.byref(tr),
-                                 DT_SINGLELINE | DT_VCENTER | DT_LEFT)
+                                 DT_SINGLELINE | DT_VCENTER | DT_CENTER)
             if old_font:
                 gdi32.SelectObject(hdc, old_font)
         finally:
@@ -620,14 +618,9 @@ class Tray:
         menu = user32.CreatePopupMenu()
         if not menu:
             return
-        user32.AppendMenuW(menu, MF_STRING, ID_OPEN_POPUP, "打开快捷面板")
-        user32.AppendMenuW(menu, MF_STRING, ID_OPEN_MAIN, "展开完整主界面")
-        user32.AppendMenuW(menu, MF_STRING, ID_REFRESH, "刷新数据")
-        user32.AppendMenuW(menu, MF_STRING, ID_SYNC, "立即同步云端")
-        user32.AppendMenuW(menu, MF_STRING, ID_SETTINGS, "设置")
-        user32.AppendMenuW(menu, MF_STRING, ID_UPDATE, "检查更新")
-        user32.AppendMenuW(menu, MF_STRING | MF_SEPARATOR, 0, None)
         user32.AppendMenuW(menu, MF_STRING, ID_AUTOSTART, "开机自启（切换）")
+        user32.AppendMenuW(menu, MF_STRING, ID_UPDATE, "检查更新")
+        user32.AppendMenuW(menu, MF_STRING, ID_SETTINGS, "设置")
         user32.AppendMenuW(menu, MF_SEPARATOR, 0, None)
         user32.AppendMenuW(menu, MF_STRING, ID_EXIT, "退出")
         user32.SetMenuDefaultItem(menu, ID_OPEN_POPUP, 0)

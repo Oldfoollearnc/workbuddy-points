@@ -54,6 +54,7 @@ from win32_utils import (      # noqa: E402  Win32 底层工具（拆分自本�
     RECT, POINT, MONITORINFO,
     dpi_scale, work_area, virtual_screen, clamp_main_pos,
     set_app_id, find_hwnd, on_taskbar, round_corners, strip_nonclient,
+    enable_snap_support,
     single_instance, signal_show,
     SW_MINIMIZE, SW_MAXIMIZE, SW_RESTORE,
     SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE, SWP_FRAMECHANGED,
@@ -116,6 +117,7 @@ LR_LOADFROMFILE = 0x0010
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
 HWND_TOPMOST = -1
+HWND_NOTOPMOST = -2
 SWP_SHOWWINDOW = 0x0040
 SWP_NOZORDER = 0x0004
 SWP_NOACTIVATE = 0x0010
@@ -295,6 +297,8 @@ class Desktop:
         main_h = int(min(MAIN_H, avail_h - 60))
         main_x = int((avail_w - main_w) / 2)
         main_y = int(max(20, (avail_h - main_h) / 2))
+        # 目标客户区尺寸：加回系统边框后要按它补回来，否则内容会被吃掉 16×39
+        self.main_size = (main_w, main_h)
 
         self.pop_x = int(avail_w - pw - MARGIN)
         self.pop_y = int(avail_h - ph - MARGIN)
@@ -511,6 +515,27 @@ class Desktop:
             log("notify error: %s" % e)
         return "none"
 
+    def _pin_temporarily(self, hwnd, seconds=4.0):
+        """临时置顶：窗口刚出来时压住其它程序，几秒后自动放开。
+
+        不做成常驻置顶 —— 那会挡住用户真正在用的窗口；4 秒足够看到界面出来。
+        """
+        try:
+            user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+        except Exception:
+            return
+
+        def _unpin():
+            time.sleep(seconds)
+            try:
+                user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+                                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+            except Exception:
+                pass
+
+        threading.Thread(target=_unpin, daemon=True).start()
+
     def show_main(self):
         # 小窗让位（同时把小窗状态簿记成"已收起"）
         self.hide_popup()
@@ -525,7 +550,16 @@ class Desktop:
         if hwnd:
             user32.ShowWindow(hwnd, 5)
             if not getattr(self, "resize_frame_on", False):
-                strip_nonclient(hwnd)
+                # 恢复 Windows 贴边布局：拖到屏幕边缘可以分屏，Win+方向键也生效。
+                # 内部会顺带压平非客户区，所以不再需要 strip_nonclient。
+                if enable_snap_support(hwnd):
+                    # 加回 WS_THICKFRAME 后客户区会被边框吃掉一圈，按创建时的目标尺寸补回来
+                    size = getattr(self, "main_size", None)
+                    if size:
+                        user32.SetWindowPos(hwnd, None, 0, 0, size[0], size[1],
+                                            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)
+                else:
+                    strip_nonclient(hwnd)
                 self.resize_frame_on = True
             self._ensure_on_screen(hwnd)
             if not was_visible:
@@ -538,6 +572,8 @@ class Desktop:
                 pass
             user32.BringWindowToTop(hwnd)
             user32.SetForegroundWindow(hwnd)
+            # 启动/展开时先置顶几秒：刚打开就被别的窗口盖住，看起来像"没打开"
+            self._pin_temporarily(hwnd)
             self._safe_js(self.main,
                           "window.App && (App.beforeShow(), App.playEnter('main'))")
         threading.Timer(0.2, lambda: self._safe_js(self.main, "App.refreshLayout()")).start()
@@ -636,23 +672,29 @@ class Desktop:
             return {"ok": False}
 
     def win_drag_start(self):
-        """开始拖动主窗：原生循环（GetCursorPos + SetWindowPos），立刻返回。
+        """开始拖动主窗：交给系统模拟「按住标题栏拖」。
 
-        为什么不在前端算位移（旧实现）：
-        1. 光标一旦离开窗口矩形，WebView2 就不再派发 mousemove，窗口停在原地；
-           光标再靠近时按"累计位移"补一次，窗口会瞬移 —— 表现就是"鼠标一靠近窗口，
-           窗口反而跑到后面/跑不见了"，严重时整窗移出屏幕，只能重启。
-        2. 前端 screenX 是 CSS 像素，SetWindowPos 是 Win32 坐标，DPI 缩放不一致时
-           窗口会比鼠标跑得快，越拖越偏。
-        原生循环里两者在同一坐标空间，且窗口 1:1 跟随光标，不会出现上述问题。
+        为什么不再自己跑 GetCursorPos 循环：
+        自绘拖动拿不到 Windows 的贴边布局 —— 拖到屏幕边缘分屏、Win+方向键、
+        双击标题栏最大化全都不会发生。改成 ReleaseCapture + WM_NCLBUTTONDOWN(HTCAPTION)
+        后，系统就按"拖标题栏"处理，Snap 那一套自然回来。
+        SendMessage 会阻塞到松手，所以丢到后台线程，前端立刻返回。
         """
         hwnd = find_hwnd(MAIN_TITLE)
         if not hwnd:
             return {"ok": False}
-        if getattr(self, "_dragging", False):
-            return {"ok": True, "busy": True}
-        self._dragging = True
-        threading.Thread(target=self._drag_loop, args=(hwnd,), daemon=True).start()
+        try:
+            user32.ReleaseCapture()
+        except Exception:
+            pass
+
+        def _drag():
+            try:
+                user32.SendMessageW(hwnd, 0x00A1, 2, 0)     # WM_NCLBUTTONDOWN / HTCAPTION
+            except Exception as e:
+                log(f"native drag error: {e}")
+
+        threading.Thread(target=_drag, daemon=True).start()
         return {"ok": True}
 
     def _drag_loop(self, hwnd):
