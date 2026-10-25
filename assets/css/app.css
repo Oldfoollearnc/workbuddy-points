@@ -624,11 +624,6 @@ body.is-desktop[data-mode="popup"] .popup-card {
 .brand-text span { font-size: 9.5px; color: var(--text-3); letter-spacing: .04em; }
 
 .nav { position: relative; display: flex; flex-direction: column; gap: 3px; }
-.nav-label {
-  padding: 2px 10px 7px;
-  font-size: 9.5px; letter-spacing: .16em;
-  color: var(--text-3);
-}
 .nav-indicator {
   position: absolute;
   left: -14px; top: 0;
