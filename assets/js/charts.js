@@ -218,14 +218,9 @@
       const n = data.length;
       const bandW = iw / n;
       const barW = Math.min(cfg.maxBarW || 26, bandW * (cfg.barRatio || 0.56));
-      const gradId = 'gb' + (++uid);
-      const grad = el('linearGradient', { id: gradId, x1: 0, y1: 0, x2: 0, y2: 1 }, el('defs', null, svg));
-      el('stop', { offset: '0%', 'stop-color': token('--brand-light', '#60a5fa') }, grad);
-      el('stop', { offset: '100%', 'stop-color': token('--brand', '#2563eb') }, grad);
-      const nowGradId = 'gn' + (++uid);
-      const nowGrad = el('linearGradient', { id: nowGradId, x1: 0, y1: 0, x2: 0, y2: 1 }, el('defs', null, svg));
-      el('stop', { offset: '0%', 'stop-color': token('--c2', '#22d3ee') }, nowGrad);
-      el('stop', { offset: '100%', 'stop-color': token('--brand', '#2563eb') }, nowGrad);
+      // 纯色柱：渐变在灰色画布上显得发糊，纯色 + 圆角更利落
+      const barColor = toneColor(cfg.tone || 'c1');
+      const nowColor = toneColor('c2');
 
       // 网格 + 左轴
       const ticks = [];
@@ -233,7 +228,7 @@
       if (!minimal) ticks.forEach(v => {
         el('line', {
           x1: pad.l, x2: W - pad.r, y1: yOf(v), y2: yOf(v),
-          stroke: 'var(--grid)', 'stroke-width': 1, 'stroke-dasharray': v === 0 ? '0' : '3 4',
+          stroke: 'var(--grid)', 'stroke-width': 1,
           'shape-rendering': 'crispEdges'
         }, svg);
         txt(svg, pad.l - 8, yOf(v) + 3.5, shortNum(v), 'ax-label', 'end');
@@ -261,7 +256,7 @@
         } else {
           const v = d.value;
           const isNow = d.isNow;
-          const seg = el('path', { fill: isNow ? `url(#${nowGradId})` : `url(#${gradId})` }, g);
+          const seg = el('path', { fill: isNow ? nowColor : barColor }, g);
           segs.push({ node: seg, x, w: barW, base: 0, hh: (v / max) * ih, v });
         }
         bars.push(segs);
@@ -355,15 +350,12 @@
       const yBar = v => pad.t + ih - (v / barMax) * ih;
       const yLine = v => pad.t + ih - ((v - low) / (high - low)) * ih;
 
-      const gradId = 'gc' + (++uid);
-      const grad = el('linearGradient', { id: gradId, x1: 0, y1: 0, x2: 0, y2: 1 }, el('defs', null, svg));
-      el('stop', { offset: '0%', 'stop-color': token('--brand-light', '#60a5fa'), 'stop-opacity': .95 }, grad);
-      el('stop', { offset: '100%', 'stop-color': token('--brand', '#2563eb'), 'stop-opacity': .55 }, grad);
+      const barTone = toneColor('c1');
 
       for (let v = 0; v <= barMax + 1e-6; v += barStep) {
         el('line', {
           x1: pad.l, x2: W - pad.r, y1: yBar(v), y2: yBar(v),
-          stroke: 'var(--grid)', 'stroke-width': 1, 'stroke-dasharray': v === 0 ? '0' : '3 4'
+          stroke: 'var(--grid)', 'stroke-width': 1
         }, svg);
         txt(svg, pad.l - 8, yBar(v) + 3.5, shortNum(v), 'ax-label', 'end');
       }
@@ -378,7 +370,7 @@
 
       labels.forEach((lb, i) => {
         const x = pad.l + bandW * i + (bandW - barW) / 2;
-        const p = el('path', { fill: `url(#${gradId})`, 'fill-opacity': cfg.dimLast && i === n - 1 ? .45 : 1 }, svg);
+        const p = el('path', { fill: barTone, 'fill-opacity': cfg.dimLast && i === n - 1 ? .38 : 1 }, svg);
         paths.push({ node: p, x, hh: (bars[i] / barMax) * ih });
 
         const hit = el('rect', { x: pad.l + bandW * i, y: pad.t - 10, width: bandW, height: ih + 10, fill: 'transparent' }, svg);

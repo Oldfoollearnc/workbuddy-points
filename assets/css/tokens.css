@@ -1,80 +1,85 @@
 /* =========================================================
-   设计令牌 · 蓝白高级配色 + 曜蓝深色主题
-   所有颜色、阴影、圆角、缓动集中在此，供全局引用
+   设计令牌 · 中性灰底 + 单色强调（Linear / Vercel 取向）
+   改动要点：
+   - 底色从"蓝白"改为中性灰，卡片纯白，靠边框分层，不靠阴影
+   - 强调色只保留一个蓝，去掉渐变与发光
+   - 圆角整体收紧（16→12），视觉更利落
+   - 数字统一等宽字体
    ========================================================= */
 
 :root {
   color-scheme: light;
 
-  --font-sans: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, -apple-system, sans-serif;
-  --font-mono: "Cascadia Mono", "Consolas", "SFMono-Regular", ui-monospace, monospace;
+  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI",
+    "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", "JetBrains Mono", "Consolas", ui-monospace, monospace;
 
   /* 侧边栏宽度：顶栏左上角的分隔竖线必须落在同一条线上，两处共用这个值 */
-  --sidebar-w: 244px;
+  --sidebar-w: 232px;
 
-  /* 画布 */
-  --bg: #eef3fc;
-  --bg-soft: #f7faff;
-  --glow-1: rgba(37, 99, 235, .13);
-  --glow-2: rgba(6, 182, 212, .10);
+  /* 画布：中性灰，不带蓝调 */
+  --bg: #f6f6f7;
+  --bg-soft: #fafafa;
+  --glow-1: transparent;
+  --glow-2: transparent;
 
   /* 表面 */
   --surface: #ffffff;
-  --surface-2: #f6f9fe;
-  --surface-3: #eaf1fd;
-  --surface-glass: rgba(255, 255, 255, .94);
-  --surface-inverse: #0d1a2e;
+  --surface-2: #f4f4f5;
+  --surface-3: #ebebed;
+  --surface-glass: rgba(255, 255, 255, .86);
+  --surface-inverse: #18181b;
 
-  /* 描边 */
-  --border: rgba(17, 45, 94, .075);
-  --border-2: rgba(17, 45, 94, .14);
-  --border-focus: rgba(37, 99, 235, .55);
+  /* 描边：靠它分层，而不是阴影 */
+  --border: rgba(9, 9, 11, .08);
+  --border-2: rgba(9, 9, 11, .14);
+  --border-focus: rgba(47, 111, 237, .55);
 
   /* 文本 */
-  --text-1: #0c1a30;
-  --text-2: #4d5f7d;
-  --text-3: #8496b3;
+  --text-1: #09090b;
+  --text-2: #52525b;
+  --text-3: #8a8a93;
   --text-on-brand: #ffffff;
 
-  /* 品牌 */
-  --brand: #2563eb;
+  /* 品牌：只留一个蓝，不用渐变 */
+  --brand: #2f6fed;
   --brand-strong: #1d4ed8;
-  --brand-light: #60a5fa;
-  --brand-soft: rgba(37, 99, 235, .09);
-  --brand-softer: rgba(37, 99, 235, .05);
-  --brand-gradient: linear-gradient(135deg, #3b82f6 0%, #2563eb 55%, #1d4ed8 100%);
+  --brand-light: #6b9bf5;
+  --brand-soft: rgba(47, 111, 237, .08);
+  --brand-softer: rgba(47, 111, 237, .04);
+  --brand-gradient: linear-gradient(135deg, #2f6fed, #2f6fed);
 
-  /* 图表色板（明色） */
-  --c1: #2563eb;
-  --c2: #06b6d4;
-  --c3: #7c3aed;
-  --c4: #f59e0b;
-  --c5: #10b981;
-  --c6: #ec4899;
+  /* 图表色板（降饱和） */
+  --c1: #2f6fed;
+  --c2: #0ea5a5;
+  --c3: #7c5cfc;
+  --c4: #e8a33d;
+  --c5: #16a34a;
+  --c6: #e05299;
 
   /* 语义 */
-  --good: #0f9d68;
-  --good-soft: rgba(15, 157, 104, .10);
+  --good: #16a34a;
+  --good-soft: rgba(22, 163, 74, .10);
   --warn: #d97706;
-  --warn-soft: rgba(217, 119, 6, .11);
+  --warn-soft: rgba(217, 119, 6, .10);
   --bad: #dc2626;
-  --bad-soft: rgba(220, 38, 38, .09);
+  --bad-soft: rgba(220, 38, 38, .08);
 
-  /* 网格与轴线：再淡一档，让数据本身站出来（克制方向） */
-  --grid: rgba(17, 45, 94, .055);
-  --axis: rgba(17, 45, 94, .16);
+  /* 网格与轴线：几乎看不见，只留基线 */
+  --grid: rgba(9, 9, 11, .05);
+  --axis: rgba(9, 9, 11, .18);
 
-  /* 阴影：两层——一层贴边定形，一层大范围柔光，比单层更"厚" */
-  --shadow-1: 0 1px 1px rgba(12, 26, 48, .03), 0 10px 24px -18px rgba(12, 26, 48, .22);
-  --shadow-2: 0 14px 34px -14px rgba(12, 26, 48, .20), 0 3px 8px -2px rgba(12, 26, 48, .05);
-  --shadow-3: 0 32px 80px -28px rgba(12, 26, 48, .34), 0 8px 20px -8px rgba(12, 26, 48, .10);
-  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, .6);
+  /* 阴影：只做"贴纸"级，不靠它分层 */
+  --shadow-1: 0 1px 2px rgba(9, 9, 11, .04);
+  --shadow-2: 0 8px 24px -12px rgba(9, 9, 11, .16), 0 2px 6px -2px rgba(9, 9, 11, .06);
+  --shadow-3: 0 24px 64px -24px rgba(9, 9, 11, .28), 0 6px 16px -8px rgba(9, 9, 11, .10);
+  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, .7);
 
-  /* 圆角 */
-  --r-xl: 20px;
-  --r-lg: 18px;
-  --r-md: 12px;
-  --r-sm: 9px;
+  /* 圆角：整体收紧 */
+  --r-xl: 16px;
+  --r-lg: 12px;
+  --r-md: 10px;
+  --r-sm: 8px;
   --r-xs: 6px;
 
   /* 缓动与时长 */
@@ -86,67 +91,65 @@
   --dur-3: 340ms;
   --dur-4: 560ms;
 
-  --tooltip-bg: rgba(13, 26, 46, .95);
-  --tooltip-text: #f2f6ff;
+  --tooltip-bg: rgba(9, 9, 11, .94);
+  --tooltip-text: #fafafa;
 
-  /* 高光扫过（入场 / 刷新共用）：亮色主题用白，深色主题用极淡的蓝白 */
-  --sheen: rgba(255, 255, 255, .62);
+  --sheen: rgba(255, 255, 255, .6);
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --bg: #070c16;
-  --bg-soft: #0b1220;
-  --glow-1: rgba(37, 99, 235, .26);
-  --glow-2: rgba(6, 182, 212, .14);
+  --bg: #0a0a0b;
+  --bg-soft: #101012;
+  --glow-1: transparent;
+  --glow-2: transparent;
 
-  --surface: #101a2b;
-  --surface-2: #0d1625;
-  --surface-3: #17233a;
-  --surface-glass: rgba(16, 26, 43, .95);
-  --surface-inverse: #e9eef8;
+  --surface: #141416;
+  --surface-2: #1a1a1d;
+  --surface-3: #242428;
+  --surface-glass: rgba(20, 20, 22, .86);
+  --surface-inverse: #fafafa;
 
-  --border: rgba(255, 255, 255, .07);
+  --border: rgba(255, 255, 255, .08);
   --border-2: rgba(255, 255, 255, .14);
-  --border-focus: rgba(96, 165, 250, .65);
+  --border-focus: rgba(107, 155, 245, .6);
 
-  --text-1: #e9eef8;
-  --text-2: #a5b5cf;
-  --text-3: #6f819e;
-  --text-on-brand: #08111f;
+  --text-1: #fafafa;
+  --text-2: #a1a1aa;
+  --text-3: #6b6b74;
+  --text-on-brand: #ffffff;
 
-  --brand: #4f8dfd;
-  --brand-strong: #74a6ff;
-  --brand-light: #93c5fd;
-  --brand-soft: rgba(79, 141, 253, .15);
-  --brand-softer: rgba(79, 141, 253, .08);
-  --brand-gradient: linear-gradient(135deg, #5b95ff 0%, #3b7ff5 55%, #2c66dc 100%);
+  --brand: #5b8def;
+  --brand-strong: #7ba7f5;
+  --brand-light: #a8c4fa;
+  --brand-soft: rgba(91, 141, 239, .14);
+  --brand-softer: rgba(91, 141, 239, .07);
+  --brand-gradient: linear-gradient(135deg, #5b8def, #5b8def);
 
-  --c1: #4f8dfd;
-  --c2: #22d3ee;
+  --c1: #5b8def;
+  --c2: #2dd4bf;
   --c3: #a78bfa;
-  --c4: #fbbf24;
+  --c4: #f5b942;
   --c5: #34d399;
   --c6: #f472b6;
 
   --good: #34d399;
-  --good-soft: rgba(52, 211, 153, .13);
+  --good-soft: rgba(52, 211, 153, .12);
   --warn: #fbbf24;
-  --warn-soft: rgba(251, 191, 36, .14);
+  --warn-soft: rgba(251, 191, 36, .12);
   --bad: #f87171;
-  --bad-soft: rgba(248, 113, 113, .13);
+  --bad-soft: rgba(248, 113, 113, .12);
 
-  --grid: rgba(255, 255, 255, .05);
-  --axis: rgba(255, 255, 255, .16);
+  --grid: rgba(255, 255, 255, .055);
+  --axis: rgba(255, 255, 255, .18);
 
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, .28), 0 12px 28px -20px rgba(0, 0, 0, .55);
-  --shadow-2: 0 18px 40px -18px rgba(0, 0, 0, .70), 0 2px 8px -2px rgba(0, 0, 0, .40);
-  --shadow-3: 0 40px 90px -30px rgba(0, 0, 0, .85);
-  --shadow-inset: inset 0 1px 0 rgba(255, 255, 255, .045);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, .40);
+  --shadow-2: 0 10px 28px -14px rgba(0, 0, 0, .70), 0 2px 6px -2px rgba(0, 0, 0, .40);
+  --shadow-3: 0 30px 76px -28px rgba(0, 0, 0, .85);
 
-  --tooltip-bg: rgba(4, 9, 17, .96);
-  --tooltip-text: #eaf1ff;
+  --tooltip-bg: rgba(9, 9, 11, .96);
+  --tooltip-text: #fafafa;
 
-  --sheen: rgba(150, 190, 255, .16);
+  --sheen: rgba(255, 255, 255, .12);
 }

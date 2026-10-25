@@ -626,9 +626,10 @@ body.is-desktop[data-mode="popup"] .popup-card {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 14px 14px 12px;
+  padding: 14px 12px 12px;
   border-right: 1px solid var(--border);
-  background: linear-gradient(180deg, var(--surface-glass) 0%, var(--surface-2) 100%);
+  /* 与画布同色：侧栏不抢视觉，靠一条细线和内容区分开 */
+  background: var(--bg);
 }
 
 .brand { display: flex; align-items: center; gap: 10px; padding: 4px 6px 2px; }
@@ -675,16 +676,15 @@ body.is-desktop[data-mode="popup"] .popup-card {
 .nav-item:hover { background: var(--surface-3); color: var(--text-1); }
 .nav-item:hover .nav-ico { background: var(--surface); color: var(--text-1); }
 .nav-item.is-active {
-  color: var(--brand);
+  color: var(--text-1);
   font-weight: 600;
-  background: linear-gradient(90deg, var(--brand-soft) 0%, transparent 92%);
+  background: var(--brand-soft);
 }
 .nav-item.is-active .nav-ico {
   background: var(--brand);
   color: #fff;
-  box-shadow: 0 5px 12px -5px rgba(37, 99, 235, .7);
 }
-[data-theme="dark"] .nav-item.is-active .nav-ico { color: #08111f; }
+[data-theme="dark"] .nav-item.is-active .nav-ico { color: #0a0a0b; }
 
 /* 切到这一页时，左侧小图标先"弹"一下，停留期间极轻地呼吸（幅度很小，不抢注意力） */
 .nav-item.is-active .i {
@@ -877,13 +877,13 @@ body.is-desktop[data-mode="popup"] .popup-card {
 
 .topbar {
   flex: none;
-  height: 52px;
+  height: 48px;
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 0;                    /* 左内边距交给 .tb-brand，竖线才能精确落在侧栏边线上 */
   border-bottom: 1px solid var(--border);
-  background: var(--surface-glass);
+  background: var(--surface);
   -webkit-user-select: none;
   user-select: none;
 }
@@ -1062,10 +1062,11 @@ body.is-dragging .topbar { cursor: default; }
 .kpi-label { font-size: 11.5px; color: var(--text-3); letter-spacing: .01em; }
 .kpi-icon { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; }
 .kpi-icon .i { width: 14px; height: 14px; }
-.tint-brand { color: var(--brand); background: var(--brand-soft); }
-.tint-cyan { color: var(--c2); background: color-mix(in srgb, var(--c2) 12%, transparent); }
-.tint-green { color: var(--good); background: var(--good-soft); }
-.tint-violet { color: var(--c3); background: color-mix(in srgb, var(--c3) 12%, transparent); }
+/* 图标不再用彩色底：四个色块会让一排卡片看起来像四个分类标签 */
+.tint-brand, .tint-cyan, .tint-green, .tint-violet {
+  color: var(--text-3);
+  background: var(--surface-2);
+}
 
 .kpi-value { display: flex; align-items: baseline; gap: 4px; margin: 11px 0 6px; line-height: 1; }
 .kpi-value span { font-size: 29px; font-weight: 650; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
@@ -1073,7 +1074,7 @@ body.is-dragging .topbar { cursor: default; }
 .kpi-foot { display: flex; align-items: center; gap: 8px; font-size: 10.5px; }
 .kpi-foot .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kpi-foot b { color: var(--text-2); font-variant-numeric: tabular-nums; }
-.kpi-spark { height: 34px; margin: auto -16px 0; opacity: .95; }
+.kpi-spark { height: 34px; margin: auto -16px 0; opacity: .5; }
 
 /* ===================== 洞察条 ===================== */
 
@@ -2107,7 +2108,7 @@ body.is-loading .boot-mask { display: flex; }
   margin-bottom: 14px;
   border-radius: var(--r-md);
   border: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--surface);
   font-size: 11px;
   color: var(--text-3);
 }
