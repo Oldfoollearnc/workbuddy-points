@@ -298,74 +298,80 @@
           </div>
         </article>
 
-        <div class="kpi-grid">
-          <article class="card kpi" style="--i:0">
-            <div class="kpi-top">
-              <span class="kpi-label" id="kpi1Label">可用积分</span>
-              <span class="kpi-icon tint-brand"><svg class="i"><use href="#i-bolt"/></svg></span>
-            </div>
-            <div class="kpi-value"><span data-count="available">0</span><em>分</em></div>
-            <div class="kpi-foot"><span class="chip chip-brand" id="kpiAvailSub">—</span><span class="muted" id="kpiAvailNote">—</span></div>
-            <div class="kpi-spark" data-spark="available"></div>
-          </article>
+        <section class="verdict">
+          <div class="v-text">
+            <p class="v-line" id="verdictLine">正在读取今天的数据…</p>
+            <p class="v-sub" id="verdictSub"></p>
+          </div>
+          <div class="segmented" id="timeSeg" role="tablist" aria-label="时间范围">
+            <button data-range="7">7 天</button>
+            <button class="is-active" data-range="30">30 天</button>
+            <button data-range="month">本月</button>
+          </div>
+        </section>
 
-          <article class="card kpi" style="--i:1">
-            <div class="kpi-top">
-              <span class="kpi-label">今日消耗</span>
-              <span class="kpi-icon tint-cyan"><svg class="i"><use href="#i-chart"/></svg></span>
-            </div>
-            <div class="kpi-value"><span data-count="todayUsed">0</span><em>分</em></div>
-            <div class="kpi-foot"><span class="delta" id="kpiTodayDelta">—</span><span class="muted">较昨日</span></div>
-            <div class="kpi-spark" data-spark="todayUsed"></div>
-          </article>
-
-          <article class="card kpi" style="--i:2">
-            <div class="kpi-top">
-              <span class="kpi-label" id="kpi3Label">今日调用</span>
-              <span class="kpi-icon tint-green"><svg class="i"><use href="#i-refresh"/></svg></span>
-            </div>
-            <div class="kpi-value"><span data-count="todayReq">0</span><em>次</em></div>
-            <div class="kpi-foot"><span class="chip chip-good" id="kpiEarnedSub">平均每次</span><span class="muted"><b id="kpiNet">—</b><span id="kpiNetUnit"> 分/次</span></span></div>
-            <div class="kpi-spark" data-spark="todayReq"></div>
-          </article>
-
-          <article class="card kpi" style="--i:3">
-            <div class="kpi-top">
-              <span class="kpi-label" id="kpi4Label">今日 Token</span>
-              <span class="kpi-icon tint-violet"><svg class="i"><use href="#i-chart"/></svg></span>
-            </div>
-            <div class="kpi-value"><span data-count="todayToken" data-decimals="0">0</span><em>万</em></div>
-            <div class="kpi-foot"><span class="chip" id="kpiDaysSub">平均上下文</span><span class="muted" id="kpiAvg">—</span></div>
-            <div class="kpi-spark" data-spark="todayToken"></div>
-          </article>
-        </div>
-
-        <div class="insight-strip" id="insightStrip"></div>
+        <div class="diagnose" id="diagnose" hidden></div>
 
         <div class="grid">
           <article class="card chart-card span-8" style="--i:0">
             <header class="card-head">
               <div>
-                <h2>近 30 天消耗趋势</h2>
-                <p>柱：每日消耗 · 线：区间累计（右轴）</p>
+                <h2>消耗与余额</h2>
+                <p>柱：每日消耗 · 线：当日余额（右轴）</p>
               </div>
-              <div class="card-tools">
-                <div class="segmented" id="rangeSeg" role="tablist">
-                  <button class="is-active" data-range="30">30 天</button>
-                  <button data-range="14">14 天</button>
-                  <button data-range="7">7 天</button>
-                  <button data-range="month">本月</button>
-                </div>
-              </div>
+              <div class="card-tools"><span class="chip" id="trendSum">—</span></div>
             </header>
             <div class="chart chart-trend" data-chart="trend"></div>
+          </article>
+
+          <div class="kpi-col span-4">
+            <article class="card kpi-mini" style="--i:0">
+              <span class="km-label">可用积分</span>
+              <b class="km-value" data-count="available">0</b>
+              <span class="km-note" id="kpiAvailSub">—</span>
+            </article>
+            <article class="card kpi-mini" style="--i:1">
+              <span class="km-label">今日消耗</span>
+              <b class="km-value" data-count="todayUsed">0</b>
+              <span class="km-note"><span class="delta" id="kpiTodayDelta">—</span> 较昨日</span>
+            </article>
+            <article class="card kpi-mini" style="--i:2">
+              <span class="km-label">近 7 日均值</span>
+              <b class="km-value" id="kpiAvg7">—</b>
+              <span class="km-note">分 / 天</span>
+            </article>
+            <article class="card kpi-mini" style="--i:3">
+              <span class="km-label">预计用完</span>
+              <b class="km-value" id="kpiRunOut">—</b>
+              <span class="km-note" id="kpiRunOutSub">—</span>
+            </article>
+          </div>
+        </div>
+
+        <div class="grid">
+          <article class="card chart-card span-4" style="--i:1">
+            <header class="card-head">
+              <div>
+                <h2>今日时段分布</h2>
+                <p>按小时统计 · 虚线标记当前时段</p>
+              </div>
+              <div class="card-tools"><span class="chip chip-brand" id="hourlyPeak">—</span></div>
+            </header>
+            <div class="chart chart-hourly" data-chart="hourly"></div>
+            <footer class="card-foot">
+              <div class="foot-stats">
+                <span>请求 <b id="footReq">—</b></span>
+                <span>均价 <b id="footAvg">—</b></span>
+                <span>Token <b id="footToken">—</b></span>
+              </div>
+            </footer>
           </article>
 
           <article class="card chart-card span-4 comp-card" style="--i:2">
             <header class="card-head">
               <div>
                 <h2>今日消耗构成</h2>
-                <p id="compSub">按模型调用次数拆分 · 颜色对应下方模型</p>
+                <p id="compSub">按模型笔数拆分</p>
               </div>
               <div class="card-tools"><span class="chip" id="compCount">—</span></div>
             </header>
@@ -373,27 +379,6 @@
               <div class="comp-donut" id="compDonut" data-chart="comp"></div>
               <div class="comp-list" id="compList"></div>
             </div>
-          </article>
-        </div>
-
-        <div class="grid">
-          <article class="card chart-card span-8" style="--i:2">
-            <header class="card-head">
-              <div>
-                <h2>今日消耗时段分布</h2>
-                <p>按小时统计积分消耗，虚线标记当前时段 · 单位：分</p>
-              </div>
-              <div class="card-tools"><span class="chip chip-brand" id="hourlyPeak">—</span></div>
-            </header>
-            <div class="chart chart-hourly" data-chart="hourly"></div>
-            <footer class="card-foot">
-              <div class="foot-stats">
-                <span>今日请求 <b id="footReq">—</b> 次</span>
-                <span>平均 <b id="footAvg">—</b> 分/次</span>
-                <span>Token <b id="footToken">—</b></span>
-              </div>
-              <span class="muted">数据截至 <b id="footNow">18:27</b></span>
-            </footer>
           </article>
 
           <article class="card quota-card span-4" style="--i:3">
