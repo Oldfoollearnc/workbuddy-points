@@ -207,6 +207,10 @@
         <span class="nav-ico"><svg class="i"><use href="#i-list"/></svg></span>
         <span class="nav-txt">积分流水</span>
       </button>
+      <button class="nav-item" data-view="account">
+        <span class="nav-ico"><svg class="i"><use href="#i-bolt"/></svg></span>
+        <span class="nav-txt">账户</span>
+      </button>
       <button class="nav-item" data-view="settings">
         <span class="nav-ico"><svg class="i"><use href="#i-sliders"/></svg></span>
         <span class="nav-txt">设置</span>
@@ -506,6 +510,123 @@
         </article>
       </section>
 
+      <!-- ---------- 账户 ---------- -->
+      <section class="view" data-view="account">
+        <div class="set-page">
+
+          <!-- 账号 -->
+          <section class="set-group">
+            <header class="set-group-head">
+              <div><h2>账号</h2><p>扫码连接后自动同步余额、周期与账号级流水</p></div>
+            </header>
+            <div class="set-rows">
+              <div class="set-row">
+                <div class="set-label"><b>当前账号</b></div>
+                <b class="set-value" id="pgAccName">未连接</b>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>手机号</b><em>服务端返回时已是掩码</em></div>
+                <b class="set-value" id="pgAccPhone">—</b>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>上次同步</b></div>
+                <b class="set-value" id="pgAccSync">—</b>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>周期额度</b><em>已用 / 总额度</em></div>
+                <b class="set-value" id="pgAccQuota">—</b>
+              </div>
+            </div>
+          </section>
+
+          <!-- 数据源 -->
+          <section class="set-group">
+            <header class="set-group-head">
+              <div><h2>数据源</h2><p>本地记录只读解析；公司电脑可手动指定数据目录</p></div>
+            </header>
+            <div class="set-rows">
+              <div class="set-row set-row--stack">
+                <div class="set-label"><b>数据目录</b><em id="srcKind">—</em></div>
+                <div class="path-box">
+                  <code id="srcPath">—</code>
+                  <button class="btn btn-soft btn-sm" id="dbPick">选择目录</button>
+                  <button class="btn btn-ghost btn-sm" id="dbReset">重新检测</button>
+                </div>
+                <p class="set-note" id="dbNote">—</p>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>云端账号</b></div>
+                <b class="set-value" id="srcCloud">未连接</b>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>本地记录</b><em>JSONL 逐笔行数</em></div>
+                <b class="set-value" id="srcRecords">—</b>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>覆盖天数</b><em>只统计最近 N 天的本机记录；周期额度始终按完整记录计算</em></div>
+                <div class="set-inline">
+                  <b class="set-value" id="srcDays">—</b>
+                  <select id="optCoverDays" class="mini-select">
+                    <option value="7">7 天</option>
+                    <option value="14">14 天</option>
+                    <option value="30">30 天</option>
+                    <option value="90">90 天</option>
+                    <option value="180">180 天</option>
+                    <option value="365">365 天</option>
+                    <option value="0">全部</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 维护 -->
+          <section class="set-group">
+            <header class="set-group-head">
+              <div><h2>维护</h2><p>清理本机缓存与日志；会话记录、账号与今日结论都不会动</p></div>
+            </header>
+            <div class="set-rows">
+              <div class="set-row">
+                <div class="set-label"><b>解析缓存</b><em>读本机 JSONL 时的增量索引；删掉后立刻重建一次，可能慢一两秒</em></div>
+                <div class="set-inline">
+                  <b class="set-value" id="cacheSize">—</b>
+                  <button class="btn btn-ghost btn-sm" id="btnClearCache">清空</button>
+                </div>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>运行日志</b><em>排障用；清空只删历史记录，程序照常继续写</em></div>
+                <div class="set-inline">
+                  <b class="set-value" id="logSize">—</b>
+                  <button class="btn btn-ghost btn-sm" id="btnClearLogs">清空</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 关于 -->
+          <section class="set-group">
+            <header class="set-group-head">
+              <div><h2>关于</h2><p>WorkBuddy 积分观测台 · 本机只读 + 云端只读</p></div>
+            </header>
+            <div class="set-rows">
+              <div class="set-row">
+                <div class="set-label"><b>版本</b><em id="updateNote">每次提交自动递增，格式 v主.次.修订</em></div>
+                <b class="set-value mono" id="aboutVersion">v1.0.0</b>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>导出诊断信息</b><em>把日志尾部、版本、账号与数据源状态打成 zip；不含手机号与登录凭证</em></div>
+                <button class="btn btn-soft btn-sm" id="btnDiag"><svg class="i"><use href="#i-download"/></svg>导出</button>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>快捷面板</b><em>独立常驻面板，与窗口最小化不同</em></div>
+                <button class="btn btn-soft btn-sm" id="popPreviewBtn"><svg class="i"><use href="#i-expand"/></svg>预览小窗</button>
+              </div>
+            </div>
+          </section>
+
+        </div>
+      </section>
+
       <!-- ---------- 设置 ---------- -->
       <section class="view" data-view="settings">
         <div class="set-page">
@@ -648,91 +769,6 @@
               <div class="set-row">
                 <div class="set-label"><b>开机自动启动</b><em>开机后在托盘静默运行，签到与派猫照常；点托盘图标才出界面</em></div>
                 <label class="switch-wrap"><input type="checkbox" id="optAutostart"><i class="switch"></i></label>
-              </div>
-            </div>
-          </section>
-
-          <!-- 数据源 -->
-          <section class="set-group">
-            <header class="set-group-head">
-              <div><h2>数据源</h2><p>本地记录只读解析；公司电脑可手动指定数据目录</p></div>
-            </header>
-            <div class="set-rows">
-              <div class="set-row set-row--stack">
-                <div class="set-label"><b>数据目录</b><em id="srcKind">—</em></div>
-                <div class="path-box">
-                  <code id="srcPath">—</code>
-                  <button class="btn btn-soft btn-sm" id="dbPick">选择目录</button>
-                  <button class="btn btn-ghost btn-sm" id="dbReset">重新检测</button>
-                </div>
-                <p class="set-note" id="dbNote">—</p>
-              </div>
-              <div class="set-row">
-                <div class="set-label"><b>云端账号</b></div>
-                <b class="set-value" id="srcCloud">未连接</b>
-              </div>
-              <div class="set-row">
-                <div class="set-label"><b>本地记录</b><em>JSONL 逐笔行数</em></div>
-                <b class="set-value" id="srcRecords">—</b>
-              </div>
-              <div class="set-row">
-                <div class="set-label"><b>覆盖天数</b><em>只统计最近 N 天的本机记录；周期额度始终按完整记录计算</em></div>
-                <div class="set-inline">
-                  <b class="set-value" id="srcDays">—</b>
-                  <select id="optCoverDays" class="mini-select">
-                    <option value="7">7 天</option>
-                    <option value="14">14 天</option>
-                    <option value="30">30 天</option>
-                    <option value="90">90 天</option>
-                    <option value="180">180 天</option>
-                    <option value="365">365 天</option>
-                    <option value="0">全部</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- 维护 -->
-          <section class="set-group">
-            <header class="set-group-head">
-              <div><h2>维护</h2><p>清理本机缓存与日志；会话记录、账号与今日结论都不会动</p></div>
-            </header>
-            <div class="set-rows">
-              <div class="set-row">
-                <div class="set-label"><b>解析缓存</b><em>读本机 JSONL 时的增量索引；删掉后立刻重建一次，可能慢一两秒</em></div>
-                <div class="set-inline">
-                  <b class="set-value" id="cacheSize">—</b>
-                  <button class="btn btn-ghost btn-sm" id="btnClearCache">清空</button>
-                </div>
-              </div>
-              <div class="set-row">
-                <div class="set-label"><b>运行日志</b><em>排障用；清空只删历史记录，程序照常继续写</em></div>
-                <div class="set-inline">
-                  <b class="set-value" id="logSize">—</b>
-                  <button class="btn btn-ghost btn-sm" id="btnClearLogs">清空</button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- 关于 -->
-          <section class="set-group">
-            <header class="set-group-head">
-              <div><h2>关于</h2><p>WorkBuddy 积分观测台 · 本机只读 + 云端只读</p></div>
-            </header>
-            <div class="set-rows">
-              <div class="set-row">
-                <div class="set-label"><b>版本</b><em id="updateNote">每次提交自动递增，格式 v主.次.修订</em></div>
-                <b class="set-value mono" id="aboutVersion">v1.0.0</b>
-              </div>
-              <div class="set-row">
-                <div class="set-label"><b>导出诊断信息</b><em>把日志尾部、版本、账号与数据源状态打成 zip；不含手机号与登录凭证</em></div>
-                <button class="btn btn-soft btn-sm" id="btnDiag"><svg class="i"><use href="#i-download"/></svg>导出</button>
-              </div>
-              <div class="set-row">
-                <div class="set-label"><b>快捷面板</b><em>独立常驻面板，与窗口最小化不同</em></div>
-                <button class="btn btn-soft btn-sm" id="popPreviewBtn"><svg class="i"><use href="#i-expand"/></svg>预览小窗</button>
               </div>
             </div>
           </section>

@@ -24,7 +24,7 @@
 
   const HASH = location.hash.replace('#', '').split('&').filter(Boolean);
   const HASH_MODE = HASH.find(x => x === 'popup' || x === 'main') || null;
-  const HASH_VIEW = HASH.find(x => ['overview', 'analytics', 'ledger', 'settings'].includes(x)) || null;
+  const HASH_VIEW = HASH.find(x => ['overview', 'analytics', 'ledger', 'account', 'settings'].includes(x)) || null;
 
   // #tooltip 在标记里被包进了 .app-shell，而小窗模式下 .app-shell 是 display:none，
   // 结果小窗里所有图表都没有悬浮提示。统一把它挂到 body 上，两个窗口共用。
@@ -37,7 +37,8 @@
     overview: ['总览', 'WorkBuddy 账号的积分余额与今日使用情况'],
     analytics: ['用量分析', '消耗日历、模型用量与项目排行的真实拆解'],
     ledger: ['积分流水', 'WorkBuddy 逐次调用的真实积分扣减记录'],
-    settings: ['设置', '账号、主题、动效、刷新节奏与数据源']
+    account: ['账户', '账号、额度与数据源：这台机器读的是哪份数据'],
+    settings: ['设置', '主题、动效、刷新节奏与每日积分']
   };
 
   const state = {
@@ -618,7 +619,8 @@
       safeRender('用量分析', renderAnalytics);
     } else if (state.view === 'ledger') {
       safeRender('流水', renderLedger);
-    } else if (state.view === 'settings') {
+    } else if (state.view === 'account' || state.view === 'settings') {
+      // 数据源 / 版本 / 维护都在账户页，渲染函数仍是同一个（元素没变，只是换了位置）
       safeRender('设置', renderSettings);
     }
     try { revealCharts(); } catch (e) { /* ignore */ }
@@ -2141,6 +2143,19 @@
     setText('#srcCloud', ACCOUNT.status === 'connected'
       ? `已连接 · ${(ACCOUNT.user && ACCOUNT.user.plan) || '标准版'}`
       : '未连接');
+
+    // 账户页顶部四行：账号 / 手机 / 上次同步 / 周期额度
+    const u = ACCOUNT.user || {};
+    const st = ACCOUNT.status;
+    setText('#pgAccName', st === 'connected'
+      ? (u.nickname || 'WorkBuddy 账号')
+      : (st === 'expired' ? '登录已过期' : '未连接账号'));
+    setText('#pgAccPhone', u.phone || '—');
+    setText('#pgAccSync', ACCOUNT.lastSync ? F.relTime(ACCOUNT.lastSync) : '—');
+    const cloud = ACCOUNT.cloud || {};
+    setText('#pgAccQuota', cloud.total
+      ? `${F.credit(cloud.used || 0)} / ${F.credit(cloud.total)}`
+      : '—');
     setText('#srcRecords', F.fmt(D.meta.records || 0) + ' 条'
       + (D.meta.coverDays ? ` / 共 ${F.fmt(D.meta.recordsTotal || 0)}` : ''));
     setText('#srcDays', `${D.meta.days || 0} 天有消耗`);
@@ -3045,8 +3060,8 @@
         if (state.mode === 'popup') bridge.hide();
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') { e.preventDefault(); refresh(); }
-      if (e.altKey && /^[1-4]$/.test(e.key) && state.mode === 'main') {
-        go(['overview', 'analytics', 'ledger', 'settings'][+e.key - 1]);
+      if (e.altKey && /^[1-5]$/.test(e.key) && state.mode === 'main') {
+        go(['overview', 'analytics', 'ledger', 'account', 'settings'][+e.key - 1]);
       }
     });
 
