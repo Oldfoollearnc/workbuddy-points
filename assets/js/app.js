@@ -556,18 +556,32 @@
   /** 重绘一张图并播放它的生长动画 */
   function replayChart(el) {
     if (!el || typeof el.__draw !== 'function') return;
-    el.dataset.anim = '1';
     el.dataset.played = '1';
+    // 超宽屏上不给生长动画：图表要写几千个 SVG 属性，动画期间每秒几次全量重绘，
+    // 屏幕越大越明显。直接落终态，观感损失很小，帧率立刻回来。
+    el.dataset.anim = el.clientWidth > 2200 ? '0' : '1';
     el.__draw();
   }
 
   /** 扫描当前页：进视野的重绘一次（带动画），没进视野的继续保持"只出终态" */
   function revealCharts(replayAll) {
+    let i = 0;
     $$('[data-chart]').forEach(el => {
       if (typeof el.__draw !== 'function') return;
       if (!mostlyVisible(el)) return;
       if (!replayAll && el.dataset.played === '1') return;
-      replayChart(el);
+      // 错峰播放：大屏上一屏能同时看见四五个图表，全一起长会让主线程忙于写 SVG 属性，
+      // 表现就是"屏幕越大越卡"。每隔 90ms 起一个，总时长多几百毫秒，但帧率稳得多。
+      const delay = i++ * 90;
+      if (!delay) { replayChart(el); return; }
+      setTimeout(() => { if (el.isConnected) replayChart(el); }, delay);
+    });
+  }
+
+  /** 只重画图表，不重建 DOM：窗口缩放走这条，比整页重渲染便宜一个量级 */
+  function redrawCharts() {
+    $$('[data-chart]').forEach(el => {
+      if (typeof el.__draw === 'function' && el.isConnected) el.__draw();
     });
   }
 
@@ -3205,7 +3219,7 @@
     let rt;
     window.addEventListener('resize', () => {
       clearTimeout(rt);
-      rt = setTimeout(() => { moveIndicator(); moveTbPill(); renderActive(); }, 180);
+      rt = setTimeout(() => { moveIndicator(); moveTbPill(); redrawCharts(); }, 180);
     });
 
     // 滚动到视野里再长：首屏看不见的图表（趋势、构成、日历）滚到跟前才播动画

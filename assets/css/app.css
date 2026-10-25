@@ -2448,8 +2448,8 @@ body[data-mode="popup"] .rz { display: none; }
   z-index: 150;
   display: grid;
   place-items: center;
-  background: color-mix(in srgb, var(--bg) 62%, transparent);
-  backdrop-filter: blur(3px);
+  /* 不用 backdrop-filter：全屏高斯模糊在 2K/带鱼屏上是最贵的合成，刷新时最容易掉帧 */
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
   animation: veilIn 160ms var(--ease-out) both;
 }
 .loading-veil[hidden] { display: none; }
