@@ -639,6 +639,7 @@
       // 数据源 / 版本 / 维护都在账户页，渲染函数仍是同一个（元素没变，只是换了位置）
       safeRender('设置', renderSettings);
       safeRender('今日状态', renderTodayStatus);
+      safeRender('项目别名', renderAliases);
     }
     try { revealCharts(); } catch (e) { /* ignore */ }
   }
@@ -927,6 +928,48 @@
       : (st === 'idle' && !t.limitReached ? ['立即派送', 'travel'] : null);
     setAct('stTvAct', !!tvAct, tvAct && tvAct[0], tvAct && tvAct[1]);
     setAct('stClAct', pending > 0, '立即领取', 'claim');
+  }
+
+  /* ---------------- 项目别名 ---------------- */
+
+  let ALIASES = null;
+
+  async function loadAliases() {
+    if (!bridge.has() || !bridge.can('get_aliases')) return;
+    try {
+      const r = await bridge.call('get_aliases');
+      ALIASES = (r && r.aliases) || {};
+    } catch (e) {
+      ALIASES = ALIASES || {};
+    }
+  }
+
+  /** 当前数据里出现过的项目名（去掉聚合用的占位名）。 */
+  function aliasCandidates() {
+    const seen = new Set();
+    ['projects', 'projects7', 'projects30', 'projectsMonth'].forEach(k => {
+      (D[k] || []).forEach(p => { if (p && p.name) seen.add(p.name); });
+    });
+    return Array.from(seen)
+      .filter(n => n && n !== '其他项目' && n !== '未归类')
+      .sort((a, b) => a.localeCompare(b, 'zh'));
+  }
+
+  function renderAliases() {
+    const box = $('#aliasList');
+    if (!box) return;
+    const list = aliasCandidates();
+    if (!list.length) {
+      box.innerHTML = '<p class="set-note">还没有可改名的项目（先产生一些本机调用记录）</p>';
+      return;
+    }
+    const cur = ALIASES || {};
+    box.innerHTML = list.map(n => `
+      <div class="alias-row">
+        <code title="${esc(n)}">${esc(n)}</code>
+        <input class="mini-input" data-alias="${esc(n)}" placeholder="留空 = 用原名"
+               value="${esc(cur[n] || '')}" maxlength="24">
+      </div>`).join('');
   }
 
   /** 按需执行单个动作（用户点了才算数）。 */
@@ -2922,6 +2965,36 @@
         weeklyBtn.disabled = false;
       }
     });
+
+    const aliasSave = $('#aliasSave');
+    if (aliasSave) aliasSave.addEventListener('click', async () => {
+      if (!bridge.has() || !bridge.can('save_aliases')) {
+        toast('浏览器预览无法保存', 'i-info');
+        return;
+      }
+      const out = {};
+      $$('#aliasList input[data-alias]').forEach(inp => {
+        const v = inp.value.trim();
+        if (v) out[inp.dataset.alias] = v;
+      });
+      aliasSave.disabled = true;
+      try {
+        const r = await bridge.call('save_aliases', out);
+        if (r && r.ok) {
+          await loadAliases();
+          renderAliases();
+          await reloadAll();          // 重新取数，排行与流水立刻用新名字
+          toast(`已保存 ${r.count} 个别名`);
+        } else {
+          toast('保存失败：' + ((r && r.error) || '未知错误'), 'i-alert');
+        }
+      } catch (e) {
+        toast('保存失败', 'i-alert');
+      } finally {
+        aliasSave.disabled = false;
+      }
+    });
+    loadAliases().then(() => { if (state.view === 'settings') renderAliases(); });
 
     const diagBtn = $('#btnDiag');
     if (diagBtn) diagBtn.addEventListener('click', async () => {

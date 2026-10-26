@@ -39,6 +39,9 @@ CACHE_PATH = app_paths.data_path(".cache", "usage.json")
 # 为什么要它：本机消耗读的是 WorkBuddy 的会话 JSONL，那批文件被清理或换机后历史就没了；
 # 自己记一份，才不会出现"上个月明明用了 8000 分，现在只剩 3000"。
 LEDGER_PATH = app_paths.data_path("usage-ledger.json")
+# 项目别名：会话目录名（cwd 的 basename）→ 自定义显示名。
+# 只影响展示与聚合时的分组名，原始 JSONL 一个字节都不动。
+ALIAS_PATH = app_paths.data_path("aliases.json")
 LOG_PATH = app_paths.data_path("logs", "app.log")
 # v5：缓存从"聚合结果快照"改成"按文件的逐笔记录 + 已读字节偏移"。
 # 这样 refresh 只需要从上次读到的位置往后读新增字节，不用每次重扫全部会话文件。
@@ -50,6 +53,15 @@ def log(msg):
 
 
 _ledger_lock = threading.Lock()
+
+
+def _load_aliases():
+    """读项目别名表 {原名: 显示名}。坏了就当没有，不影响取数。"""
+    try:
+        d = fsutil.load_json(ALIAS_PATH, {}) or {}
+        return {str(k): str(v) for k, v in d.items() if k and v}
+    except Exception:
+        return {}
 
 
 def _merge_ledger(by_day, by_day_req, now):
@@ -514,6 +526,12 @@ class UsageService:
         now = dt.datetime.now()
         today = now.date()
         cfg = _load_config()
+        aliases = _load_aliases()
+
+        def proj_name(rec):
+            """项目显示名：目录名查别名表，查不到就用目录名。"""
+            base = os.path.basename(rec["cwd"].rstrip("\\/")) or "未归类"
+            return aliases.get(base, base)
 
         def day_of(r):
             return dt.datetime.fromtimestamp(r["ts"] / 1000).date()
@@ -576,8 +594,7 @@ class UsageService:
 
         by_proj = defaultdict(float)
         for r in today_recs:
-            cwd = r["cwd"].rstrip("\\/")
-            by_proj[os.path.basename(cwd) or "未归类"] += r["credit"]
+            by_proj[proj_name(r)] += r["credit"]
         projects = _mix(by_proj, today_credit)
 
         # 近 7 天调用类型（取总量前 5，其余合并为「其他」），统一用于环形图 / 堆叠图 / 热力图
@@ -662,8 +679,7 @@ class UsageService:
                         continue
                 elif days is not None and (today - d).days >= days:
                     continue
-                cwd = r["cwd"].rstrip("\\/")
-                agg[os.path.basename(cwd) or "未归类"] += r["credit"]
+                agg[proj_name(r)] += r["credit"]
             total = round(sum(agg.values()), 2)
             top = sorted(agg.items(), key=lambda kv: -kv[1])[:5]
             folded = defaultdict(float)
@@ -714,7 +730,7 @@ class UsageService:
             for h in range(24):
                 v = sum(r["credit"] for r in today_recs
                         if dt.datetime.fromtimestamp(r["ts"] / 1000).hour == h
-                        and (os.path.basename(r["cwd"].rstrip("\\/")) or "未归类") == name)
+                        and proj_name(r) == name)
                 row.append(round(v, 2))
             heat.append({"name": name, "tone": "c1", "values": row, "points": round(sum(row), 2)})
         for i, row in enumerate(heat):
@@ -727,7 +743,6 @@ class UsageService:
         ledger = []
         for r in sorted(records, key=lambda x: -x["ts"])[:240]:
             t = dt.datetime.fromtimestamp(r["ts"] / 1000)
-            cwd = r["cwd"].rstrip("\\/")
             ledger.append({
                 "id": str(r["ts"]) + r["model"],
                 "time": t.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -735,7 +750,7 @@ class UsageService:
                 "points": round(r["credit"], 2),
                 "model": _friendly_model(r["model"]),
                 "task": _tool_group(r["tool"], r["type"], r["role"]),
-                "project": os.path.basename(cwd) or "未归类",
+                "project": proj_name(r),
                 "tokens": r["tokens"],
                 "requests": 1,
                 "tone": "c1",

@@ -1328,6 +1328,28 @@ class Api:
         except Exception as e:
             return {"ok": False, "error": str(e)[:160]}
 
+    def get_aliases(self):
+        """项目别名表：{目录名: 显示名}。"""
+        return {"ok": True, "aliases": usage_source._load_aliases()}
+
+    def save_aliases(self, payload):
+        """整表替换：没出现在 payload 里的名字就是恢复原名。"""
+        try:
+            data = payload if isinstance(payload, dict) else {}
+            clean = {}
+            for k, v in data.items():
+                name = str(k or "").strip()
+                show = str(v or "").strip()[:24]
+                if name and show and show != name:
+                    clean[name] = show
+            fsutil.save_json(usage_source.ALIAS_PATH, clean)
+            log("save_aliases -> %d" % len(clean))
+            self._desk.usage.refresh()
+            return {"ok": True, "count": len(clean)}
+        except Exception as e:
+            log(f"save_aliases error: {e}")
+            return {"ok": False, "error": str(e)[:160]}
+
     def export_weekly_report(self):
         """导出近 7 天周报（Markdown）：概览 + 每日 + 项目 Top + 模型 Top。"""
         try:

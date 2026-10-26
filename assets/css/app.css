@@ -2440,6 +2440,21 @@ body.is-loading .boot-mask { display: flex; }
 .set-row .segmented, .set-row .mini-select { flex: none; }
 .set-row--stack .theme-grid { margin-top: 2px; }
 
+/* ---------- 项目别名 ---------- */
+.alias-list { display: flex; flex-direction: column; gap: 6px; padding: 8px 0 10px; }
+.alias-row { display: flex; align-items: center; gap: 10px; }
+.alias-row code {
+  flex: 0 0 46%;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.alias-row input { flex: 1 1 auto; min-width: 0; }
+
 /* ---------- 今日状态：签到 / 猫猫 / 领取 三栏 ---------- */
 .status-grid {
   display: grid;

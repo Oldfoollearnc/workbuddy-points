@@ -12,6 +12,7 @@ digest.json
 session.bin
 account.json
 points_config.json
+aliases.json
 datasource.json
 
 # Python
