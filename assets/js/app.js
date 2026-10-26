@@ -3474,6 +3474,25 @@
       });
     });
 
+    /* 图表卡：点标题栏放大成整行（图更高），再点一次收起。
+       图例、下拉、按钮这些交互元素往上不响应，避免误触。 */
+    $$('.chart-card .card-head').forEach(head => {
+      head.classList.add('is-zoomable');
+      head.title = '点击放大 / 收起这张图';
+      head.addEventListener('click', e => {
+        if (e.target.closest('button, input, select, a, .segmented, .chip')) return;
+        const card = head.closest('.chart-card');
+        if (!card) return;
+        const on = card.classList.toggle('is-expanded');
+        if (on) {
+          setTimeout(() => {
+            try { card.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+            catch (err) { try { card.scrollIntoView(); } catch (e2) { /* ignore */ } }
+          }, 40);
+        }
+      });
+    });
+
     /* 账户页「今日状态」：三个「立即检查」+ 全部检查，都走同一条只读探测 */
     ['stCkBtn', 'stTvBtn', 'stClBtn', 'stAll'].forEach(id => {
       const b = $('#' + id);

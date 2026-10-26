@@ -2564,6 +2564,14 @@ body.is-loading .boot-mask { display: flex; }
 body.is-maximized .rz { display: none; }
 body[data-mode="popup"] .rz { display: none; }
 
+/* 图表卡点标题栏放大：整行铺满，图长高；再点收起 */
+.card-head.is-zoomable { cursor: zoom-in; }
+.chart-card.is-expanded { grid-column: span 12; }
+.chart-card.is-expanded .card-head.is-zoomable { cursor: zoom-out; }
+.chart-card.is-expanded .chart { min-height: 52vh; }
+.chart-card.is-expanded .chart-cal { height: 56vh; }
+.view .chart-card.is-expanded .comp-donut { min-height: 42vh; max-height: 56vh; }
+
 /* 从 KPI 卡跳转过来时闪一下目标格：不然只是换了页，不知道该看哪儿 */
 .is-spot {
   border-radius: 10px;
