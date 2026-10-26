@@ -980,14 +980,16 @@
     }));
     const parts = ['<div class="heat-h"></div>'];
     for (let h = 0; h < 24; h++) parts.push(`<div class="heat-h">${h % 3 === 0 ? h : ''}</div>`);
-    rows.forEach(r => {
+    rows.forEach((r, d) => {
+      const rowDelay = Math.min(520, d * 18);
       // 行标签带具体日期：30 天里的"周一"其实是四个不同的日子，只写星期没法对应
-      parts.push(`<div class="heat-d">${esc(r.date)} 周${esc(r.wd)}</div>`);
+      parts.push(`<div class="heat-d" style="animation-delay:${rowDelay}ms">${esc(r.date)} 周${esc(r.wd)}</div>`);
       (r.hours || []).forEach((v, h) => {
         const n = Number(v) || 0;
         const a = max > 0 ? Math.pow(n / max, 0.55) : 0;
         const bg = n > 0 ? `rgba(47,111,237,${(0.14 + a * 0.86).toFixed(2)})` : 'var(--surface-3)';
-        parts.push(`<i class="heat-c" style="background:${bg}" title="${esc(r.date)} 周${esc(r.wd)} ${F.pad(h)}:00–${F.pad((h + 1) % 24)}:00 · ${F.credit(n)} 分"></i>`);
+        const delay = Math.min(560, rowDelay + h * 6);
+        parts.push(`<i class="heat-c" style="background:${bg};animation-delay:${delay}ms" title="${esc(r.date)} 周${esc(r.wd)} ${F.pad(h)}:00–${F.pad((h + 1) % 24)}:00 · ${F.credit(n)} 分"></i>`);
       });
     });
     const label = rng === '7' ? '近 7 天' : (rng === 'month' ? '本月' : '近 30 天');
@@ -1008,14 +1010,14 @@
   function detailKpis(items) {
     // 值太长会被省略号吃掉（比如「最高一天 10-22 · 320.01 分」），
     // 所以每个值都带 title，鼠标停一下能看全。
-    return `<div class="detail-kpis">${items.map(([k, v]) =>
-      `<div><span>${esc(k)}</span><b title="${esc(plainText(v))}">${v}</b></div>`).join('')}</div>`;
+    return `<div class="detail-kpis">${items.map(([k, v], i) =>
+      `<div style="--i:${i}"><span>${esc(k)}</span><b title="${esc(plainText(v))}">${v}</b></div>`).join('')}</div>`;
   }
 
   function detailTable(cols, rows) {
     const th = cols.map(c => `<th class="${c.num ? 'num' : ''}">${esc(c.label)}</th>`).join('');
-    const body = rows.map(r => `<tr>${r.map((c, i) =>
-      `<td class="${cols[i] && cols[i].num ? 'num' : ''}">${c}</td>`).join('')}</tr>`).join('');
+    const body = rows.map((r, i) => `<tr style="--i:${i}">${r.map((c, j) =>
+      `<td class="${cols[j] && cols[j].num ? 'num' : ''}">${c}</td>`).join('')}</tr>`).join('');
     return `<table class="detail-table"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`;
   }
 

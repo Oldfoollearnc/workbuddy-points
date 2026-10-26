@@ -124,6 +124,8 @@ img { display: block; }
   color: var(--text-2);
   background: var(--surface-3);
   white-space: nowrap;
+  /* 状态在「待办 → 完成」之间换色时，不要一帧跳过去 */
+  transition: background-color var(--dur-2) var(--ease-out), color var(--dur-2) var(--ease-out);
 }
 .chip-brand { color: var(--brand); background: var(--brand-soft); }
 .chip-good { color: var(--good); background: var(--good-soft); }
@@ -2769,6 +2771,8 @@ body[data-mode="popup"] .rz { display: none; }
   border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--surface-2);
+  animation: detailIn 300ms var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 45ms);
 }
 .detail-kpis span { font-size: 10.5px; color: var(--text-3); }
 .detail-kpis b {
@@ -2794,6 +2798,10 @@ body[data-mode="popup"] .rz { display: none; }
   border-bottom: 1px solid var(--border);
 }
 .detail-table td { padding: 8px; border-bottom: 1px solid var(--border); color: var(--text-1); }
+.detail-table tbody tr {
+  animation: detailRow 260ms var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 12ms);
+}
 .detail-table tbody tr:hover { background: var(--surface-2); }
 .detail-table tr:last-child td { border-bottom: 0; }
 .detail-table .num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -2810,6 +2818,21 @@ body[data-mode="popup"] .rz { display: none; }
   text-align: center;
   font-size: 12.5px;
   color: var(--text-3);
+  animation: fadeUp 260ms var(--ease-out) both;
+}
+
+@keyframes detailIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes detailRow { from { opacity: 0; transform: translateX(-5px); } to { opacity: 1; transform: none; } }
+@keyframes heatIn { from { opacity: 0; transform: scale(.82); } to { opacity: 1; transform: none; } }
+@keyframes heatFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-kpis > div,
+  .detail-table tbody tr,
+  .detail-empty,
+  .heat-c,
+  .heat-d { animation: none; }
 }
 .detail-sub {
   margin: 20px 0 8px;
@@ -2832,7 +2855,12 @@ body[data-mode="popup"] .rz { display: none; }
 
 /* 能点进详情的卡片给个手型与悬停提示 */
 .card.is-detail { cursor: pointer; }
-.card.is-detail:hover { border-color: var(--border-2); }
+.card.is-detail:hover {
+  border-color: var(--border-2);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(12, 26, 48, .07);
+}
+[data-theme="dark"] .card.is-detail:hover { box-shadow: 0 8px 20px rgba(0, 0, 0, .38); }
 
 /* 数字统一等宽：表格里的积分、调用、日期竖向对齐靠这个，不靠肉眼 */
 body { font-variant-numeric: tabular-nums; }
@@ -2847,7 +2875,10 @@ body { font-variant-numeric: tabular-nums; }
 .loading-veil { inset: 48px 0 0 0; }
 
 /* ---------- 消耗热力图：周几 × 小时 ---------- */
-.heat-wrap { padding: 2px 0 6px; }
+.heat-wrap {
+  padding: 2px 0 6px;
+  animation: fadeUp 200ms var(--ease-out) both;
+}
 .heat-tools {
   display: flex;
   align-items: center;
@@ -2864,7 +2895,14 @@ body { font-variant-numeric: tabular-nums; }
   max-height: 430px;
   overflow-y: auto;
 }
-.heat-d { font-size: 10px; color: var(--text-3); display: flex; align-items: center; white-space: nowrap; }
+.heat-d {
+  font-size: 10px;
+  color: var(--text-3);
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  animation: heatFade 240ms var(--ease-out) backwards;
+}
 .heat-h {
   font-size: 9px;
   color: var(--text-3);
@@ -2875,7 +2913,14 @@ body { font-variant-numeric: tabular-nums; }
   z-index: 1;
   background: var(--surface);
 }
-.heat-c { display: block; height: 18px; border-radius: 3px; background: var(--surface-3); transition: transform 120ms var(--ease-out); }
+.heat-c {
+  display: block;
+  height: 18px;
+  border-radius: 3px;
+  background: var(--surface-3);
+  transition: transform 120ms var(--ease-out);
+  animation: heatIn 260ms var(--ease-out) backwards;
+}
 .heat-c:hover { transform: scale(1.18); }
 .heat-sum { grid-column: 1 / -1; padding: 8px 2px 0; font-size: 11px; color: var(--text-3); }
 
