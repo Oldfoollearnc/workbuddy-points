@@ -961,6 +961,10 @@
 
   let detailOpen = false;
 
+  function detailEmpty(text) {
+    return `<div class="detail-empty">${esc(text || '当前范围内没有记录')}</div>`;
+  }
+
   const plainText = s => String(s).replace(/<[^>]*>/g, '').trim();
 
   function detailKpis(items) {
@@ -983,7 +987,7 @@
     // 日历卡用的是 dailySeries（云端逐笔优先、本机补盲），这里必须同口径，
     // 否则"区间合计"会跟上面日历卡对不上。
     const series = dailySeries(30);
-    if (!series.length) return { title: '消耗日历', sub: '还没有可用记录', html: '' };
+    if (!series.length) return { title: '消耗日历', sub: '还没有可用记录', html: detailEmpty() };
     const lmap = {};
     (D.daily || []).forEach(d => { lmap[d.date] = d; });
     const total = series.reduce((s, d) => s + (Number(d.consumed) || 0), 0);
@@ -1022,23 +1026,25 @@
   function detailModels() {
     const deep = (D.modelsDeep || []).slice();
     const base = deep.length ? deep : (D.models30 || D.models || []).slice();
-    if (!base.length) return { title: '模型使用量', sub: '还没有可用记录', html: '' };
+    if (!base.length) return { title: '模型使用量', sub: '还没有可用记录', html: detailEmpty() };
     const total = base.reduce((s, m) => s + (Number(m.points) || 0), 0) || 1;
     const calls = base.reduce((s, m) => s + (Number(m.calls) || 0), 0);
     const freeCalls = base.reduce((s, m) => s + (Number(m.freeCalls) || 0), 0);
     const rows = base.map(m => {
       const v = Number(m.points) || 0;
       const c = Number(m.calls) || 0;
+      const span = m.first
+        ? (m.last && m.last !== m.first ? `${esc(m.first)} ~ ${esc(m.last)}` : esc(m.first))
+        : '—';
       return [esc(m.name), v > 0 ? F.credit(v) : '免费', F.fmt(c),
         c ? F.credit(v / c) : '—',
         m.freeCalls == null ? '—' : F.fmt(m.freeCalls),
-        m.first ? esc(m.first) : '—',
-        m.last ? esc(m.last) : '—',
+        span,
         detailBar(v / total * 100)];
     });
     return {
       title: '模型使用量 · 全部模型',
-      sub: '近 30 天；排行只显示前 5。这里补单次均成本、免费调用次数与首末使用日期',
+      sub: '近 30 天；排行只显示前 5。这里补单次均成本、免费调用次数与使用区间',
       html: detailKpis([
         ['模型数', String(base.length)],
         ['积分合计', F.credit(total) + ' 分'],
@@ -1047,21 +1053,22 @@
       ]) + detailTable(
         [{ label: '模型' }, { label: '积分', num: true }, { label: '调用', num: true },
           { label: '单次均', num: true }, { label: '免费', num: true },
-          { label: '首次' }, { label: '最近' }, { label: '占比' }], rows)
+          { label: '使用区间' }, { label: '占比' }], rows)
     };
   }
 
   function detailProjects() {
     const deep = (D.projectsDeep || []).slice();
     const base = deep.length ? deep : (D.projectsAll || D.projects30 || []).slice();
-    if (!base.length) return { title: '项目消耗排行', sub: '还没有可用记录', html: '' };
+    if (!base.length) return { title: '项目消耗排行', sub: '还没有可用记录', html: detailEmpty() };
     const total = base.reduce((s, p) => s + (Number(p.points) || 0), 0) || 1;
     const rows = base.map(p => {
       const v = Number(p.points) || 0;
+      const pct = (v / total * 100).toFixed(1) + '%';
+      const bar = `<span class="cell-bar">${detailBar(v / total * 100)}<em>${pct}</em></span>`;
       return [esc(p.name), v > 0 ? F.credit(v) : '—', F.fmt(Number(p.calls) || 0),
         p.days == null ? '—' : p.days + ' 天',
-        p.topModel ? esc(p.topModel) : '—',
-        detailBar(v / total * 100), (v / total * 100).toFixed(1) + '%'];
+        p.topModel ? esc(p.topModel) : '—', bar];
     });
     return {
       title: '项目消耗排行 · 全部项目',
@@ -1072,7 +1079,7 @@
         ['最高', base[0] ? `${esc(base[0].name)} · ${F.credit(base[0].points || 0)} 分` : '—']
       ]) + detailTable(
         [{ label: '项目' }, { label: '积分', num: true }, { label: '调用', num: true },
-          { label: '活跃', num: true }, { label: '主要模型' }, { label: '占比' }, { label: '', num: true }], rows)
+          { label: '活跃', num: true }, { label: '主要模型' }, { label: '占比' }], rows)
     };
   }
 
@@ -1108,7 +1115,7 @@
     const models = (D.modelsToday && D.modelsToday.length ? D.modelsToday : (D.models || [])).slice();
     const projs = (D.projectsToday || []).slice();
     const purposes = (D.purposesToday || []).slice();
-    if (!models.length && !projs.length) return { title: '今日消耗构成', sub: '今天还没有消耗', html: '' };
+    if (!models.length && !projs.length) return { title: '今日消耗构成', sub: '今天还没有消耗', html: detailEmpty() };
     const total = models.reduce((s, m) => s + (Number(m.points) || 0), 0) || 1;
     const calls = models.reduce((s, m) => s + (Number(m.calls) || 0), 0);
     const free = models.filter(m => (Number(m.points) || 0) <= 0).length;
@@ -1173,7 +1180,7 @@
 
   function detailQuota() {
     const acc = effAccount();
-    if (!hasQuota()) return { title: '额度与消耗', sub: '还没连接账号，或账号没有周期额度', html: '' };
+    if (!hasQuota()) return { title: '额度与消耗', sub: '还没连接账号，或账号没有周期额度', html: detailEmpty() };
     const al = allowance(acc);
     const used = Math.max(0, (acc.total || 0) - (acc.available || 0));
     const endText = al.end
@@ -1224,7 +1231,7 @@
     const spec = DETAIL_SPECS[kind];
     if (!spec) return;
     let d;
-    try { d = spec(); } catch (e) { d = { title: '详情', sub: '数据暂时不可用', html: '' }; }
+    try { d = spec(); } catch (e) { d = { title: '详情', sub: '数据暂时不可用', html: detailEmpty() }; }
     setText('#detailTitle', d.title);
     setText('#detailSub', d.sub || '');
     const body = $('#detailBody');

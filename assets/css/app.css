@@ -2796,6 +2796,18 @@ body[data-mode="popup"] .rz { display: none; }
 .detail-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .detail-bar { display: block; height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; min-width: 60px; }
 .detail-bar i { display: block; height: 100%; border-radius: 99px; background: var(--brand); }
+/* 深色底上品牌蓝对比度不够，条形几乎看不出长度差 */
+[data-theme="dark"] .detail-bar i { background: color-mix(in srgb, var(--brand) 58%, #fff); }
+
+.cell-bar { display: flex; align-items: center; gap: 8px; min-width: 120px; }
+.cell-bar em { font-style: normal; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+.detail-empty {
+  padding: 44px 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
 .detail-sub {
   margin: 20px 0 8px;
   font-size: 12px;
