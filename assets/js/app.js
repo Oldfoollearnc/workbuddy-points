@@ -1007,46 +1007,59 @@
   }
 
   function detailModels() {
-    const list = (D.models30 && D.models30.length ? D.models30 : (D.models || [])).slice();
-    if (!list.length) return { title: '模型使用量', sub: '还没有可用记录', html: '' };
-    const total = list.reduce((s, m) => s + (Number(m.points) || 0), 0) || 1;
-    const calls = list.reduce((s, m) => s + (Number(m.calls) || 0), 0);
-    const rows = list.map(m => {
+    const deep = (D.modelsDeep || []).slice();
+    const base = deep.length ? deep : (D.models30 || D.models || []).slice();
+    if (!base.length) return { title: '模型使用量', sub: '还没有可用记录', html: '' };
+    const total = base.reduce((s, m) => s + (Number(m.points) || 0), 0) || 1;
+    const calls = base.reduce((s, m) => s + (Number(m.calls) || 0), 0);
+    const freeCalls = base.reduce((s, m) => s + (Number(m.freeCalls) || 0), 0);
+    const rows = base.map(m => {
       const v = Number(m.points) || 0;
-      return [esc(m.name), F.credit(v), F.fmt(Number(m.calls) || 0),
-        m.tokens ? F.fmtWan(m.tokens) : '—', detailBar(v / total * 100),
-        (v / total * 100).toFixed(1) + '%'];
+      const c = Number(m.calls) || 0;
+      return [esc(m.name), v > 0 ? F.credit(v) : '免费', F.fmt(c),
+        c ? F.credit(v / c) : '—',
+        m.freeCalls == null ? '—' : F.fmt(m.freeCalls),
+        m.first ? esc(m.first) : '—',
+        m.last ? esc(m.last) : '—',
+        detailBar(v / total * 100)];
     });
     return {
       title: '模型使用量 · 全部模型',
-      sub: '近 30 天；排行里只显示前 5，这里是完整列表',
+      sub: '近 30 天；排行只显示前 5。这里补单次均成本、免费调用次数与首末使用日期',
       html: detailKpis([
-        ['模型数', String(list.length)],
+        ['模型数', String(base.length)],
         ['积分合计', F.credit(total) + ' 分'],
-        ['调用合计', F.fmt(calls) + ' 次']
+        ['调用合计', F.fmt(calls) + ' 次'],
+        ['免费调用', F.fmt(freeCalls) + ' 次']
       ]) + detailTable(
         [{ label: '模型' }, { label: '积分', num: true }, { label: '调用', num: true },
-          { label: 'Token', num: true }, { label: '占比' }, { label: '', num: true }], rows)
+          { label: '单次均', num: true }, { label: '免费', num: true },
+          { label: '首次' }, { label: '最近' }, { label: '占比' }], rows)
     };
   }
 
   function detailProjects() {
-    const list = (D.projectsAll && D.projectsAll.length ? D.projectsAll : (D.projects30 || [])).slice();
-    if (!list.length) return { title: '项目消耗排行', sub: '还没有可用记录', html: '' };
-    const total = list.reduce((s, p) => s + (Number(p.points) || 0), 0) || 1;
-    const rows = list.map(p => {
+    const deep = (D.projectsDeep || []).slice();
+    const base = deep.length ? deep : (D.projectsAll || D.projects30 || []).slice();
+    if (!base.length) return { title: '项目消耗排行', sub: '还没有可用记录', html: '' };
+    const total = base.reduce((s, p) => s + (Number(p.points) || 0), 0) || 1;
+    const rows = base.map(p => {
       const v = Number(p.points) || 0;
-      return [esc(p.name), F.credit(v), detailBar(v / total * 100), (v / total * 100).toFixed(1) + '%'];
+      return [esc(p.name), v > 0 ? F.credit(v) : '—', F.fmt(Number(p.calls) || 0),
+        p.days == null ? '—' : p.days + ' 天',
+        p.topModel ? esc(p.topModel) : '—',
+        detailBar(v / total * 100), (v / total * 100).toFixed(1) + '%'];
     });
     return {
       title: '项目消耗排行 · 全部项目',
-      sub: '仅本机会话记录，按消耗从高到低',
+      sub: '仅本机会话记录；排行只显示前 5，这里给每个项目的活跃天数与主要模型',
       html: detailKpis([
-        ['项目数', String(list.length)],
+        ['项目数', String(base.length)],
         ['积分合计', F.credit(total) + ' 分'],
-        ['最高', list[0] ? `${esc(list[0].name)} · ${F.credit(list[0].points || 0)} 分` : '—']
+        ['最高', base[0] ? `${esc(base[0].name)} · ${F.credit(base[0].points || 0)} 分` : '—']
       ]) + detailTable(
-        [{ label: '项目' }, { label: '积分', num: true }, { label: '占比' }, { label: '', num: true }], rows)
+        [{ label: '项目' }, { label: '积分', num: true }, { label: '调用', num: true },
+          { label: '活跃', num: true }, { label: '主要模型' }, { label: '占比' }, { label: '', num: true }], rows)
     };
   }
 
@@ -1072,23 +1085,47 @@
   }
 
   function detailComp() {
-    const list = (D.models || []).slice();
-    if (!list.length) return { title: '今日消耗构成', sub: '今天还没有消耗', html: '' };
-    const total = list.reduce((s, m) => s + (Number(m.points) || 0), 0) || 1;
-    const rows = list.map(m => {
+    const models = (D.modelsToday && D.modelsToday.length ? D.modelsToday : (D.models || [])).slice();
+    const projs = (D.projectsToday || []).slice();
+    const purposes = (D.purposesToday || []).slice();
+    if (!models.length && !projs.length) return { title: '今日消耗构成', sub: '今天还没有消耗', html: '' };
+    const total = models.reduce((s, m) => s + (Number(m.points) || 0), 0) || 1;
+    const calls = models.reduce((s, m) => s + (Number(m.calls) || 0), 0);
+    const free = models.filter(m => (Number(m.points) || 0) <= 0).length;
+    const top = D.topCall || null;
+
+    const modelRows = models.map(m => {
       const v = Number(m.points) || 0;
-      return [esc(m.name), F.credit(v), F.fmt(Number(m.calls) || 0), detailBar(v / total * 100),
-        (v / total * 100).toFixed(1) + '%'];
+      return [esc(m.name), v > 0 ? F.credit(v) : '免费', F.fmt(Number(m.calls) || 0),
+        detailBar(v / total * 100), v > 0 ? (v / total * 100).toFixed(1) + '%' : '—'];
     });
+    const projRows = projs.map(p => [esc(p.name), F.credit(Number(p.points) || 0),
+      F.fmt(Number(p.calls) || 0), p.tokens ? F.fmtWan(p.tokens) : '—',
+      detailBar((Number(p.points) || 0) / total * 100)]);
+    const purRows = purposes.map(p => [esc(p.name), F.credit(Number(p.points) || 0),
+      F.fmt(Number(p.calls) || 0),
+      (Number(p.calls) || 0) ? F.credit((Number(p.points) || 0) / Number(p.calls)) + ' 分' : '—']);
+
     return {
       title: '今日消耗构成',
-      sub: '按模型拆今天花的每一分',
+      sub: '界面只给了按模型的一层；这里按模型 / 项目 / 用途拆开，并标出免费调用',
       html: detailKpis([
         ['今日合计', F.credit(total) + ' 分'],
-        ['模型数', String(list.length)]
-      ]) + detailTable(
-        [{ label: '模型' }, { label: '积分', num: true }, { label: '调用', num: true },
-          { label: '占比' }, { label: '', num: true }], rows)
+        ['调用', F.fmt(calls) + ' 次'],
+        ['模型数', String(models.length) + (free ? `（${free} 个免费）` : '')],
+        ['项目数', String(projs.length)],
+        ['平均每次', calls ? F.credit(total / calls) + ' 分' : '—'],
+        ['最贵一次', top ? `${esc(top.time)} · ${F.credit(top.points)} 分` : '—']
+      ])
+        + '<h3 class="detail-sub">按模型</h3>'
+        + detailTable([{ label: '模型' }, { label: '积分', num: true }, { label: '调用', num: true },
+          { label: '占比' }, { label: '', num: true }], modelRows)
+        + '<h3 class="detail-sub">按项目</h3>'
+        + detailTable([{ label: '项目' }, { label: '积分', num: true }, { label: '调用', num: true },
+          { label: 'Token', num: true }, { label: '占今日' }], projRows)
+        + '<h3 class="detail-sub">按用途</h3>'
+        + detailTable([{ label: '用途' }, { label: '积分', num: true }, { label: '调用', num: true },
+          { label: '单次均', num: true }], purRows)
     };
   }
 

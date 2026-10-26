@@ -2796,6 +2796,14 @@ body[data-mode="popup"] .rz { display: none; }
 .detail-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .detail-bar { display: block; height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; min-width: 60px; }
 .detail-bar i { display: block; height: 100%; border-radius: 99px; background: var(--brand); }
+.detail-sub {
+  margin: 20px 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: .01em;
+}
+.detail-sub:first-of-type { margin-top: 4px; }
 .detail-foot { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--border); font-size: 10.5px; color: var(--text-3); }
 
 /* 能点进详情的卡片给个手型与悬停提示 */

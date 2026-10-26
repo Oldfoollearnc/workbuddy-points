@@ -702,6 +702,62 @@ class UsageService:
         projects_all = [{"name": k, "points": round(v, 2)}
                         for k, v in sorted(by_proj_all.items(), key=lambda kv: -kv[1])]
 
+        # ---- 详情浮层用的深层聚合：界面只给聚合结果，这里给"再往下一层" ----
+        # 今日按模型（含 0 积分的免费调用，排行里会被过滤掉，所以必须在后端留全量）
+        models_today = {}
+        for r in today_recs:
+            m = _friendly_model(r["model"])
+            e = models_today.setdefault(m, {"name": m, "points": 0.0, "calls": 0})
+            e["points"] += r["credit"]
+            e["calls"] += 1
+
+        # 今日按用途（会话 / 话题 / 其它）
+        purposes_today = {}
+        for r in today_recs:
+            key = (r.get("purpose") or "会话").strip() or "会话"
+            e = purposes_today.setdefault(key, {"name": key, "points": 0.0, "calls": 0})
+            e["points"] += r["credit"]
+            e["calls"] += 1
+
+        # 今日按项目：模型只有一两个时，项目维度才是真正有信息量的那一层
+        projects_today = {}
+        for r in today_recs:
+            p = proj_name(r)
+            e = projects_today.setdefault(p, {"name": p, "points": 0.0, "calls": 0, "tokens": 0})
+            e["points"] += r["credit"]
+            e["calls"] += 1
+            e["tokens"] += r.get("tokens") or 0
+
+        # 今日最贵的一次调用
+        top_call = None
+        for r in today_recs:
+            if top_call is None or r["credit"] > top_call["credit"]:
+                top_call = r
+
+        # 近 N 天按模型：首末使用、免费次数、单次均成本
+        models_deep = {}
+        for r in records:
+            m = _friendly_model(r["model"])
+            e = models_deep.setdefault(m, {"name": m, "points": 0.0, "calls": 0,
+                                           "freeCalls": 0, "first": r["ts"], "last": r["ts"]})
+            e["points"] += r["credit"]
+            e["calls"] += 1
+            if r["credit"] <= 0:
+                e["freeCalls"] += 1
+            e["first"] = min(e["first"], r["ts"])
+            e["last"] = max(e["last"], r["ts"])
+
+        # 近 N 天按项目：活跃天数、主要模型
+        proj_deep = {}
+        for r in records:
+            p = proj_name(r)
+            e = proj_deep.setdefault(p, {"name": p, "points": 0.0, "calls": 0,
+                                         "days": set(), "models": defaultdict(float)})
+            e["points"] += r["credit"]
+            e["calls"] += 1
+            e["days"].add(dt.datetime.fromtimestamp(r["ts"] / 1000).date())
+            e["models"][_friendly_model(r["model"])] += r["credit"]
+
         # 近 7 天模型序列（模型是计费主体，归因 100% 准确）
         week_models = defaultdict(float)
         for r in records:
@@ -874,6 +930,32 @@ class UsageService:
             "projectsMonthTotal": pw_month["total"],
             "projectNames": project_names,
             "projectsAll": projects_all,
+            # 浮层详情：界面看不到的那一层
+            "modelsToday": sorted(
+                ({"name": v["name"], "points": round(v["points"], 2), "calls": v["calls"]}
+                 for v in models_today.values()), key=lambda x: -x["points"]),
+            "purposesToday": sorted(
+                ({"name": v["name"], "points": round(v["points"], 2), "calls": v["calls"]}
+                 for v in purposes_today.values()), key=lambda x: -x["points"]),
+            "projectsToday": sorted(
+                ({"name": v["name"], "points": round(v["points"], 2), "calls": v["calls"],
+                  "tokens": v["tokens"]}
+                 for v in projects_today.values()), key=lambda x: -x["points"]),
+            "topCall": ({"time": dt.datetime.fromtimestamp(top_call["ts"] / 1000).strftime("%H:%M"),
+                         "model": _friendly_model(top_call["model"]),
+                         "points": round(top_call["credit"], 2),
+                         "project": proj_name(top_call)} if top_call else None),
+            "modelsDeep": sorted(
+                ({"name": v["name"], "points": round(v["points"], 2), "calls": v["calls"],
+                  "freeCalls": v["freeCalls"],
+                  "first": dt.datetime.fromtimestamp(v["first"] / 1000).strftime("%Y-%m-%d"),
+                  "last": dt.datetime.fromtimestamp(v["last"] / 1000).strftime("%Y-%m-%d")}
+                 for v in models_deep.values()), key=lambda x: -x["points"]),
+            "projectsDeep": sorted(
+                ({"name": v["name"], "points": round(v["points"], 2), "calls": v["calls"],
+                  "days": len(v["days"]),
+                  "topModel": (max(v["models"].items(), key=lambda kv: kv[1])[0] if v["models"] else "")}
+                 for v in proj_deep.values()), key=lambda x: -x["points"]),
             # 本机全量：有多台机器同用一个账号时，这张"这台机器花了多少"只能由本机回答
             "totalAll": total_all,
             "daysAll": days_all,
