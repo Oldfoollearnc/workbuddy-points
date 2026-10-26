@@ -1005,7 +1005,8 @@
       toast('浏览器预览无法执行', 'i-info');
       return;
     }
-    if (btn) { btn.disabled = true; btn.textContent = '执行中…'; }
+    // 忙碌态用 class：chip 是 span，textContent 一改会把里面的猫猫倒计时冲掉
+    if (btn) btn.classList.add('is-busy');
     try {
       const r = await bridge.call('checkin_action', kind);
       if (r && r.ok) {
@@ -1021,10 +1022,10 @@
     } catch (e) {
       toast('执行失败：' + (e && e.message ? e.message : '未知错误'), 'i-alert');
     } finally {
-      if (btn) btn.disabled = false;
+      if (btn) btn.classList.remove('is-busy');
       // 按钮文案由状态渲染，不在这里硬恢复；否则会把「已签到」改回「立即签到」
       renderTodayStatus();
-      renderPopQuick();
+      renderPopActions();
     }
   }
 
@@ -1447,8 +1448,10 @@
   }
 
   /** 小窗快捷按钮：只显示"现在能做的那件"，做不了就置灰。 */
-  function renderPopQuick() {
-    if (!$('#popQuick')) return;
+  /** 小窗状态 chip 本身就是操作入口：能做就点，不能做就淡掉并说明原因。
+      以前上面一排状态、下面又排三个按钮，同一件事写两遍。 */
+  function renderPopActions() {
+    if (!$('#popCkChip')) return;
     const r = (CHECKIN && CHECKIN.result) || null;
     const isToday = !!(r && (!r.date || r.date === todayKey()));
     const c = (isToday && r.checkin) || {};
@@ -1456,24 +1459,23 @@
     const pending = t.state === 'arrived' ? (t.reward || 0) : 0;
     const can = bridge.has();
 
-    const ck = $('#popDoCheckin');
+    const ck = $('#popCkChip');
     if (ck) {
-      ck.disabled = !can || !!c.done;
-      ck.textContent = c.done ? '已签到' : '立即签到';
+      const off = !can || !!c.done;
+      ck.classList.toggle('is-off', off);
+      ck.dataset.act = off ? '' : 'checkin';
+      ck.title = c.done ? '今天已经签过' : (can ? '点击立即签到' : '桌面端才能签到');
     }
-    const cl = $('#popDoClaim');
-    if (cl) {
-      cl.disabled = !can || pending <= 0;
-      cl.textContent = pending > 0 ? `领 ${pending} 分` : '领积分';
-      cl.title = pending > 0 ? '猫猫已到家，点击领取积分' : '猫猫回来后这里会亮起';
-    }
-    const tv = $('#popDoTravel');
+    const tv = $('#popTravelChip');
     if (tv) {
-      const canGo = t.state === 'idle' && !t.limitReached;
-      tv.disabled = !can || !canGo;
-      tv.textContent = t.state === 'traveling' ? '旅行中'
-        : (t.state === 'arrived' ? '待领取' : (canGo ? '派猫猫' : '今日已派'));
-      tv.title = canGo ? '派猫猫出门，1–4 小时后带积分回来' : '';
+      const claim = pending > 0;
+      const dep = t.state === 'idle' && !t.limitReached;
+      const off = !can || (!claim && !dep);
+      tv.classList.toggle('is-off', off);
+      tv.dataset.act = claim ? 'claim' : (dep ? 'travel' : '');
+      tv.title = claim ? `点击领取 ${pending} 分`
+        : dep ? '点击派猫猫出门'
+          : t.state === 'traveling' ? '猫猫还在路上' : '今日名额已用完';
     }
   }
 
@@ -1537,7 +1539,7 @@
     if (prog) requestAnimationFrame(() => { prog.style.width = ((configured ? acc.usedPct : 0) * 100).toFixed(2) + '%'; });
 
     renderPopHours(stat);
-    renderPopQuick();
+    renderPopActions();
   }
 
   /** 今日消耗构成：按「计费笔数 / 调用次数」拆分（云端是计费记录，本机是逐次调用） */
@@ -3503,9 +3505,14 @@
       if (b) b.addEventListener('click', () => runAction(b.dataset.act, b));
     });
     /* 小窗快捷操作 */
-    [['popDoCheckin', 'checkin'], ['popDoClaim', 'claim'], ['popDoTravel', 'travel']].forEach(([id, kind]) => {
-      const b = $('#' + id);
-      if (b) b.addEventListener('click', () => runAction(kind, b));
+    /* 小窗：状态 chip 本身就是操作入口（不再额外排一行按钮） */
+    const popCkChip = $('#popCkChip');
+    if (popCkChip) popCkChip.addEventListener('click', () => {
+      if (popCkChip.dataset.act) runAction(popCkChip.dataset.act, popCkChip);
+    });
+    const popTvChip = $('#popTravelChip');
+    if (popTvChip) popTvChip.addEventListener('click', () => {
+      if (popTvChip.dataset.act) runAction(popTvChip.dataset.act, popTvChip);
     });
 
     /* 用量分析：本机消耗周期 + 项目排行周期 */

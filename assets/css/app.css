@@ -592,31 +592,11 @@ body.is-desktop[data-mode="popup"] .popup-card {
 .pop-row .pt.is-earn { color: var(--good); }
 .pop-empty { padding: 14px 4px; font-size: 10.5px; color: var(--text-3); text-align: center; }
 
-.pop-quick {
-  flex: none;
-  display: flex;
-  gap: 6px;
-  padding: 0 14px 10px;
-}
-.pop-qbtn {
-  flex: 1 1 0;
-  min-width: 0;
-  height: 30px;
-  padding: 0 8px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text-1);
-  font-size: 11.5px;
-  font-family: inherit;
-  cursor: pointer;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: border-color var(--dur-1) var(--ease-out), background-color var(--dur-1) var(--ease-out);
-}
-.pop-qbtn:hover:not(:disabled) { border-color: var(--border-2); background: var(--surface-3); }
-.pop-qbtn:disabled { opacity: .45; cursor: default; }
+/* 小窗状态 chip 本身可点：能做就点，不能做就淡掉并说明原因 */
+.chip-act { cursor: pointer; transition: box-shadow var(--dur-1) var(--ease-out), opacity var(--dur-1) var(--ease-out); }
+.chip-act:hover { box-shadow: inset 0 0 0 1px var(--border-2); }
+.chip-act.is-off { opacity: .5; cursor: default; box-shadow: none; }
+.is-busy { opacity: .55; pointer-events: none; }
 
 .pop-foot {
   flex: none;
