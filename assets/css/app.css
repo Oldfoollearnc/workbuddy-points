@@ -1233,9 +1233,9 @@ body.is-dragging .topbar { cursor: default; }
 /* 图表高度跟着窗口走：窗口一矮，先把图压扁，别逼用户滚三屏才看全 */
 .chart-cal { width: 100%; height: clamp(190px, 27vh, 288px); flex: none; }
 .chart { flex: 1 1 auto; min-height: 160px; position: relative; margin-top: 8px; }
-.chart-hourly { min-height: clamp(150px, 24vh, 224px); }
+.chart-hourly { min-height: clamp(150px, 23vh, 224px); }
 .chart-donut { min-height: clamp(160px, 23vh, 288px); }
-.chart-trend { min-height: clamp(160px, 27vh, 280px); }
+.chart-trend { min-height: clamp(160px, 26vh, 280px); }
 .chart-gauge { min-height: clamp(112px, 13vh, 152px); }
 .chart-stack { min-height: clamp(170px, 22vh, 320px); }
 .chart-task { min-height: clamp(170px, 22vh, 320px); }
@@ -2553,13 +2553,16 @@ body[data-mode="popup"] .rz { display: none; }
 /* 再矮一档：压卡片留白与字号，图表高度已由 clamp 跟着 vh 缩 */
 @media (max-height: 760px) {
   .views { padding: 8px 16px 14px; }
-  .grid { gap: 12px; }
-  .grid + .grid { margin-top: 12px; }
-  .kpi { min-height: 104px; padding: 10px 14px 0; }
+  .grid { gap: 10px; }
+  .grid + .grid { margin-top: 10px; }
+  .kpi { min-height: 96px; padding: 10px 14px 0; }
   .kpi-value { margin: 8px 0 4px; }
   .kpi-value span { font-size: 24px; }
   .chart-card { padding: 12px 14px 10px; }
   .card-head h2 { font-size: 13px; }
+  /* 额度卡右列比左列高，行高会被它顶起来：压统计行、收掉脚注 */
+  .quota-stats > div { padding: 5px 2px; }
+  .quota-hint { display: none; }
 }
 
 /* 极矮窗口：藏掉 KPI 的迷你折线，图再收一档 */
