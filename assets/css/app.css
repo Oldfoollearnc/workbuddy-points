@@ -1097,6 +1097,20 @@ body.is-dragging .topbar { cursor: default; }
 .view { display: none; }
 .view.is-active { display: block; animation: viewIn 300ms var(--ease-out) both; }
 
+/* 总览：两行图表吃掉剩余高度，窗口多大就填多满，底部不留死白 */
+.view[data-view="overview"].is-active {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.view[data-view="overview"].is-active > .grid {
+  flex: 1 1 0;
+  min-height: 0;
+  grid-auto-rows: minmax(0, 1fr);
+}
+.view[data-view="overview"] .comp-donut { max-height: 320px; }
+.view[data-view="overview"] .chart-gauge { flex: 1 1 auto; }
+
 .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
 .grid + .grid { margin-top: 16px; }
 .span-3 { grid-column: span 3; }
