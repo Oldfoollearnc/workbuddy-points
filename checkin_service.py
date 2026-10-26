@@ -284,8 +284,12 @@ class CheckinService:
                     t["pending"] = self._int0(tv.get("reward"))
 
         if tv.get("limitReached"):
-            t["dispatched"] = True
+            # daily_limit_reached 只说明"今天名额用掉了"，不等于"我们看见它派出去了"。
+            # 之前这里直接置 dispatched=True，于是没派送的机器也显示"今日已派过"，
+            # 再叠加 claimed 就变成"今日已完成"，整天不再去问服务端。
             t["limitReached"] = True
+            if st in ("traveling", "arrived") or tv.get("departed"):
+                t["dispatched"] = True
 
         got = self._int0(tv.get("claimed"))
         if got > 0 or tv.get("claimedToday"):
@@ -307,12 +311,16 @@ class CheckinService:
         v = {"error": None, "departed": False, "claimed": 0,
              "claimedToday": reward, "limitReached": bool(t.get("limitReached")),
              "location": "", "reward": pending, "durationHours": 0, "progress": 0.0,
-             "remainingSec": 0, "remainingText": ""}
-        if t.get("claimed"):
+             "remainingSec": 0, "remainingText": "", "unknown": False,
+             "canClaim": False, "canDepart": False}
+        arrive = self._int0(t.get("arriveAt"))
+        # 已领取且没有新的在途行程：今天就算完事了。
+        # 若本地还记着一趟没回来的（arriveAt 在未来），以在途为准 ——
+        # 否则新派出去的猫会被上一条 claimed 盖成"空闲"。
+        if t.get("claimed") and not (arrive and now < arrive):
             v.update(state="idle", stateText="空闲", limitReached=True)
             return v
 
-        arrive = self._int0(t.get("arriveAt"))
         if arrive and now < arrive:
             left = arrive - now
             v.update(state="traveling", stateText="旅行中", location=t.get("location") or "",
@@ -325,11 +333,14 @@ class CheckinService:
         if arrive or pending:
             # 到点了但还没领：显示"可领取"，让用户知道分没丢
             v.update(state="arrived", stateText="已到家", remainingText="已到家，可领取",
-                     location=t.get("location") or "", progress=1.0, reward=pending)
+                     location=t.get("location") or "", progress=1.0, reward=pending,
+                     canClaim=pending > 0)
             return v
 
-        # 只记得"派出过"，没有更多细节：按已派满显示，别编造倒计时
-        v.update(state="idle", stateText="空闲", limitReached=True)
+        # 只剩"名额已用"这条线索、没有任何行程细节：如实标注，别冒充"已派满"。
+        v.update(state="idle", stateText="空闲",
+                 limitReached=bool(t.get("limitReached")),
+                 unknown=bool(t.get("limitReached") and not t.get("claimed")))
         return v
 
     def _merge_result(self, res):
@@ -930,12 +941,20 @@ class CheckinService:
 
         # 1) 已到家 → 先领积分（领完状态变 idle，才能接着派）
         if out["state"] == "arrived":
+            before = self._int0(out.get("reward"))
             c = self._call(TRAVEL_CLAIM, "POST", {})
-            if c.get("status") == 200:
-                out["claimed"] = out["reward"]
-                r2 = self._call(TRAVEL_STATUS, "GET")
-                if r2.get("status") == 200:
-                    self._fill_travel(out, (r2.get("json") or {}).get("data") or {})
+            code = self._code(c)
+            if c.get("status") == 200 and code == CODE_OK:
+                out["claimed"] = before
+                self._reload_travel(out)
+            elif c.get("status") == 200 and code is None:
+                # HTTP 200 但没给结果码：回读状态，奖励归零才算真领到。
+                # 只看 status 会把"没领到"记成"已领取"，接着一整天都不再问 —— 分就白丢了。
+                self._reload_travel(out)
+                if before and not self._int0(out.get("reward")):
+                    out["claimed"] = before
+                elif before:
+                    out["error"] = "领取请求已发出，服务端没有返回结果码"
             else:
                 out["error"] = self._http_hint(c, "领取旅行积分失败")
 
@@ -945,15 +964,156 @@ class CheckinService:
             if locs:
                 pick = random.choice(locs)
                 p = self._call(TRAVEL_DEPART, "POST", {"location_id": pick.get("id")})
-                if p.get("status") == 200:
+                pcode = self._code(p)
+                if p.get("status") == 200 and pcode in (CODE_OK, CODE_ALREADY):
                     out["departed"] = True
                     out["location"] = pick.get("name") or ""
-                    r3 = self._call(TRAVEL_STATUS, "GET")
-                    if r3.get("status") == 200:
-                        self._fill_travel(out, (r3.get("json") or {}).get("data") or {})
+                    self._reload_travel(out)
+                elif p.get("status") == 200 and pcode is None:
+                    # 没有结果码：回读状态，只有真的在旅行才敢记"已派出"
+                    self._reload_travel(out)
+                    out["departed"] = out.get("state") in ("traveling", "arrived")
                 else:
                     out["error"] = self._http_hint(p, "派出猫猫失败")
         return out
+
+    def _reload_travel(self, out):
+        """回读一次旅行状态，覆盖 out 里的行程字段（领取/派出后的校准）。"""
+        r = self._call(TRAVEL_STATUS, "GET", retry=0)
+        if r.get("status") == 200:
+            self._fill_travel(out, (r.get("json") or {}).get("data") or {})
+
+    # ---------------- 立即检查（只读） ----------------
+
+    def probe(self):
+        """立即检查：只读，不签到、不领取、不派送。
+
+        为什么需要它：本地 today 结论命中「签过 + 领过」就整天短路，一旦某次判断错了，
+        界面会一直显示「今日已完成」。这个入口绕过短路与冷却，把服务端此刻的事实读回来，
+        并用它校准本地结论 —— 本地错了就改本地，而不是继续错一整天。
+        """
+        out = {"ok": False, "at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+               "checkin": None, "travel": None, "error": None}
+        if self.account.state.get("autoLogin") is False:
+            out["error"] = "已退出登录，先连接账号"
+            return out
+        if not self.account.win:
+            out["error"] = "登录窗口不可用"
+            return out
+        if self.account.state.get("status") == "disconnected":
+            out["error"] = "还没连接账号，先扫码连接"
+            return out
+        if getattr(self.account, "_login_active", False):
+            out["error"] = "正在扫码登录，先完成登录再检查"
+            return out
+        got = self.account._sync_lock.acquire(timeout=20)
+        if not got:
+            out["error"] = "正在同步云端数据，几秒后再试"
+            return out
+        try:
+            if not self._ensure_page():
+                out["error"] = "打不开账号页面：多半是网络断了"
+                return out
+
+            st = self._call(STATUS_PATH, "POST")
+            if st.get("status") == 200:
+                d = (st.get("json") or {}).get("data") or {}
+                out["checkin"] = {
+                    "done": bool(d.get("today_checked_in")),
+                    "streak": d.get("streak_days"),
+                    "balance": d.get("total_credits"),
+                    "week": [bool(x) for x in (d.get("week_progress") or [])][:7],
+                    "dailyCredit": d.get("daily_credit") or 100,
+                    "error": None,
+                }
+            else:
+                out["checkin"] = {"done": None,
+                                  "error": self._http_hint(st, "读取签到状态失败")}
+
+            tr = self._call(TRAVEL_STATUS, "GET")
+            if tr.get("status") == 200:
+                tv = {"state": "unknown", "stateText": "未知", "location": "",
+                      "remainingSec": 0, "remainingText": "", "reward": 0,
+                      "claimed": 0, "claimedToday": 0, "departed": False,
+                      "limitReached": False, "error": None, "progress": 0.0,
+                      "arriveAt": 0, "departAt": 0}
+                self._fill_travel(tv, (tr.get("json") or {}).get("data") or {})
+                tv["canClaim"] = tv.get("state") == "arrived" and self._int0(tv.get("reward")) > 0
+                tv["canDepart"] = tv.get("state") == "idle" and not tv.get("limitReached")
+                out["travel"] = tv
+            else:
+                out["travel"] = {"state": "unknown", "stateText": "未知",
+                                 "error": self._http_hint(tr, "读取猫猫状态失败")}
+
+            out["ok"] = True
+            self._reconcile(out)
+            return out
+        finally:
+            if got:
+                self.account._sync_lock.release()
+
+    def _reconcile(self, res):
+        """用刚读到的服务端事实校准今日结论。服务端说什么就是什么，不替它圆场。"""
+        with self.lock:
+            t = self._today()
+            c = res.get("checkin") or {}
+            if not c.get("error") and c.get("done") is True:
+                t["checkedIn"] = True
+                for k in ("streak", "week", "balance"):
+                    if c.get(k) is not None:
+                        t[k] = c[k]
+                self.state["signedDate"] = self._day_key()
+                self.state["streak"] = t.get("streak")
+                self.state["week"] = t.get("week")
+                self.state["balance"] = t.get("balance")
+            elif not c.get("error") and c.get("done") is False:
+                # 服务端明确说没签：本地那条"今天签过"就是错的，撤掉。
+                t["checkedIn"] = False
+                if self.state.get("signedDate") == self._day_key():
+                    self.state["signedDate"] = None
+
+            tv = res.get("travel") or {}
+            st = tv.get("state")
+            if not tv.get("error") and st in ("traveling", "arrived", "idle"):
+                if st == "traveling":
+                    t["dispatched"] = True
+                    if tv.get("location"):
+                        t["location"] = tv["location"]
+                    if tv.get("arriveAt"):
+                        t["arriveAt"] = self._int0(tv["arriveAt"])
+                    if tv.get("departAt"):
+                        t["departAt"] = self._int0(tv["departAt"])
+                    # 在途时 reward 是"预计带回来多少"，覆盖旧的待领值
+                    t["pending"] = self._int0(tv.get("reward"))
+                    t.pop("arrived", None)
+                elif st == "arrived":
+                    t["dispatched"] = True
+                    t["arrived"] = True
+                    t["pending"] = self._int0(tv.get("reward"))
+                    if tv.get("location"):
+                        t["location"] = tv["location"]
+                    if tv.get("arriveAt"):
+                        t["arriveAt"] = self._int0(tv["arriveAt"])
+                else:                                   # idle：今天没在旅行
+                    if tv.get("limitReached"):
+                        t["dispatched"] = True
+                        t["limitReached"] = True
+                    else:
+                        # 服务端说今天还没派 → 清掉本地"已派出/已领取"的旧结论。
+                        # 这是"猫猫没派送却显示今日已完成"的正面纠正。
+                        for k in ("dispatched", "limitReached", "claimed", "reward",
+                                  "pending", "arriveAt", "arrived", "departAt"):
+                            t.pop(k, None)
+
+            # 同步刷新 result 里的旅行快照：_merge_result 在某些分支会直接返回旧 result，
+            # 只改 today 的话界面还会显示纠正前那一份。
+            rs = self.state.get("result")
+            if isinstance(rs, dict):
+                rs["travel"] = self._travel_view(t)
+                rs["date"] = self._day_key()
+                if t.get("checkedIn"):
+                    rs["checkedIn"] = True
+            self._save_cache()
 
     def _note_travel_claim(self, travel):
         """把"今天领到多少"记进本地状态。

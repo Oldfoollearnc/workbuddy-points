@@ -1082,6 +1082,21 @@ class Api:
     def checkin_options(self, auto=None, travel=None):
         return self._desk.checkin.set_options(auto=auto, travel=travel)
 
+    def checkin_probe(self):
+        """立即检查签到 / 猫猫 / 待领积分：只读，不触发任何写操作。"""
+        try:
+            r = self._desk.checkin.probe()
+        except Exception as e:
+            log("checkin_probe error: %s" % e)
+            return {"ok": False, "error": str(e)[:160]}
+        # 校准后顺带把界面上的结论刷新一遍
+        try:
+            for w in (self._desk.popup, self._desk.main):
+                self._desk._safe_js(w, "window.App && App.reloadCheckin && App.reloadCheckin()")
+        except Exception:
+            pass
+        return r
+
     def get_checkin_tasks(self):
         """成长计划任务进度（活动卡第四格用，带 30 分钟缓存）。"""
         return self._desk.checkin.tasks()

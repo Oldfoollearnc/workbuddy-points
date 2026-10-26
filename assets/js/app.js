@@ -636,6 +636,7 @@
     } else if (state.view === 'account' || state.view === 'settings') {
       // 数据源 / 版本 / 维护都在账户页，渲染函数仍是同一个（元素没变，只是换了位置）
       safeRender('设置', renderSettings);
+      safeRender('今日状态', renderTodayStatus);
     }
     try { revealCharts(); } catch (e) { /* ignore */ }
   }
@@ -764,7 +765,7 @@
       const gotToday = t.claimedToday || 0;
       bits.push(gotToday
         ? `猫猫今天带回来 <b>${gotToday}</b> 分`
-        : (t.claimed ? '今天已经派满（每天 1 次）' : '今日猫猫已派过'));
+        : (t.unknown ? '今日名额已用，没查到行程细节' : '今日猫猫已派过'));
     }
     if (t.error) bits.push(`<span class="dim">${esc(t.error)}</span>`);
     if (!bits.length) bits.push('签到检查完成');
@@ -832,9 +833,108 @@
     if (!bridge.has() || !bridge.can('get_checkin')) return false;
     try {
       const r = await bridge.call('get_checkin');
-      if (r) { CHECKIN = r; renderCheckin(); return true; }
+      if (r) { CHECKIN = r; renderCheckin(); renderTodayStatus(); return true; }
     } catch (e) { /* ignore */ }
     return false;
+  }
+
+  /* ---------------- 账户页：今日状态三栏 ---------------- */
+
+  /** 三栏共用的写入器：chip 文案 + 主行 + 说明 + 警示边框。 */
+  function putStatus(id, chip, chipCls, main, sub, warn) {
+    const cEl = $('#' + id + 'Chip');
+    if (cEl) { cEl.textContent = chip; cEl.className = 'chip' + (chipCls ? ' ' + chipCls : ''); }
+    setText('#' + id + 'Main', main);
+    setText('#' + id + 'Sub', sub);
+    const card = cEl && cEl.closest ? cEl.closest('.status-card') : null;
+    if (card) card.classList.toggle('is-warn', !!warn);
+  }
+
+  /**
+   * 签到 / 猫猫 / 领积分 三件事分开显示。
+   * 以前三件事挤在一行结论里，任何一环判断错了都会把另外两环一起盖掉
+   * （典型：猫猫没派、分没领，却显示"今日已完成"）。
+   */
+  function renderTodayStatus() {
+    if (!$('#statusGrid')) return;
+    const r = (CHECKIN && CHECKIN.result) || null;
+    const isToday = !!(r && (!r.date || r.date === todayKey()));
+    const c = (isToday && r.checkin) || {};
+    const t = (isToday && r.travel) || {};
+
+    if (!isToday) {
+      ['stCk', 'stTv', 'stCl'].forEach(k => putStatus(k, '待检查', '', '还没有今天的结论',
+        '点「立即检查」向云端要一次真实状态'));
+      return;
+    }
+
+    /* 签到 */
+    if (c.done) {
+      putStatus('stCk', '已签到', 'chip-good',
+        r.streak ? `连签 ${r.streak} 天` : '今日签到已完成',
+        c.new ? `本次 +${c.gain || 100} 分` : '今天已经签过，没有重复打卡');
+    } else {
+      putStatus('stCk', '待签到', '', '今天还没签到',
+        prefs.checkinAuto ? '自动签到开着，到点会自己签' : '自动签到已关闭，需要手动触发', true);
+    }
+
+    /* 猫猫行程 */
+    const st = t.state;
+    if (st === 'traveling') {
+      putStatus('stTv', '旅行中', '', `在${t.location || '路上'}`,
+        `已派出，预计 ${t.remainingText || '过一会儿'}回来`);
+    } else if (st === 'arrived') {
+      putStatus('stTv', '已到家', '', `带了 ${t.reward || 0} 分回来`,
+        '猫猫已到家，积分还躺在那里没领', true);
+    } else if (st === 'idle' && t.limitReached) {
+      const got = t.claimedToday || 0;
+      putStatus('stTv', '今日已派', '', got ? `今天已领 ${got} 分` : '今日派送名额已用完',
+        '每天只能派 1 次，明天再来');
+    } else if (st === 'idle') {
+      putStatus('stTv', '可派送', 'chip-good', '今天还没派',
+        prefs.checkinTravel ? '派猫猫开着，下次启动会自动出发' : '派猫猫已关闭，需要手动触发');
+    } else {
+      putStatus('stTv', '未知', '', '还没读到猫猫状态', '点「立即检查」或连接账号后再看');
+    }
+
+    /* 积分领取 */
+    const pending = st === 'arrived' ? (t.reward || 0) : 0;
+    const got = t.claimedToday || (t.claimed ? t.claimed : 0);
+    if (pending > 0) {
+      putStatus('stCl', '待领取', '', `${pending} 分还没领`,
+        '派猫猫开着时下一轮会自动领；急的话先看看是不是开关关了', true);
+    } else if (got > 0) {
+      putStatus('stCl', '已领取', 'chip-good', `+${got} 分`, '今天猫猫带回来的积分已经入账');
+    } else {
+      putStatus('stCl', '—', '', '没有待领积分', '猫猫回来后会在这里提示');
+    }
+  }
+
+  /** 「立即检查」：只读，Python 侧会把真实状态写回今日结论。 */
+  async function probeStatus(btn) {
+    if (!bridge.has() || !bridge.can('checkin_probe')) {
+      toast('浏览器预览无法检查云端状态', 'i-info');
+      return;
+    }
+    const old = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '检查中…'; }
+    try {
+      const r = await bridge.call('checkin_probe');
+      if (r && r.ok) {
+        await loadCheckin();          // 校准后的结论在 get_checkin 里
+        renderTodayStatus();
+        setText('#stNote', `上次检查 ${r.at} · 只读，没有替你签到/领取`);
+        toast('已读取云端真实状态');
+      } else {
+        const msg = (r && r.error) || '检查失败，稍后再试';
+        setText('#stNote', msg);
+        toast(msg, 'i-alert');
+      }
+    } catch (e) {
+      setText('#stNote', '检查失败：' + (e && e.message ? e.message : '未知错误'));
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = old; }
+    }
   }
 
   /** 把界面上的两个开关同步给 Python：它启动时要靠这个决定跑不跑签到。 */
@@ -2971,6 +3071,12 @@
 
     window.addEventListener('resize', () => { if (acctPop && !acctPop.hidden) positionAccountPop(); });
     const ph = $('#popHide'); if (ph) ph.addEventListener('click', () => bridge.hide());
+
+    /* 账户页「今日状态」：三个「立即检查」+ 全部检查，都走同一条只读探测 */
+    ['stCkBtn', 'stTvBtn', 'stClBtn', 'stAll'].forEach(id => {
+      const b = $('#' + id);
+      if (b) b.addEventListener('click', () => probeStatus(b));
+    });
 
     /* 点小窗外部收起：由 Python 端监听鼠标左键松开 + 光标是否落在小窗内，
        不依赖焦点（托盘弹出时焦点常常不在小窗上，靠 blur 判断会误收）。 */

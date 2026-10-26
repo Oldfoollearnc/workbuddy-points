@@ -536,6 +536,37 @@
       <section class="view" data-view="account">
         <div class="set-page">
 
+          <!-- 今日状态：签到 / 猫猫 / 领积分 三件事各自独立，随时可向云端要一次真实状态 -->
+          <section class="set-group">
+            <header class="set-group-head">
+              <div><h2>今日状态</h2><p>自动流程照常跑；这里随时可以向云端要一次真实状态，本地结论错了会被纠正</p></div>
+              <button class="btn btn-soft btn-sm" id="stAll">全部检查</button>
+            </header>
+            <div class="set-rows">
+              <div class="status-grid" id="statusGrid">
+                <article class="status-card" data-kind="checkin">
+                  <div class="st-head"><span>每日签到</span><i class="chip" id="stCkChip">—</i></div>
+                  <b class="st-main" id="stCkMain">—</b>
+                  <p class="st-sub" id="stCkSub">—</p>
+                  <button class="btn btn-ghost btn-sm st-btn" id="stCkBtn">立即检查</button>
+                </article>
+                <article class="status-card" data-kind="travel">
+                  <div class="st-head"><span>猫猫行程</span><i class="chip" id="stTvChip">—</i></div>
+                  <b class="st-main" id="stTvMain">—</b>
+                  <p class="st-sub" id="stTvSub">—</p>
+                  <button class="btn btn-ghost btn-sm st-btn" id="stTvBtn">立即检查</button>
+                </article>
+                <article class="status-card" data-kind="claim">
+                  <div class="st-head"><span>积分领取</span><i class="chip" id="stClChip">—</i></div>
+                  <b class="st-main" id="stClMain">—</b>
+                  <p class="st-sub" id="stClSub">—</p>
+                  <button class="btn btn-ghost btn-sm st-btn" id="stClBtn">立即检查</button>
+                </article>
+              </div>
+              <p class="set-note" id="stNote">「立即检查」只读，不会替你签到、派猫或领积分</p>
+            </div>
+          </section>
+
           <!-- 账号 -->
           <section class="set-group">
             <header class="set-group-head">
