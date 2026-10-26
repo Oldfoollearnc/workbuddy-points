@@ -1230,16 +1230,17 @@ body.is-dragging .topbar { cursor: default; }
 /* ===================== 图表卡容器 ===================== */
 
 .chart-card { display: flex; flex-direction: column; padding: 15px 16px 12px; }
-.chart-cal { width: 100%; height: 262px; flex: none; }
-.chart { flex: 1 1 auto; min-height: 200px; position: relative; margin-top: 8px; }
-.chart-hourly { min-height: 292px; }
-.chart-donut { min-height: 302px; }
-.chart-trend { min-height: 300px; }
-.chart-gauge { min-height: 152px; }
-.chart-stack { min-height: 320px; }
-.chart-task { min-height: 320px; }
-.chart-heat { min-height: 246px; }
-.chart-rank { min-height: 246px; }
+/* 图表高度跟着窗口走：窗口一矮，先把图压扁，别逼用户滚三屏才看全 */
+.chart-cal { width: 100%; height: clamp(190px, 26vh, 300px); flex: none; }
+.chart { flex: 1 1 auto; min-height: 160px; position: relative; margin-top: 8px; }
+.chart-hourly { min-height: clamp(150px, 20vh, 292px); }
+.chart-donut { min-height: clamp(160px, 21vh, 302px); }
+.chart-trend { min-height: clamp(160px, 21vh, 300px); }
+.chart-gauge { min-height: clamp(112px, 13vh, 152px); }
+.chart-stack { min-height: clamp(170px, 22vh, 320px); }
+.chart-task { min-height: clamp(170px, 22vh, 320px); }
+.chart-heat { min-height: clamp(160px, 20vh, 246px); }
+.chart-rank { min-height: clamp(160px, 20vh, 246px); }
 
 .chart svg { display: block; overflow: visible; }
 .chart text { font-family: var(--font-sans); }
@@ -2543,14 +2544,33 @@ body[data-mode="popup"] .rz { display: none; }
   .side-card { padding: 11px 12px; }
 }
 
-/* 低高度窗口（768p 笔记本、窗口被压矮）：先保证一屏能看全，
-   图表不强行占满 300px。 */
+/* 低高度窗口（768p 笔记本、窗口被压矮）：先保证一屏能看全，图表不强行占满 300px */
 @media (max-height: 820px) {
   .views { padding-top: 10px; }
   .kpi { min-height: 116px; }
-  .chart-trend { min-height: 232px; }
-  .chart-hourly { min-height: 220px; }
-  .chart-cal { height: 232px; }
+}
+
+/* 再矮一档：压卡片留白与字号，图表高度已由 clamp 跟着 vh 缩 */
+@media (max-height: 760px) {
+  .views { padding: 8px 16px 14px; }
+  .grid { gap: 12px; }
+  .grid + .grid { margin-top: 12px; }
+  .kpi { min-height: 104px; padding: 10px 14px 0; }
+  .kpi-value { margin: 8px 0 4px; }
+  .kpi-value span { font-size: 24px; }
+  .chart-card { padding: 12px 14px 10px; }
+  .card-head h2 { font-size: 13px; }
+}
+
+/* 极矮窗口：藏掉 KPI 的迷你折线，图再收一档 */
+@media (max-height: 720px) {
+  .kpi-spark { display: none; }
+  .kpi { min-height: 88px; padding-bottom: 10px; }
+  .chart-trend { min-height: 148px; }
+  .chart-hourly { min-height: 150px; }
+  .chart-donut { min-height: 168px; }
+  .chart-cal { height: 176px; }
+  .chart-gauge { min-height: 104px; }
 }
 
 /* ===================== 加载遮罩 ===================== */
