@@ -980,28 +980,32 @@
   const detailBar = pct => `<span class="detail-bar"><i style="width:${Math.max(2, Math.min(100, pct)).toFixed(1)}%"></i></span>`;
 
   function detailDaily() {
-    const daily = (D.daily || []).slice();
-    if (!daily.length) return { title: '消耗日历', sub: '还没有可用记录', html: '' };
-    const total = daily.reduce((s, d) => s + (Number(d.consumed) || 0), 0);
-    const calls = daily.reduce((s, d) => s + (Number(d.calls) || 0), 0);
-    const tokens = daily.reduce((s, d) => s + (Number(d.tokens) || 0), 0);
-    const active = daily.filter(d => (Number(d.consumed) || 0) > 0);
-    const idle = daily.filter(d => (Number(d.consumed) || 0) <= 0);
+    // 日历卡用的是 dailySeries（云端逐笔优先、本机补盲），这里必须同口径，
+    // 否则"区间合计"会跟上面日历卡对不上。
+    const series = dailySeries(30);
+    if (!series.length) return { title: '消耗日历', sub: '还没有可用记录', html: '' };
+    const lmap = {};
+    (D.daily || []).forEach(d => { lmap[d.date] = d; });
+    const total = series.reduce((s, d) => s + (Number(d.consumed) || 0), 0);
+    const calls = series.reduce((s, d) => s + (Number((lmap[d.date] || {}).calls) || 0), 0);
+    const tokens = series.reduce((s, d) => s + (Number((lmap[d.date] || {}).tokens) || 0), 0);
+    const active = series.filter(d => (Number(d.consumed) || 0) > 0);
+    const idle = series.filter(d => !((Number(d.consumed) || 0) > 0));
     const max = Math.max(...active.map(d => Number(d.consumed) || 0), 0.01);
     let peak = active[0] || {};
     active.forEach(d => { if ((Number(d.consumed) || 0) > (Number(peak.consumed) || 0)) peak = d; });
-    // 只列有消耗的日期：把一堆 0/0/— 铺成十几行，既占地方又像是加错了
     const rows = active.slice().reverse().map(d => {
       const v = Number(d.consumed) || 0;
-      return [esc(d.date || ''), F.credit(v), F.fmt(Number(d.calls) || 0),
-        d.tokens ? F.fmtWan(d.tokens) : '—', detailBar(v / max * 100)];
+      const l = lmap[d.date] || {};
+      return [esc(d.date), F.credit(v), F.fmt(Number(l.calls) || 0),
+        l.tokens ? F.fmtWan(l.tokens) : '—', detailBar(v / max * 100)];
     });
     const idleNote = idle.length
-      ? `<p class="detail-note">另有 ${idle.length} 天没有消耗记录（${esc(idle[0].date || '')} ~ ${esc(idle[idle.length - 1].date || '')}），未逐行列示。</p>`
+      ? `<p class="detail-note">另有 ${idle.length} 天没有消耗记录（${esc(idle[0].date)} ~ ${esc(idle[idle.length - 1].date)}），未逐行列示。</p>`
       : '';
     return {
       title: '消耗日历 · 近 30 天',
-      sub: '只列有消耗的日期；占比条按区间最高值归一',
+      sub: '云端逐笔优先、本机补盲（与日历卡同口径）；调用与 Token 只有本机能给',
       html: detailKpis([
         ['区间合计', F.credit(total) + ' 分'],
         ['日均', F.credit(active.length ? total / active.length : 0) + ' 分'],
@@ -1073,21 +1077,28 @@
   }
 
   function detailHourly() {
-    const list = (D.hourly || []).filter(h => !h.isFuture);
-    const total = list.reduce((s, h) => s + (Number(h.points) || 0), 0);
+    // 口径必须跟流水页一致：云端逐笔 + 同步后本机（todayStat 已合并）。
+    // 之前这里读 D.hourly（纯本机），于是出现"时段图 76 分、流水 262 分"。
+    const s = todayStat();
+    const nowHour = (D.meta && D.meta.nowHour != null) ? D.meta.nowHour : new Date().getHours();
+    const list = (s.hours || []).filter(h => h.hour <= nowHour);
+    const total = s.consumed || 0;
     const max = Math.max(...list.map(h => Number(h.points) || 0), 0.01);
     let peak = list[0] || {};
     list.forEach(h => { if ((Number(h.points) || 0) > (Number(peak.points) || 0)) peak = h; });
     const rows = list.map(h => {
       const v = Number(h.points) || 0;
-      return [esc(h.label), F.credit(v), F.fmt(Number(h.requests) || 0), detailBar(v / max * 100)];
+      return [`${F.pad(h.hour)}:00–${F.pad((h.hour + 1) % 24)}:00`, F.credit(v),
+        F.fmt(Number(h.requests) || 0), detailBar(v / max * 100)];
     });
     return {
       title: '今日消耗时段分布',
-      sub: '按小时统计，只列已经过去的小时',
+      sub: s.cloud ? '云端逐笔 + 同步后本机，与积分流水同一口径' : '本机记录口径（未连接账号）',
       html: detailKpis([
         ['今日合计', F.credit(total) + ' 分'],
-        ['峰值时段', peak.label ? `${esc(peak.label)} · ${F.credit(Number(peak.points) || 0)} 分` : '—']
+        ['调用', F.fmt(s.requests || 0) + ' 次'],
+        ['峰值时段', peak.hour != null ? `${F.pad(peak.hour)}:00 · ${F.credit(Number(peak.points) || 0)} 分` : '—'],
+        ['平均每次', (s.avgPerRequest || 0).toFixed(2) + ' 分']
       ]) + detailTable(
         [{ label: '时段' }, { label: '消耗', num: true }, { label: '调用', num: true }, { label: '相对峰值' }], rows)
     };
