@@ -3009,6 +3009,10 @@
        光标再回来时按累计位移补一次 → 窗口瞬移，甚至直接飞出屏幕。
        下面的 queueMove 仅作旧后端的兜底。 */
     let drag = null, dragPending = null, dragTimer = 0, dragLast = 0;
+    // 最大化状态下按住标题栏：先只记起点，等指针真的移动了才还原。
+    // 原来在 mousedown 里直接调 win_max，于是双击最大化后随便单击一下标题栏，
+    // 窗口就缩回去了 —— 这是"最大化后单击变小"的真正原因。
+    let restoreAt = null;
     const queueMove = (x, y) => {
       dragPending = [x, y];
       if (dragTimer) return;
@@ -3021,17 +3025,9 @@
         if (p) bridge.call('win_move', p[0], p[1]);
       }, wait);
     };
-    const startDrag = async e => {
-      if (!topbar || e.button !== 0 || !bridge.has()) return;
-      if (e.target.closest('button, input, select, textarea, a, .win-controls, .dock')) return;
-      e.preventDefault();                   // 别触发文本选中，也别让浏览器自己开始拖拽
-      const native = bridge.can('win_drag_start');
-      if (winMaxed) {                       // 最大化时拖动 = 先还原，再跟随光标
-        applyWinState(await bridge.call('win_max'));
-        await new Promise(r => setTimeout(r, 70));
-      }
+    const beginDrag = async e => {
       document.body.classList.add('is-dragging');
-      if (native) {
+      if (bridge.can('win_drag_start')) {
         bridge.call('win_drag_start');      // 结束时会回调 App.__dragEnd()
         return;
       }
@@ -3039,9 +3035,20 @@
       if (!pos || pos.x == null) { document.body.classList.remove('is-dragging'); return; }
       drag = { sx: e.screenX, sy: e.screenY, wx: pos.x, wy: pos.y, dpr: window.devicePixelRatio || 1 };
     };
+    const startDrag = async e => {
+      if (!topbar || e.button !== 0 || !bridge.has()) return;
+      if (e.target.closest('button, input, select, textarea, a, .win-controls, .dock')) return;
+      e.preventDefault();                   // 别触发文本选中，也别让浏览器自己开始拖拽
+      if (winMaxed) {
+        restoreAt = { x: e.screenX, y: e.screenY };
+        return;
+      }
+      beginDrag(e);
+    };
     if (topbar) topbar.addEventListener('mousedown', startDrag);
     // 系统拖动时后面不会回调 __dragEnd，靠 mouseup 兜一次，别把拖动光标留在地上
     window.addEventListener('mouseup', () => {
+      restoreAt = null;
       if (document.body.classList.contains('is-dragging')) {
         setTimeout(() => { 
           document.body.classList.remove('is-dragging');
@@ -3050,6 +3057,16 @@
       }
     });
     window.addEventListener('mousemove', e => {
+      if (restoreAt) {
+        // 4px 死区：双击取消选中、轻微抖动都不该把最大化窗口还原
+        if (Math.abs(e.screenX - restoreAt.x) < 4 && Math.abs(e.screenY - restoreAt.y) < 4) return;
+        restoreAt = null;
+        bridge.call('win_max').then(st => {
+          applyWinState(st);
+          beginDrag(e);
+        });
+        return;
+      }
       if (!drag) return;
       queueMove(
         Math.round(drag.wx + (e.screenX - drag.sx) * drag.dpr),

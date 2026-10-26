@@ -709,6 +709,10 @@ class Desktop:
             user32.GetCursorPos(ctypes.byref(pt))
             off_x, off_y = pt.x - rc.left, pt.y - rc.top
             w, h = rc.right - rc.left, rc.bottom - rc.top
+            # 光标可能落在窗口外（最大化还原后按住的位置），偏移钳进窗口内，
+            # 否则第一帧会把窗口整个甩到光标左上方。
+            off_x = min(max(0, off_x), max(1, w - 1))
+            off_y = min(max(0, off_y), max(1, h - 1))
             if getattr(self, "_maxed", False):
                 self._maxed = False
             # 仅首帧提一次 z-order（等同常规窗口被拖起时的置顶），之后只平移
