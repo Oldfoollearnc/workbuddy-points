@@ -552,15 +552,14 @@ class Desktop:
         """窗口置顶开关：主界面与小窗一起生效，并记住偏好。"""
         self.always_on_top = bool(flag)
         target = HWND_TOPMOST if self.always_on_top else HWND_NOTOPMOST
-        for title in (MAIN_TITLE, POPUP_TITLE):
-            hwnd = find_hwnd(title)
-            if not hwnd:
-                continue
+        # 只管主窗：小窗（快捷面板）按设计就该常驻最前，不跟着一起取消
+        hwnd = find_hwnd(MAIN_TITLE)
+        if hwnd:
             try:
                 user32.SetWindowPos(hwnd, target, 0, 0, 0, 0,
                                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
             except Exception as e:
-                log(f"set_always_on_top({title}) error: {e}")
+                log(f"set_always_on_top error: {e}")
         log("always_on_top -> %s" % self.always_on_top)
         return {"ok": True, "on": self.always_on_top}
 
@@ -570,7 +569,9 @@ class Desktop:
         只读最近一次快照，不触发重新扫描 —— 右键菜单要立刻出来。
         """
         try:
-            d = getattr(self.usage, "_data", None) or {}
+            d = getattr(self.usage, "_data", None)
+            if not d:
+                return ""
             used = float(((d.get("today") or {}).get("consumed")) or 0)
             return "今日 %s 分" % format(int(round(used)), ",d")
         except Exception:
