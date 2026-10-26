@@ -1004,6 +1004,7 @@ class Desktop:
             return True
         try:
             self.login_win.hide()
+            self.account.cancel_login()      # 用户关窗 = 放弃这次扫码，别再后台导航
         except Exception:
             pass
         return False

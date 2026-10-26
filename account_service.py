@@ -146,6 +146,10 @@ class AccountService:
         self._last_check = None
         self._syncing = False
         self._sync_lock = threading.Lock()   # 定时轮询与手动同步可能撞车，用锁而不是布尔判断
+        # 用户正在扫码登录：这期间任何后台导航（try_restore / sync 重试）都必须让路，
+        # 否则会把刚渲染好的二维码整页刷掉 —— 用户看到的就是"二维码刚出来又刷新"。
+        self._login_active = False
+        self._login_at = 0.0
         self.state = {
             "status": "disconnected",   # disconnected | logining | connected | expired | error
             "user": None,
@@ -201,16 +205,31 @@ class AccountService:
         if not self.win:
             return {"ok": False, "error": "登录窗口不可用"}
         try:
+            # 已经在登录页、且刚打开不久：直接亮窗口，不再 load_url。
+            # 以前每次点「连接账号」都整页重载一次，二维码渲染完就被下一次加载顶掉。
+            href = self._href()
+            reuse = ("/login" in href) and (time.time() - self._login_at < 120)
+            self._login_active = True
+            self._login_at = time.time()
             self.win.show()
-            self._nav(LOGIN_URL, wait=2.0)
-            threading.Timer(2.5, self._install_hook).start()
+            if reuse:
+                _log("open_login: 复用已打开的登录页，不重新加载")
+            else:
+                self._nav(LOGIN_URL, wait=2.0)
+            threading.Timer(1.0, self._install_hook).start()
             with self.lock:
                 self.state["status"] = "logining"
                 self.state["autoLogin"] = True     # 用户主动登录 → 恢复开机自动回填
             threading.Thread(target=self._watch_login, daemon=True).start()
             return {"ok": True}
         except Exception as e:
+            self._login_active = False
             return {"ok": False, "error": str(e)}
+
+    def cancel_login(self):
+        """登录窗被用户关掉：停止登录态跟踪，别让后台还占着窗口导航。"""
+        self._login_active = False
+        _log("login cancelled by user")
 
     def _install_hook(self):
         """新窗口一律拦在本窗口内，避免回调被外部浏览器接走。"""
@@ -236,26 +255,38 @@ class AccountService:
         """不打断用户当前页面：只检测当前页所在域的登录状态；
         同步阶段再自动切到有会话的那个域。"""
         deadline = time.time() + timeout
-        while time.time() < deadline and not self._stop:
-            time.sleep(5)
-            self._install_hook()
-            st = self._console_status()
-            if st != self._last_check:
-                self._last_check = st
-                _log(f"watch console={st} href={self._href()}")
-            if st == 200:
-                _log("login detected (billing 200)")
-                res = self.sync()
-                if res.get("ok"):
+        try:
+            while time.time() < deadline and not self._stop:
+                time.sleep(5)
+                self._install_hook()
+                st = self._console_status()
+                if st != self._last_check:
+                    self._last_check = st
+                    _log(f"watch console={st} href={self._href()}")
+                if st == 200:
+                    _log("login detected (billing 200)")
+                    # 同步会把页面导航到 /profile/plans-usage。窗口还开着的话，
+                    # 用户看到的就是"刚授权完，页面又刷了一次" —— 先收起再做，失败再放出来。
+                    hidden = False
                     try:
                         self.win.hide()
+                        hidden = True
                     except Exception:
                         pass
-                    return
-                _log("sync after login failed, keep window open")
-                with self.lock:
-                    self.state["status"] = "logining"
-        _log("watch timeout")
+                    res = self.sync()
+                    if res.get("ok"):
+                        return
+                    _log("sync after login failed, keep window open")
+                    if hidden:
+                        try:
+                            self.win.show()
+                        except Exception:
+                            pass
+                    with self.lock:
+                        self.state["status"] = "logining"
+            _log("watch timeout")
+        finally:
+            self._login_active = False
 
     def _href(self):
         try:
@@ -445,8 +476,14 @@ class AccountService:
             _log("try_restore skipped: 用户已退出登录")
             return False
         time.sleep(2.0)
+        if self._login_active:
+            _log("try_restore skipped: 用户正在扫码登录，别去动他的窗口")
+            return False
         # 先导一次页面把会话激活（签到要用同源 fetch，也需要页面在 workbuddy 域）
         self._nav(ORIGINS[0] + "/app", wait=3.5)
+        if self._login_active:
+            _log("try_restore aborted: 用户开始扫码登录")
+            return False
         if cdp_enabled() and os.path.exists(COOKIE_FILE):
             self.restore_session()
 
@@ -454,6 +491,9 @@ class AccountService:
             _log("try_restore: 距上次同步不足 %s 分钟，直接用缓存，跳过主动同步" % self.interval_min)
             return bool(self.state.get("cloud"))
 
+        if self._login_active:
+            _log("try_restore aborted: 用户开始扫码登录")
+            return False
         self._nav(ORIGINS[0] + PROFILE_PATH, wait=4.5)
         res = self.sync()
         _log(f"try_restore sync ok={res.get('ok')}")
