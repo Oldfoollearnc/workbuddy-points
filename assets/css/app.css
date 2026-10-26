@@ -2547,12 +2547,16 @@ body[data-mode="popup"] .rz { display: none; }
 /* 默认 1389×936 的窗口：右列两张卡（构成环图 + 额度）比左列高，
    整行被它们顶起来。这里先把右侧压紧，再把 KPI 收一档，保证一屏收下。 */
 @media (max-height: 960px) {
+  .views { padding: 8px 16px 12px; }
+  .grid { gap: 12px; }
+  .grid + .grid { margin-top: 12px; }
   .comp-wrap { gap: 6px; padding: 4px 16px 2px; }
-  .comp-donut { min-height: 160px; max-height: 170px; }
-  .comp-list { gap: 3px; font-size: 10.5px; }
+  .comp-donut { min-height: 156px; max-height: 160px; }
+  .comp-list { gap: 2px; font-size: 10.5px; }
   .quota-hint { display: none; }
   .quota-stats > div { padding: 5px 2px; }
-  .kpi { min-height: 100px; }
+  .kpi { min-height: 92px; }
+  .chart-hourly { min-height: clamp(150px, 21vh, 210px); }
 }
 
 /* 低高度窗口（768p 笔记本、窗口被压矮）：先保证一屏能看全，图表不强行占满 300px */
