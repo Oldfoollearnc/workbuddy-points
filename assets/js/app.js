@@ -3484,7 +3484,12 @@
         if (acctOpen) setAccountPop(false);
         if (state.mode === 'popup') bridge.hide();
       }
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') { e.preventDefault(); refresh(); }
+      // Ctrl+R = 重载整个界面：改了样式/脚本后能立刻看到。
+      // 只刷数据的话，CSS 改动永远不生效，看起来就像"没改"。
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        location.reload();
+      }
       if (e.altKey && /^[1-5]$/.test(e.key) && state.mode === 'main') {
         go(['overview', 'analytics', 'ledger', 'account', 'settings'][+e.key - 1]);
       }

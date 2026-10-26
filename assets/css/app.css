@@ -1171,7 +1171,7 @@ body.is-dragging .topbar { cursor: default; }
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  min-height: 138px;
+  min-height: 118px;
 }
 .kpi::after {
   content: "";
@@ -1231,11 +1231,11 @@ body.is-dragging .topbar { cursor: default; }
 
 .chart-card { display: flex; flex-direction: column; padding: 15px 16px 12px; }
 /* 图表高度跟着窗口走：窗口一矮，先把图压扁，别逼用户滚三屏才看全 */
-.chart-cal { width: 100%; height: clamp(190px, 26vh, 300px); flex: none; }
+.chart-cal { width: 100%; height: clamp(190px, 27vh, 288px); flex: none; }
 .chart { flex: 1 1 auto; min-height: 160px; position: relative; margin-top: 8px; }
-.chart-hourly { min-height: clamp(150px, 20vh, 292px); }
-.chart-donut { min-height: clamp(160px, 21vh, 302px); }
-.chart-trend { min-height: clamp(160px, 21vh, 300px); }
+.chart-hourly { min-height: clamp(150px, 24vh, 224px); }
+.chart-donut { min-height: clamp(160px, 23vh, 288px); }
+.chart-trend { min-height: clamp(160px, 27vh, 280px); }
 .chart-gauge { min-height: clamp(112px, 13vh, 152px); }
 .chart-stack { min-height: clamp(170px, 22vh, 320px); }
 .chart-task { min-height: clamp(170px, 22vh, 320px); }
@@ -2539,7 +2539,7 @@ body[data-mode="popup"] .rz { display: none; }
   .views { padding: 14px 16px 20px; }
   .topbar { padding: 0 14px; }
   .card-head h2 { font-size: 13.5px; }
-  .kpi { min-height: 126px; padding: 12px 14px 0; }
+  .kpi { min-height: 110px; padding: 12px 14px 0; }
   .kpi-value span { font-size: 26px; }
   .side-card { padding: 11px 12px; }
 }
