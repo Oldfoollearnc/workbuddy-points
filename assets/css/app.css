@@ -2526,8 +2526,9 @@ body[data-mode="popup"] .rz { display: none; }
 @media (max-width: 1280px) {
   .main-shell { grid-template-columns: 208px minmax(0, 1fr); }
   .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .span-8, .span-7, .span-5, .span-4, .span-6 { grid-column: span 12; }
-  .chart-donut, .chart-task { min-height: 280px; }
+  /* 1280 以下仍保留 8/4 并排：1080 宽时趋势图约 700、构成卡约 350，放得下。
+     只有更窄（≤1100）才让它们各占一整行。 */
+  .span-7, .span-5, .span-6 { grid-column: span 12; }
   .insight-list { grid-template-columns: 1fr; }
   .ledger-tools .search { width: 160px; max-width: 160px; flex-basis: 120px; }
   .quota-wide .quota-body { grid-template-columns: 1fr; gap: 10px; }
@@ -2536,6 +2537,11 @@ body[data-mode="popup"] .rz { display: none; }
 
   .set-cols { grid-template-columns: 1fr; }
   .set-pair { grid-template-columns: 1fr; }
+}
+
+/* 更窄的窗口（半屏、小笔记本）：8/4 并排会挤成两列窄条，退回整行堆叠 */
+@media (max-width: 1100px) {
+  .span-8, .span-4 { grid-column: span 12; }
 }
 
 @media (min-width: 1680px) {
