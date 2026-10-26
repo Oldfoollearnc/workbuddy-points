@@ -5,6 +5,7 @@ logs/
 .edge-cdp/
 run.out
 checkin.json
+usage-ledger.json
 
 # 账号凭证与本地私有配置（绝不入库）
 session.bin

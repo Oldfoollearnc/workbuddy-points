@@ -2880,6 +2880,13 @@
         if (!r) return;
         setText('#cacheSize', bytesText(r.cacheBytes));
         setText('#logSize', bytesText(r.logBytes));
+        const led = r.ledger || {};
+        setText('#ledgerSize', led.days
+          ? `${led.days} 天 · ${bytesText(led.bytes)}`
+          : '还没有记录');
+        setText('#ledgerNote', led.days
+          ? `从 ${led.first} 到 ${led.last}；WorkBuddy 清理旧会话后，这段历史仍能追溯`
+          : '每天一条聚合记录；WorkBuddy 清理旧会话后，历史消耗仍能追溯');
       } catch (e) { /* 只影响设置页的显示 */ }
     };
     loadMaintenance();
@@ -2924,8 +2931,25 @@
       }
     });
 
-    const btnClearLogs = $('#btnClearLogs');
-    if (btnClearLogs) armDanger(btnClearLogs, '清空', async () => {
+    const btnClearLedger = $('#btnClearLedger');
+    if (btnClearLedger) armDanger(btnClearLedger, '清空', async () => {
+      btnClearLedger.disabled = true;
+      try {
+        const r = await bridge.call('clear_usage_ledger');
+        if (r && r.ok) {
+          toast('本机台账已清空，下次刷新会从现有记录重新累计');
+          loadMaintenance();
+        } else {
+          toast('清空失败：' + ((r && r.error) || '未知错误'), 'i-alert');
+        }
+      } catch (e) {
+        toast('清空失败', 'i-alert');
+      } finally {
+        btnClearLedger.disabled = false;
+      }
+    });
+
+    const btnClearLogs = $('#btnClearLogs');    if (btnClearLogs) armDanger(btnClearLogs, '清空', async () => {
       btnClearLogs.disabled = true;
       try {
         const r = await bridge.call('clear_logs');

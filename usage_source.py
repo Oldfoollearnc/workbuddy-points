@@ -35,6 +35,10 @@ HOME = os.path.expanduser("~")
 # 这样在公司电脑上把数据放在 D 盘或网络盘时也能读到，见 docs/本地数据源方案.md
 CONFIG_PATH = app_paths.data_path("points_config.json")
 CACHE_PATH = app_paths.data_path(".cache", "usage.json")
+# 本机台账：每天一行（消耗 / 次数），只增不减。
+# 为什么要它：本机消耗读的是 WorkBuddy 的会话 JSONL，那批文件被清理或换机后历史就没了；
+# 自己记一份，才不会出现"上个月明明用了 8000 分，现在只剩 3000"。
+LEDGER_PATH = app_paths.data_path("usage-ledger.json")
 LOG_PATH = app_paths.data_path("logs", "app.log")
 # v5：缓存从"聚合结果快照"改成"按文件的逐笔记录 + 已读字节偏移"。
 # 这样 refresh 只需要从上次读到的位置往后读新增字节，不用每次重扫全部会话文件。
@@ -43,6 +47,54 @@ CACHE_VER = 6
 
 def log(msg):
     logutil.log(LOG_PATH, msg, "usage")
+
+
+_ledger_lock = threading.Lock()
+
+
+def _merge_ledger(by_day, by_day_req, now):
+    """把本次聚合到的每日消耗并进本机台账，返回台账里的 {日期: {points, calls}}。
+
+    只增不减：同一天这次算出来的值比历史小（分页失败、缓存半截），保留大的那个。
+    没有变化就不写盘，避免每 30 秒刷新一次都落一次 IO。
+    """
+    with _ledger_lock:
+        led = fsutil.load_json(LEDGER_PATH, {}) or {}
+        days = led.get("days") if isinstance(led.get("days"), dict) else {}
+        changed = False
+        for d, v in by_day.items():
+            key = d.isoformat()
+            old = days.get(key) or {}
+            old_pts = float(old.get("points") or 0)
+            old_calls = int(old.get("calls") or 0)
+            pts = round(max(old_pts, float(v or 0)), 2)
+            calls = max(old_calls, int(by_day_req.get(d, 0)))
+            if pts != old_pts or calls != old_calls:
+                days[key] = {"points": pts, "calls": calls}
+                changed = True
+        if changed:
+            led["days"] = days
+            led["updated"] = now.strftime("%Y-%m-%d %H:%M:%S")
+            try:
+                fsutil.save_json(LEDGER_PATH, led)
+            except Exception as e:
+                log(f"ledger save failed: {e}")
+        return days
+
+
+def ledger_info():
+    """给设置页看的台账概况。"""
+    with _ledger_lock:
+        led = fsutil.load_json(LEDGER_PATH, {}) or {}
+    days = led.get("days") if isinstance(led.get("days"), dict) else {}
+    size = 0
+    try:
+        size = os.path.getsize(LEDGER_PATH)
+    except OSError:
+        pass
+    return {"days": len(days), "bytes": size,
+            "first": min(days) if days else "", "last": max(days) if days else "",
+            "updated": led.get("updated") or "", "path": LEDGER_PATH}
 
 MODEL_NAMES = {
     "deepseek-v4.1-flash": "DeepSeek-V4.1-Flash",
@@ -686,6 +738,17 @@ class UsageService:
 
         data_start = min(by_day.keys()).strftime("%Y-%m-%d") if by_day else today.strftime("%Y-%m-%d")
 
+        # 本机台账：比 JSONL 更长寿的一份账（只增不减）
+        ledger_days = _merge_ledger(by_day, by_day_req, now)
+        if ledger_days:
+            total_all = round(sum(float(x.get("points") or 0) for x in ledger_days.values()), 2)
+            days_all = len(ledger_days)
+            first_all = min(ledger_days)
+        else:
+            total_all = round(sum(r["credit"] for r in all_records), 2)
+            days_all = len(all_days)
+            first_all = min(all_days).strftime("%Y-%m-%d") if all_days else ""
+
         # 最近 72 小时逐笔时间线：[毫秒时间戳, 积分]
         # 用途：云端余额是"上次同步那一刻"的快照，减去这段时间本地又花掉的量，
         # 才是此刻真实的可用积分（云端入账有延迟，单靠余额会偏高）。
@@ -781,9 +844,10 @@ class UsageService:
             "projectsMonth": pw_month["items"],
             "projectsMonthTotal": pw_month["total"],
             # 本机全量：有多台机器同用一个账号时，这张"这台机器花了多少"只能由本机回答
-            "totalAll": round(sum(r["credit"] for r in all_records), 2),
-            "daysAll": len(all_days),
-            "firstDayAll": min(all_days).strftime("%Y-%m-%d") if all_days else "",
+            "totalAll": total_all,
+            "daysAll": days_all,
+            "firstDayAll": first_all,
+            "ledgerDays": len(ledger_days),
             "daily": daily,
             "week": week,
             "heat": heat,

@@ -1195,7 +1195,20 @@ class Api:
             "logBytes": logutil.size(LOG_PATH),
             "cachePath": app_paths.data_path(".cache", "usage.json"),
             "logPath": LOG_PATH,
+            "ledger": usage_source.ledger_info(),
         }
+
+    def clear_usage_ledger(self):
+        """清空本机台账（不动 WorkBuddy 记录、也不动解析缓存）。"""
+        try:
+            p = usage_source.LEDGER_PATH
+            if os.path.exists(p):
+                os.remove(p)
+            log("clear_usage_ledger -> %s" % p)
+            return {"ok": True}
+        except Exception as e:
+            log(f"clear_usage_ledger error: {e}")
+            return {"ok": False, "error": str(e)[:160]}
 
     def clear_usage_cache(self):
         """删掉解析缓存；下次刷新会全量重建（本机记录本身不受影响）。"""
