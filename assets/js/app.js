@@ -1844,13 +1844,25 @@
     return sum(daily.slice(-Number(range)));
   }
 
+  /** 云端逐笔的积分字段叫 credit（本机 ledger 才叫 points），两个都认。 */
+  const rowCredit = r => {
+    const v = Number(r && (r.credit != null ? r.credit : r.points));
+    return Number.isFinite(v) ? v : 0;
+  };
+
   /** 云端账号级消耗（含其他设备）。没有云端逐笔时返回 null。 */
   function cloudPeriodSum(range) {
     const rows = cloudRows();
     if (!rows || !rows.length) return null;
-    if (range === 'all') return rows.reduce((s, r) => s + (Number(r.points) || 0), 0);
     let cut;
-    if (range === 'month') {
+    if (range === 'all') {
+      // 「全部」要对齐本机记录的起点，否则本机 60 天、云端 30 天，
+      // 两边时间窗不一样，算出来的"其他设备"是假的。
+      const first = (D.meta && D.meta.firstDayAll) || '';
+      const from = first ? new Date(first + 'T00:00:00').getTime() : NaN;
+      if (!Number.isFinite(from)) return rows.reduce((s, r) => s + rowCredit(r), 0);
+      cut = from;
+    } else if (range === 'month') {
       const now = new Date();
       cut = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
     } else {
@@ -1859,7 +1871,7 @@
     let total = 0, hit = 0;
     rows.forEach(r => {
       const t = rowTime(r);
-      if (t && t.getTime() >= cut) { total += Number(r.points) || 0; hit += 1; }
+      if (t && t.getTime() >= cut) { total += rowCredit(r); hit += 1; }
     });
     return hit ? total : null;
   }
@@ -1872,6 +1884,7 @@
     setText('#lcMachine', (D.meta && D.meta.machine) ? D.meta.machine : '本机');
 
     const cloud = cloudPeriodSum(range);
+    const connected = !!(ACCOUNT && ACCOUNT.status === 'connected');
     if (cloud && cloud > 0) {
       setText('#lcCloud', F.credit(cloud) + ' 分');
       setText('#lcShare', Math.round(Math.min(1, local / cloud) * 100) + '%');
@@ -1880,14 +1893,20 @@
     } else {
       setText('#lcCloud', '—');
       setText('#lcShare', '—');
-      setText('#lcOther', '连上账号后可对比');
+      setText('#lcOther', '—');
     }
 
-    const days = Number(D.meta && D.meta.daysAll) || 0;
+    const dailyArr = Array.isArray(D.daily) ? D.daily : [];
+    const days = Number(D.meta && D.meta.daysAll)
+      || dailyArr.filter(d => (Number(d.consumed) || 0) > 0).length;
     const first = (D.meta && D.meta.firstDayAll) || '';
-    setText('#lcNote', range === 'all'
-      ? (days ? `本机记录共 ${days} 天，从 ${first} 起` : '本机还没有可用记录')
-      : '只统计这台机器的 WorkBuddy 会话记录');
+    let note = range === 'all'
+      ? (days ? `本机记录共 ${days} 天${first ? '，从 ' + first + ' 起' : ''}` : '本机还没有可用记录')
+      : '只统计这台机器的 WorkBuddy 会话记录';
+    if (!(cloud && cloud > 0)) {
+      note += connected ? ' · 云端同期没有逐笔数据' : ' · 连上账号后可对比占比';
+    }
+    setText('#lcNote', note);
     $$('#lcSeg button').forEach(b => b.classList.toggle('is-active', b.dataset.lc === range));
   }
 
