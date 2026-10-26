@@ -934,17 +934,24 @@
 
   let spotTimer = 0;
 
-  /** 滚到目标并闪一下：从 KPI 跳过来时，得让人知道"看哪儿"。 */
+  /** 清掉所有定位标记：切页时不能把上一页的高亮带过去。 */
+  function clearSpots() {
+    $$('.is-spot').forEach(el => el.classList.remove('is-spot'));
+  }
+
+  /** 滚到目标并标一下：从 KPI 跳过来时，得让人知道"看哪儿"。 */
   function spotlight(sel) {
     const el = typeof sel === 'string' ? document.querySelector(sel) : sel;
     if (!el) return;
+    const view = el.closest('.view');
+    if (view && !view.classList.contains('is-active')) return;   // 目标不在当前页，别乱标
     try {
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     } catch (e) {
       try { el.scrollIntoView(); } catch (e2) { /* ignore */ }
     }
     el.classList.remove('is-spot');
-    void el.offsetWidth;                    // 强制回流，动画才能重播
+    void el.offsetWidth;                    // 强制回流，重新起一次过渡
     el.classList.add('is-spot');
     clearTimeout(spotTimer);
     spotTimer = setTimeout(() => el.classList.remove('is-spot'), 1900);
@@ -980,7 +987,7 @@
 
   function renderAliases() {
     const box = $('#aliasList');
-    if (!box) return;
+    if (!box || box.closest('[hidden]')) return;      // 入口已隐藏，不再白建 28 行 DOM
     const all = aliasCandidates();
     const kwEl = $('#aliasSearch');
     const kw = ((kwEl && kwEl.value) || '').trim().toLowerCase();
@@ -2643,6 +2650,7 @@
      ========================================================= */
 
   function go(view) {
+    clearSpots();
     if (state.view === view) return;
     state.view = view;
     $$('.nav-item, .tb-nav-item').forEach(b => b.classList.toggle('is-active', b.dataset.view === view));
@@ -3476,24 +3484,7 @@
       });
     });
 
-    /* 图表卡：点标题栏放大成整行（图更高），再点一次收起。
-       图例、下拉、按钮这些交互元素往上不响应，避免误触。 */
-    $$('.chart-card .card-head').forEach(head => {
-      head.classList.add('is-zoomable');
-      head.title = '点击放大 / 收起这张图';
-      head.addEventListener('click', e => {
-        if (e.target.closest('button, input, select, a, .segmented, .chip')) return;
-        const card = head.closest('.chart-card');
-        if (!card) return;
-        const on = card.classList.toggle('is-expanded');
-        if (on) {
-          setTimeout(() => {
-            try { card.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
-            catch (err) { try { card.scrollIntoView(); } catch (e2) { /* ignore */ } }
-          }, 40);
-        }
-      });
-    });
+    /* 图表卡点击见 openDetail()：走浮层详情，不再原地放大 —— 放大后会打乱整个栅格 */
 
     /* 账户页「今日状态」：三个「立即检查」+ 全部检查，都走同一条只读探测 */
     ['stCkBtn', 'stTvBtn', 'stClBtn', 'stAll'].forEach(id => {

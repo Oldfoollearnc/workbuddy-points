@@ -478,21 +478,11 @@ class Tray:
             auto_on = bool(self.autostart_state and self.autostart_state())
         except Exception:
             auto_on = False
-        info = ""
-        try:
-            info = (self.status_provider() or "").strip() if self.status_provider else ""
-        except Exception:
-            info = ""
-        self._menu_items = []
-        if info:
-            self._menu_items.append((ID_INFO, info, "#94A3B8"))
-            self._menu_items.append((0, None, None))
-        self._menu_items += [
-            # 只留真正会用到的四个：自启 / 更新 / 设置 / 退出。
-            # 打开面板、刷新、同步都能在界面里一步点到，塞进这里只是噪音。
-            (ID_AUTOSTART, ("✓ 开机自启" if auto_on else "开机自启"), "#64748B"),
-            (ID_UPDATE, "检查更新", "#F59E0B"),
-            (ID_SETTINGS, "设置", "#0EA5E9"),
+        # 菜单只放操作，不放数据：加了「今日 N 分」那行之后又花又容易被误读成余额
+        self._menu_items = [
+            (ID_AUTOSTART, ("✓ 开机自启" if auto_on else "开机自启"), None),
+            (ID_UPDATE, "检查更新", None),
+            (ID_SETTINGS, "设置", None),
             (0, None, None),
             (ID_EXIT, "退出", "#DC2626"),
         ]
@@ -626,8 +616,6 @@ class Tray:
 
                 if hovered:
                     color = pal["hover_text"]
-                elif mid == ID_INFO:
-                    color = accent
                 elif mid == ID_EXIT:
                     color = accent
                 else:

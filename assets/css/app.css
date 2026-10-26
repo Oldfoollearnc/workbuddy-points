@@ -2544,23 +2544,16 @@ body.is-loading .boot-mask { display: flex; }
 body.is-maximized .rz { display: none; }
 body[data-mode="popup"] .rz { display: none; }
 
-/* 图表卡点标题栏放大：整行铺满，图长高；再点收起 */
-.card-head.is-zoomable { cursor: zoom-in; }
-.chart-card.is-expanded { grid-column: span 12; }
-.chart-card.is-expanded .card-head.is-zoomable { cursor: zoom-out; }
-.chart-card.is-expanded .chart { min-height: 52vh; }
-.chart-card.is-expanded .chart-cal { height: 56vh; }
-.view .chart-card.is-expanded .comp-donut { min-height: 42vh; max-height: 56vh; }
+/* 卡片进详情浮层的入口提示 */
+.card-head.is-zoomable { cursor: pointer; }
+.card-head.is-zoomable:hover h2 { color: var(--brand); }
 
-/* 从 KPI 卡跳转过来时闪一下目标格：不然只是换了页，不知道该看哪儿 */
+/* 从 KPI 卡跳转过来时标出目标那一格：静态底色，不做动画 */
 .is-spot {
   border-radius: 10px;
-  animation: spotPulse 1.9s var(--ease-out);
-}
-@keyframes spotPulse {
-  0% { box-shadow: 0 0 0 0 rgba(47, 111, 237, .40); background: var(--brand-soft); }
-  30% { box-shadow: 0 0 0 7px rgba(47, 111, 237, .10); background: var(--brand-soft); }
-  100% { box-shadow: 0 0 0 0 rgba(47, 111, 237, 0); background: transparent; }
+  background: var(--brand-soft);
+  box-shadow: inset 0 0 0 1px var(--brand);
+  transition: background-color 240ms var(--ease-out), box-shadow 240ms var(--ease-out);
 }
 
 /* 点一下就能跳到流水并筛好，光标给出可点的暗示 */
