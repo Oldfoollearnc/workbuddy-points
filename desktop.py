@@ -270,6 +270,7 @@ class Desktop:
         self.tray = None
         self.quitting = False
         self.close_to_tray = True
+        self.always_on_top = False      # 用户偏好（界面开关），决定 _pin_temporarily 的行为
         self.scale = dpi_scale()
         self.pop_size = (POP_W, POP_H)
         # 小窗状态簿记：意图（而非可见性）驱动托盘单击的开/关，避免与"点外部收起"互相打架
@@ -526,6 +527,34 @@ class Desktop:
             log("notify error: %s" % e)
         return "none"
 
+    def set_always_on_top(self, flag):
+        """窗口置顶开关：主界面与小窗一起生效，并记住偏好。"""
+        self.always_on_top = bool(flag)
+        target = HWND_TOPMOST if self.always_on_top else HWND_NOTOPMOST
+        for title in (MAIN_TITLE, POPUP_TITLE):
+            hwnd = find_hwnd(title)
+            if not hwnd:
+                continue
+            try:
+                user32.SetWindowPos(hwnd, target, 0, 0, 0, 0,
+                                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+            except Exception as e:
+                log(f"set_always_on_top({title}) error: {e}")
+        log("always_on_top -> %s" % self.always_on_top)
+        return {"ok": True, "on": self.always_on_top}
+
+    def tray_status(self):
+        """托盘右键菜单顶部那行只读信息：今天的消耗。
+
+        只读最近一次快照，不触发重新扫描 —— 右键菜单要立刻出来。
+        """
+        try:
+            d = getattr(self.usage, "_data", None) or {}
+            used = float(((d.get("today") or {}).get("consumed")) or 0)
+            return "今日 %s 分" % format(int(round(used)), ",d")
+        except Exception:
+            return ""
+
     def _pin_temporarily(self, hwnd, seconds=1.0):
         """临时置顶：窗口刚出来时压住其它程序，1 秒后自动放开。
 
@@ -536,6 +565,8 @@ class Desktop:
                                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
         except Exception:
             return
+        if self.always_on_top:
+            return          # 用户勾了「窗口置顶」：别 1 秒后又把自己放开
 
         def _unpin():
             time.sleep(seconds)
@@ -581,6 +612,8 @@ class Desktop:
                 pass
             user32.BringWindowToTop(hwnd)
             user32.SetForegroundWindow(hwnd)
+            if self.always_on_top:
+                self.set_always_on_top(True)      # 唤回窗口时把常驻置顶续上
             # 启动/展开时先置顶几秒：刚打开就被别的窗口盖住，看起来像"没打开"
             self._pin_temporarily(hwnd)
             self._safe_js(self.main,
@@ -1449,6 +1482,9 @@ class Api:
         self._desk.close_to_tray = bool(flag)
         return True
 
+    def set_always_on_top(self, flag):
+        return self._desk.set_always_on_top(flag)
+
     def open_data_dir(self):
         try:
             home = (data_source.resolve() or {}).get("home") \
@@ -1573,6 +1609,7 @@ def main():
         autostart_state=autostart.is_enabled,
         on_update=_tray_update,
         on_exit=app.quit,
+        status_provider=app.tray_status,
         logger=log,
     )
     app.tray = tray

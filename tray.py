@@ -63,6 +63,7 @@ VK_ESCAPE = 0x1B
 
 ID_OPEN_POPUP, ID_OPEN_MAIN, ID_REFRESH, ID_EXIT = 1, 2, 3, 4
 ID_SYNC, ID_AUTOSTART, ID_SETTINGS = 5, 6, 7
+ID_INFO = 8          # 只读信息行（今日消耗），点了不做任何事
 ID_UPDATE = 8
 
 # 菜单尺寸（逻辑像素；进程 DPI 无关，和界面 1:1 对应）
@@ -235,7 +236,7 @@ class Tray:
 
     def __init__(self, icon_path, on_click=None, on_open_main=None, on_refresh=None, on_exit=None,
                  on_sync=None, on_autostart=None, autostart_state=None, on_settings=None,
-                 on_update=None,
+                 on_update=None, status_provider=None,
                  tooltip="WorkBuddy 积分观测台 · 单击查看今日积分", logger=None):
         self.log = logger or (lambda msg: None)
         self.icon_path = icon_path
@@ -248,6 +249,7 @@ class Tray:
         self.autostart_state = autostart_state      # 返回 bool，用来画勾
         self.on_settings = on_settings
         self.on_update = on_update
+        self.status_provider = status_provider   # 返回菜单顶部那行只读信息
         self.tooltip = tooltip[:120]
 
         self.hwnd = None
@@ -476,7 +478,16 @@ class Tray:
             auto_on = bool(self.autostart_state and self.autostart_state())
         except Exception:
             auto_on = False
-        self._menu_items = [
+        info = ""
+        try:
+            info = (self.status_provider() or "").strip() if self.status_provider else ""
+        except Exception:
+            info = ""
+        self._menu_items = []
+        if info:
+            self._menu_items.append((ID_INFO, info, "#94A3B8"))
+            self._menu_items.append((0, None, None))
+        self._menu_items += [
             # 只留真正会用到的四个：自启 / 更新 / 设置 / 退出。
             # 打开面板、刷新、同步都能在界面里一步点到，塞进这里只是噪音。
             (ID_AUTOSTART, ("✓ 开机自启" if auto_on else "开机自启"), "#64748B"),
@@ -533,7 +544,7 @@ class Tray:
                 idx = self._hit(y)
                 cmd = self._menu_hit[idx][0] if idx >= 0 else 0
                 self._hide_menu()
-                if cmd:
+                if cmd and cmd != ID_INFO:
                     user32.PostMessageW(self.hwnd, WM_MENU_CMD, cmd, 0)
                 return 0
             if msg == WM_KEYDOWN and wparam == VK_ESCAPE:
@@ -603,7 +614,7 @@ class Tray:
                     gdi32.DeleteObject(sp)
                     continue
 
-                hovered = (i == self._menu_hover)
+                hovered = (i == self._menu_hover) and mid != ID_INFO
                 if hovered:
                     hb = gdi32.CreateSolidBrush(_rgb(pal["hover_bg"]))
                     ob = gdi32.SelectObject(hdc, hb)
@@ -615,6 +626,8 @@ class Tray:
 
                 if hovered:
                     color = pal["hover_text"]
+                elif mid == ID_INFO:
+                    color = accent
                 elif mid == ID_EXIT:
                     color = accent
                 else:

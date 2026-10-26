@@ -59,7 +59,7 @@
   /* ---------------- 偏好 ---------------- */
   const PREF_KEY = 'pi.prefs.v1';
   const prefs = Object.assign(
-    { theme: 'light', motion: 'full', countUp: true, labels: true, tray: true,
+    { theme: 'light', motion: 'full', countUp: true, labels: true, tray: true, onTop: false,
       holiday: true, signin: true, localRefresh: 60,
       calGlow: true, calIntro: true, groupMinute: true, notice: true,
       checkinAuto: true, checkinTravel: true, checkinDismissed: '',
@@ -2469,6 +2469,7 @@
 
     $('#optLabels').checked = !!prefs.labels;
     $('#optTray').checked = !!prefs.tray;
+    if ($('#optOnTop')) $('#optOnTop').checked = !!prefs.onTop;
     if ($('#optCalGlow')) $('#optCalGlow').checked = prefs.calGlow !== false;
     if ($('#optCalIntro')) $('#optCalIntro').checked = prefs.calIntro !== false;
     if ($('#optGroupMinute')) $('#optGroupMinute').checked = prefs.groupMinute !== false;
@@ -2994,6 +2995,18 @@
     bindToggle('#optHoliday', 'holiday', renderQuotaSurfaces);
     bindToggle('#optSignin', 'signin', renderQuotaSurfaces);
     bindToggle('#optTray', 'tray', () => bridge.call('set_close_to_tray', prefs.tray));
+
+    /* 窗口置顶：偏好存本地，启动时立刻应用一次（Python 侧也记着，唤回窗口会续上） */
+    const topEl = $('#optOnTop');
+    if (topEl) {
+      topEl.checked = !!prefs.onTop;
+      topEl.addEventListener('change', () => {
+        prefs.onTop = topEl.checked;
+        savePrefs();
+        if (bridge.has()) bridge.call('set_always_on_top', prefs.onTop);
+      });
+      if (prefs.onTop && bridge.has()) bridge.call('set_always_on_top', true);
+    }
 
     const warnBelowEl = $('#optWarnBelow');
     if (warnBelowEl) {
