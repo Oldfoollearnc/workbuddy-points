@@ -1459,7 +1459,9 @@
       const done = !!r.checkedIn;
       // 小窗的 chip 没有标题栏，得自己带前缀；侧栏卡片上方已有「今日签到」
       ckChip.textContent = (p === 'pop' ? '签到 · ' : '') + (done ? '已签到' : (fresh ? '待签到' : '—'));
-      ckChip.className = 'chip' + (done ? ' chip-good' : '');
+      // 完成=绿；还能操作=品牌蓝；chip-act 是点击样式，不能被整串 className 冲掉
+      ckChip.className = 'chip' + (p === 'pop' ? ' chip-act' : '')
+        + (done ? ' chip-good' : (fresh ? ' chip-brand' : ''));
     }
     const ckNote = $('#' + p + 'CkNote');
     if (ckNote) {
@@ -1477,7 +1479,11 @@
     // 小窗的猫猫不是独立 chip（和大数字挤在一起），单独同步一次颜色
     if (p === 'pop') {
       const etaChip = $('.pop-chip-eta');
-      if (etaChip) etaChip.classList.toggle('chip-good', st === 'idle' && !!t.limitReached);
+      if (etaChip) {
+        // 已完成（到家待领 / 今日已派）→ 绿；还能派 → 品牌蓝；旅行中保持中性
+        etaChip.classList.toggle('chip-good', st === 'arrived' || (st === 'idle' && !!t.limitReached));
+        etaChip.classList.toggle('chip-brand', st === 'idle' && !t.limitReached);
+      }
     }
     const tvMain = $('#' + p + 'TvMain');
     const tvUnit = $('#' + p + 'TvUnit');
@@ -1773,7 +1779,9 @@
     if (tv) {
       const claim = pending > 0;
       const dep = t.state === 'idle' && !t.limitReached;
-      const off = !can || (!claim && !dep);
+      const done = t.state === 'idle' && !!t.limitReached;
+      // 完成态不置灰：它已经是"做完了"，只是没得再点
+      const off = !can || (!claim && !dep && !done);
       tv.classList.toggle('is-off', off);
       tv.dataset.act = claim ? 'claim' : (dep ? 'travel' : '');
       tv.title = claim ? `点击领取 ${pending} 分`
