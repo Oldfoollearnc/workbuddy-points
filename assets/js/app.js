@@ -935,7 +935,6 @@
       toast('浏览器预览无法执行', 'i-info');
       return;
     }
-    const old = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = '执行中…'; }
     try {
       const r = await bridge.call('checkin_action', kind);
@@ -952,7 +951,10 @@
     } catch (e) {
       toast('执行失败：' + (e && e.message ? e.message : '未知错误'), 'i-alert');
     } finally {
-      if (btn) { btn.disabled = false; btn.textContent = old; }
+      if (btn) btn.disabled = false;
+      // 按钮文案由状态渲染，不在这里硬恢复；否则会把「已签到」改回「立即签到」
+      renderTodayStatus();
+      renderPopQuick();
     }
   }
 
@@ -1374,6 +1376,37 @@
     wait();
   }
 
+  /** 小窗快捷按钮：只显示"现在能做的那件"，做不了就置灰。 */
+  function renderPopQuick() {
+    if (!$('#popQuick')) return;
+    const r = (CHECKIN && CHECKIN.result) || null;
+    const isToday = !!(r && (!r.date || r.date === todayKey()));
+    const c = (isToday && r.checkin) || {};
+    const t = (isToday && r.travel) || {};
+    const pending = t.state === 'arrived' ? (t.reward || 0) : 0;
+    const can = bridge.has();
+
+    const ck = $('#popDoCheckin');
+    if (ck) {
+      ck.disabled = !can || !!c.done;
+      ck.textContent = c.done ? '已签到' : '立即签到';
+    }
+    const cl = $('#popDoClaim');
+    if (cl) {
+      cl.disabled = !can || pending <= 0;
+      cl.textContent = pending > 0 ? `领 ${pending} 分` : '领积分';
+      cl.title = pending > 0 ? '猫猫已到家，点击领取积分' : '猫猫回来后这里会亮起';
+    }
+    const tv = $('#popDoTravel');
+    if (tv) {
+      const canGo = t.state === 'idle' && !t.limitReached;
+      tv.disabled = !can || !canGo;
+      tv.textContent = t.state === 'traveling' ? '旅行中'
+        : (t.state === 'arrived' ? '待领取' : (canGo ? '派猫猫' : '今日已派'));
+      tv.title = canGo ? '派猫猫出门，1–4 小时后带积分回来' : '';
+    }
+  }
+
   function renderPopup() {
     const stat = todayStat();
     const acc = effAccount();
@@ -1417,6 +1450,7 @@
     if (prog) requestAnimationFrame(() => { prog.style.width = ((configured ? acc.usedPct : 0) * 100).toFixed(2) + '%'; });
 
     renderPopHours(stat);
+    renderPopQuick();
   }
 
   /** 今日消耗构成：按「计费笔数 / 调用次数」拆分（云端是计费记录，本机是逐次调用） */
@@ -3283,6 +3317,11 @@
     ['stCkAct', 'stTvAct', 'stClAct'].forEach(id => {
       const b = $('#' + id);
       if (b) b.addEventListener('click', () => runAction(b.dataset.act, b));
+    });
+    /* 小窗快捷操作 */
+    [['popDoCheckin', 'checkin'], ['popDoClaim', 'claim'], ['popDoTravel', 'travel']].forEach(([id, kind]) => {
+      const b = $('#' + id);
+      if (b) b.addEventListener('click', () => runAction(kind, b));
     });
 
     /* 用量分析：本机消耗周期 + 项目排行周期 */
