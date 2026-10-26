@@ -1014,43 +1014,168 @@ class CheckinService:
             if not self._ensure_page():
                 out["error"] = "打不开账号页面：多半是网络断了"
                 return out
-
-            st = self._call(STATUS_PATH, "POST")
-            if st.get("status") == 200:
-                d = (st.get("json") or {}).get("data") or {}
-                out["checkin"] = {
-                    "done": bool(d.get("today_checked_in")),
-                    "streak": d.get("streak_days"),
-                    "balance": d.get("total_credits"),
-                    "week": [bool(x) for x in (d.get("week_progress") or [])][:7],
-                    "dailyCredit": d.get("daily_credit") or 100,
-                    "error": None,
-                }
-            else:
-                out["checkin"] = {"done": None,
-                                  "error": self._http_hint(st, "读取签到状态失败")}
-
-            tr = self._call(TRAVEL_STATUS, "GET")
-            if tr.get("status") == 200:
-                tv = {"state": "unknown", "stateText": "未知", "location": "",
-                      "remainingSec": 0, "remainingText": "", "reward": 0,
-                      "claimed": 0, "claimedToday": 0, "departed": False,
-                      "limitReached": False, "error": None, "progress": 0.0,
-                      "arriveAt": 0, "departAt": 0}
-                self._fill_travel(tv, (tr.get("json") or {}).get("data") or {})
-                tv["canClaim"] = tv.get("state") == "arrived" and self._int0(tv.get("reward")) > 0
-                tv["canDepart"] = tv.get("state") == "idle" and not tv.get("limitReached")
-                out["travel"] = tv
-            else:
-                out["travel"] = {"state": "unknown", "stateText": "未知",
-                                 "error": self._http_hint(tr, "读取猫猫状态失败")}
-
             out["ok"] = True
+            self._read_truth(out)
             self._reconcile(out)
             return out
         finally:
             if got:
                 self.account._sync_lock.release()
+
+    def _read_truth(self, out):
+        """读签到与猫猫的真实状态写进 out。调用方必须已持有 account._sync_lock。"""
+        st = self._call(STATUS_PATH, "POST")
+        if st.get("status") == 200:
+            d = (st.get("json") or {}).get("data") or {}
+            out["checkin"] = {
+                "done": bool(d.get("today_checked_in")),
+                "streak": d.get("streak_days"),
+                "balance": d.get("total_credits"),
+                "week": [bool(x) for x in (d.get("week_progress") or [])][:7],
+                "dailyCredit": d.get("daily_credit") or 100,
+                "error": None,
+            }
+        else:
+            out["checkin"] = {"done": None,
+                              "error": self._http_hint(st, "读取签到状态失败")}
+
+        tr = self._call(TRAVEL_STATUS, "GET")
+        if tr.get("status") == 200:
+            tv = {"state": "unknown", "stateText": "未知", "location": "",
+                  "remainingSec": 0, "remainingText": "", "reward": 0,
+                  "claimed": 0, "claimedToday": 0, "departed": False,
+                  "limitReached": False, "error": None, "progress": 0.0,
+                  "arriveAt": 0, "departAt": 0}
+            self._fill_travel(tv, (tr.get("json") or {}).get("data") or {})
+            tv["canClaim"] = tv.get("state") == "arrived" and self._int0(tv.get("reward")) > 0
+            tv["canDepart"] = tv.get("state") == "idle" and not tv.get("limitReached")
+            out["travel"] = tv
+        else:
+            out["travel"] = {"state": "unknown", "stateText": "未知",
+                             "error": self._http_hint(tr, "读取猫猫状态失败")}
+
+    # ---------------- 按需执行单个动作 ----------------
+
+    def act(self, kind):
+        """执行用户点的那一件：checkin（签到）/ claim（领积分）/ travel（派猫猫）。
+
+        与 run() 的区别：只做一件，不顺手把别的也做了。
+        检查（probe）之后由用户决定要不要执行，执行完立刻回读真值并校准本地结论。
+        """
+        kind = str(kind or "").strip().lower()
+        if kind not in ("checkin", "claim", "travel"):
+            return {"ok": False, "error": "未知动作"}
+        out = {"ok": False, "kind": kind, "message": "", "error": None,
+               "at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        if self.account.state.get("autoLogin") is False:
+            out["error"] = "已退出登录，先连接账号"
+            return out
+        if not self.account.win:
+            out["error"] = "登录窗口不可用"
+            return out
+        if self.account.state.get("status") == "disconnected":
+            out["error"] = "还没连接账号，先扫码连接"
+            return out
+        if getattr(self.account, "_login_active", False):
+            out["error"] = "正在扫码登录，先完成登录"
+            return out
+        got = self.account._sync_lock.acquire(timeout=20)
+        if not got:
+            out["error"] = "正在同步云端数据，几秒后再试"
+            return out
+        try:
+            if not self._ensure_page():
+                out["error"] = "打不开账号页面：多半是网络断了"
+                return out
+            if kind == "checkin":
+                self._act_checkin(out)
+            elif kind == "claim":
+                self._act_claim(out)
+            else:
+                self._act_travel(out)
+            # 无论成败都回读一次：界面显示的必须是服务端的事实
+            truth = {"ok": True, "checkin": None, "travel": None}
+            self._read_truth(truth)
+            self._reconcile(truth)
+            return out
+        finally:
+            if got:
+                self.account._sync_lock.release()
+
+    def _act_checkin(self, out):
+        st = self._call(STATUS_PATH, "POST")
+        if st.get("status") != 200:
+            out["error"] = self._http_hint(st, "读取签到状态失败")
+            return
+        d = (st.get("json") or {}).get("data") or {}
+        if d.get("today_checked_in"):
+            out.update(ok=True, message="今天已经签过，没有重复打卡")
+            return
+        r = self._call(CHECKIN_PATH, "POST")
+        code = self._code(r)
+        gain = d.get("daily_credit") or 100
+        if r.get("status") == 200 and code == CODE_OK:
+            out.update(ok=True, message="签到成功 +%s 分" % gain)
+        elif code == CODE_ALREADY:
+            out.update(ok=True, message="今天已经签过，没有重复打卡")
+        elif r.get("status") == 200 and code is None:
+            out.update(ok=True, message="签到请求已发出，正在确认结果")
+        else:
+            out["error"] = self._http_hint(r, "签到失败")
+
+    def _act_claim(self, out):
+        tv = {"state": "unknown", "stateText": "未知", "location": "", "remainingSec": 0,
+              "remainingText": "", "reward": 0, "claimed": 0, "departed": False,
+              "limitReached": False, "error": None, "progress": 0.0}
+        r = self._call(TRAVEL_STATUS, "GET")
+        if r.get("status") != 200:
+            out["error"] = self._http_hint(r, "读取猫猫状态失败")
+            return
+        self._fill_travel(tv, (r.get("json") or {}).get("data") or {})
+        if tv.get("state") != "arrived":
+            out["error"] = "现在没有可领取的积分（猫猫%s）" % (tv.get("stateText") or "状态未知")
+            return
+        before = self._int0(tv.get("reward"))
+        c = self._call(TRAVEL_CLAIM, "POST", {})
+        code = self._code(c)
+        if c.get("status") == 200 and code == CODE_OK:
+            out.update(ok=True, message=("领到 %s 分" % before) if before else "积分已领取")
+        elif c.get("status") == 200 and code is None:
+            out.update(ok=True, message="领取请求已发出，正在确认结果")
+        elif c.get("status") == 200:
+            out["error"] = "服务端没有确认领取（code=%s）" % code
+        else:
+            out["error"] = self._http_hint(c, "领取旅行积分失败")
+
+    def _act_travel(self, out):
+        tv = {"state": "unknown", "stateText": "未知", "location": "", "remainingSec": 0,
+              "remainingText": "", "reward": 0, "claimed": 0, "departed": False,
+              "limitReached": False, "error": None, "progress": 0.0}
+        r = self._call(TRAVEL_STATUS, "GET")
+        if r.get("status") != 200:
+            out["error"] = self._http_hint(r, "读取猫猫状态失败")
+            return
+        self._fill_travel(tv, (r.get("json") or {}).get("data") or {})
+        if tv.get("state") == "traveling":
+            out["error"] = "猫猫还在旅行，等它回来再派"
+            return
+        if tv.get("state") == "arrived":
+            out["error"] = "猫猫已到家，先把积分领了才能再派"
+            return
+        if tv.get("limitReached"):
+            out["error"] = "今天已经派过了，每天只能派 1 次"
+            return
+        locs = self._travel_locations()
+        if not locs:
+            out["error"] = "没读到目的地列表，稍后再试"
+            return
+        pick = random.choice(locs)
+        p = self._call(TRAVEL_DEPART, "POST", {"location_id": pick.get("id")})
+        code = self._code(p)
+        if p.get("status") == 200 and code in (CODE_OK, CODE_ALREADY):
+            out.update(ok=True, message="猫猫出发去「%s」了" % (pick.get("name") or "旅行"))
+        else:
+            out["error"] = self._http_hint(p, "派出猫猫失败")
 
     def _reconcile(self, res):
         """用刚读到的服务端事实校准今日结论。服务端说什么就是什么，不替它圆场。"""

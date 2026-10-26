@@ -578,22 +578,31 @@
                   <div class="st-head"><span>每日签到</span><i class="chip" id="stCkChip">—</i></div>
                   <b class="st-main" id="stCkMain">—</b>
                   <p class="st-sub" id="stCkSub">—</p>
-                  <button class="btn btn-ghost btn-sm st-btn" id="stCkBtn">立即检查</button>
+                  <div class="st-acts">
+                    <button class="btn btn-ghost btn-sm" id="stCkBtn">立即检查</button>
+                    <button class="btn btn-primary btn-sm" id="stCkAct" hidden>立即签到</button>
+                  </div>
                 </article>
                 <article class="status-card" data-kind="travel">
                   <div class="st-head"><span>猫猫行程</span><i class="chip" id="stTvChip">—</i></div>
                   <b class="st-main" id="stTvMain">—</b>
                   <p class="st-sub" id="stTvSub">—</p>
-                  <button class="btn btn-ghost btn-sm st-btn" id="stTvBtn">立即检查</button>
+                  <div class="st-acts">
+                    <button class="btn btn-ghost btn-sm" id="stTvBtn">立即检查</button>
+                    <button class="btn btn-primary btn-sm" id="stTvAct" hidden>立即派送</button>
+                  </div>
                 </article>
                 <article class="status-card" data-kind="claim">
                   <div class="st-head"><span>积分领取</span><i class="chip" id="stClChip">—</i></div>
                   <b class="st-main" id="stClMain">—</b>
                   <p class="st-sub" id="stClSub">—</p>
-                  <button class="btn btn-ghost btn-sm st-btn" id="stClBtn">立即检查</button>
+                  <div class="st-acts">
+                    <button class="btn btn-ghost btn-sm" id="stClBtn">立即检查</button>
+                    <button class="btn btn-primary btn-sm" id="stClAct" hidden>立即领取</button>
+                  </div>
                 </article>
               </div>
-              <p class="set-note" id="stNote">「立即检查」只读，不会替你签到、派猫或领积分</p>
+              <p class="set-note" id="stNote">「立即检查」只读；检查出可执行的动作后，才会出现对应的执行按钮</p>
             </div>
           </section>
 

@@ -2434,6 +2434,7 @@ body.is-loading .boot-mask { display: flex; }
   line-height: 1.45;
   color: var(--text-3);
 }
+.st-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
 .st-btn { align-self: flex-start; margin-top: 2px; }
 .st-btn[disabled] { opacity: .55; cursor: default; }
 @media (max-width: 1080px) {

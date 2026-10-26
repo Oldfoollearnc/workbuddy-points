@@ -852,6 +852,15 @@
     if (card) card.classList.toggle('is-warn', !!warn);
   }
 
+  /** 动作按钮：检查出「能做」才出现，点一下按需执行那一件。 */
+  function setAct(id, show, text, kind) {
+    const b = $('#' + id);
+    if (!b) return;
+    b.hidden = !show;
+    if (show && text) b.textContent = text;
+    if (show && kind) b.dataset.act = kind;
+  }
+
   /**
    * 签到 / 猫猫 / 领积分 三件事分开显示。
    * 以前三件事挤在一行结论里，任何一环判断错了都会把另外两环一起盖掉
@@ -867,6 +876,7 @@
     if (!isToday) {
       ['stCk', 'stTv', 'stCl'].forEach(k => putStatus(k, '待检查', '', '还没有今天的结论',
         '点「立即检查」向云端要一次真实状态'));
+      ['stCkAct', 'stTvAct', 'stClAct'].forEach(id => setAct(id, false));
       return;
     }
 
@@ -909,6 +919,40 @@
       putStatus('stCl', '已领取', 'chip-good', `+${got} 分`, '今天猫猫带回来的积分已经入账');
     } else {
       putStatus('stCl', '—', '', '没有待领积分', '猫猫回来后会在这里提示');
+    }
+
+    /* 能做的事才给按钮：签到、领积分、派猫猫各管各的 */
+    setAct('stCkAct', !c.done, '立即签到', 'checkin');
+    const tvAct = st === 'arrived' ? ['立即领取', 'claim']
+      : (st === 'idle' && !t.limitReached ? ['立即派送', 'travel'] : null);
+    setAct('stTvAct', !!tvAct, tvAct && tvAct[0], tvAct && tvAct[1]);
+    setAct('stClAct', pending > 0, '立即领取', 'claim');
+  }
+
+  /** 按需执行单个动作（用户点了才算数）。 */
+  async function runAction(kind, btn) {
+    if (!kind || !bridge.has() || !bridge.can('checkin_action')) {
+      toast('浏览器预览无法执行', 'i-info');
+      return;
+    }
+    const old = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '执行中…'; }
+    try {
+      const r = await bridge.call('checkin_action', kind);
+      if (r && r.ok) {
+        toast(r.message || '已完成');
+        await loadCheckin();
+        renderTodayStatus();
+        setText('#stNote', `${r.at || ''} 执行：${r.message || '已完成'}`);
+      } else {
+        const msg = (r && r.error) || '执行失败，稍后再试';
+        toast(msg, 'i-alert');
+        setText('#stNote', msg);
+      }
+    } catch (e) {
+      toast('执行失败：' + (e && e.message ? e.message : '未知错误'), 'i-alert');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = old; }
     }
   }
 
@@ -3156,6 +3200,10 @@
     ['stCkBtn', 'stTvBtn', 'stClBtn', 'stAll'].forEach(id => {
       const b = $('#' + id);
       if (b) b.addEventListener('click', () => probeStatus(b));
+    });
+    ['stCkAct', 'stTvAct', 'stClAct'].forEach(id => {
+      const b = $('#' + id);
+      if (b) b.addEventListener('click', () => runAction(b.dataset.act, b));
     });
 
     /* 用量分析：本机消耗周期 + 项目排行周期 */

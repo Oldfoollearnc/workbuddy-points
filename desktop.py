@@ -526,10 +526,10 @@ class Desktop:
             log("notify error: %s" % e)
         return "none"
 
-    def _pin_temporarily(self, hwnd, seconds=4.0):
-        """临时置顶：窗口刚出来时压住其它程序，几秒后自动放开。
+    def _pin_temporarily(self, hwnd, seconds=1.0):
+        """临时置顶：窗口刚出来时压住其它程序，1 秒后自动放开。
 
-        不做成常驻置顶 —— 那会挡住用户真正在用的窗口；4 秒足够看到界面出来。
+        只用来盖住"启动瞬间被别的窗口顶下去"这一下，久了就是在挡用户的路。
         """
         try:
             user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
@@ -1090,6 +1090,20 @@ class Api:
             log("checkin_probe error: %s" % e)
             return {"ok": False, "error": str(e)[:160]}
         # 校准后顺带把界面上的结论刷新一遍
+        try:
+            for w in (self._desk.popup, self._desk.main):
+                self._desk._safe_js(w, "window.App && App.reloadCheckin && App.reloadCheckin()")
+        except Exception:
+            pass
+        return r
+
+    def checkin_action(self, kind):
+        """按需执行单个动作：checkin（签到）/ claim（领积分）/ travel（派猫猫）。"""
+        try:
+            r = self._desk.checkin.act(kind)
+        except Exception as e:
+            log("checkin_action error: %s" % e)
+            return {"ok": False, "error": str(e)[:160]}
         try:
             for w in (self._desk.popup, self._desk.main):
                 self._desk._safe_js(w, "window.App && App.reloadCheckin && App.reloadCheckin()")
