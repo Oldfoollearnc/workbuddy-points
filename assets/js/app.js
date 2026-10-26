@@ -964,6 +964,8 @@
   function renderHeatmap() {
     const box = $('#heatGrid');
     if (!box) return;
+    const wrap = $('#heatWrap');
+    if (wrap && wrap.hidden) return;      // 没展开就别每 30 秒重建 30 行 DOM
     const rng = state.heatRange || '7';
     const rows = (D.dayHeat && D.dayHeat[rng]) || [];
     if (!rows.length) {
@@ -3902,7 +3904,12 @@
       setText('#calSub', heat
         ? '每行一天、每列一小时，格子越深花得越多；悬停看具体时段'
         : '每格一天，从当月起按整月对齐 · 颜色越深消耗越多 · 悬停查看当天用量');
-      if (heat) renderHeatmap();
+      if (heat) {
+        renderHeatmap();
+      } else if (chartEl && chartEl.__draw) {
+        // 隐藏期间容器宽度是 0，画不出来；切回来必须重绘一次
+        chartEl.__draw();
+      }
     });
 
     const heatSeg = $('#heatSeg');

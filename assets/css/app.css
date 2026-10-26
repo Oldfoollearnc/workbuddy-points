@@ -2862,7 +2862,16 @@ body { font-variant-numeric: tabular-nums; }
   overflow-y: auto;
 }
 .heat-d { font-size: 10px; color: var(--text-3); display: flex; align-items: center; white-space: nowrap; }
-.heat-h { font-size: 9px; color: var(--text-3); text-align: center; height: 12px; }
+.heat-h {
+  font-size: 9px;
+  color: var(--text-3);
+  text-align: center;
+  height: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+}
 .heat-c { display: block; height: 18px; border-radius: 3px; background: var(--surface-3); transition: transform 120ms var(--ease-out); }
 .heat-c:hover { transform: scale(1.18); }
 .heat-sum { grid-column: 1 / -1; padding: 8px 2px 0; font-size: 11px; color: var(--text-3); }
