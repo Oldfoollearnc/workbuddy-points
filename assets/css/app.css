@@ -2702,56 +2702,101 @@ body[data-mode="popup"] .rz { display: none; }
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
-  background: rgba(8, 12, 20, .48);
+  padding: 28px;
+  background: rgba(6, 10, 18, .55);
+  opacity: 0;
+  transition: opacity 180ms var(--ease-out);
 }
 .detail-veil[hidden] { display: none; }
+.detail-veil.is-in { opacity: 1; }
+.detail-veil.is-closing { opacity: 0; }
+
 .detail-panel {
   display: flex;
   flex-direction: column;
-  width: min(980px, 94vw);
-  height: min(760px, 88vh);
-  border-radius: var(--r-lg);
+  width: min(1000px, 94vw);
+  height: min(780px, 90vh);
+  border-radius: 16px;
   background: var(--surface);
-  border: 1px solid var(--border-strong, var(--border));
-  box-shadow: 0 24px 60px rgba(0, 0, 0, .28);
+  border: 1px solid var(--border);
+  box-shadow: 0 32px 80px rgba(0, 0, 0, .35);
   overflow: hidden;
+  transform: translateY(10px) scale(.985);
+  transition: transform 200ms var(--ease-out);
+}
+.detail-veil.is-in .detail-panel { transform: none; }
+.detail-veil.is-closing .detail-panel { transform: translateY(6px) scale(.99); }
+
+@media (prefers-reduced-motion: reduce) {
+  .detail-veil, .detail-panel { transition: none; }
 }
 .detail-head {
+  position: relative;
   flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 16px 20px;
+  gap: 14px;
+  padding: 18px 22px;
   border-bottom: 1px solid var(--border);
 }
-.detail-head h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-1); }
-.detail-head p { margin: 3px 0 0; font-size: 11.5px; color: var(--text-3); }
-.detail-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 20px 20px; }
+.detail-head::before {
+  content: "";
+  flex: none;
+  width: 3px;
+  height: 30px;
+  border-radius: 2px;
+  background: var(--brand);
+}
+.detail-head > div { flex: 1 1 auto; min-width: 0; }
+.detail-head h2 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text-1); letter-spacing: -.01em; }
+.detail-head p { margin: 4px 0 0; font-size: 11.5px; color: var(--text-3); line-height: 1.5; }
+.detail-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 22px 18px; }
 
-.detail-kpis { display: flex; flex-wrap: wrap; gap: 26px; padding: 14px 2px 16px; }
-.detail-kpis > div { display: flex; flex-direction: column; gap: 2px; }
-.detail-kpis span { font-size: 11px; color: var(--text-3); }
-.detail-kpis b { font-size: 17px; font-weight: 650; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.detail-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px;
+  padding: 16px 0 18px;
+}
+.detail-kpis > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.detail-kpis span { font-size: 10.5px; color: var(--text-3); }
+.detail-kpis b {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .detail-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .detail-table th {
   position: sticky; top: 0; z-index: 1;
-  padding: 8px 6px;
+  padding: 9px 8px;
   text-align: left;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 500;
+  letter-spacing: .02em;
   color: var(--text-3);
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
-.detail-table td { padding: 7px 6px; border-bottom: 1px solid var(--border); color: var(--text-1); }
+.detail-table td { padding: 8px; border-bottom: 1px solid var(--border); color: var(--text-1); }
+.detail-table tbody tr:hover { background: var(--surface-2); }
 .detail-table tr:last-child td { border-bottom: 0; }
 .detail-table .num { text-align: right; font-variant-numeric: tabular-nums; }
-.detail-table .dim { color: var(--text-3); }
 .detail-bar { display: block; height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; min-width: 60px; }
 .detail-bar i { display: block; height: 100%; border-radius: 99px; background: var(--brand); }
+.detail-foot { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--border); font-size: 10.5px; color: var(--text-3); }
 
 /* 能点进详情的卡片给个手型与悬停提示 */
 .card.is-detail { cursor: pointer; }

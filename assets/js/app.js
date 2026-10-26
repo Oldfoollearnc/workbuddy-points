@@ -1114,6 +1114,39 @@
     };
   }
 
+  function detailQuota() {
+    const acc = effAccount();
+    if (!hasQuota()) return { title: '额度与消耗', sub: '还没连接账号，或账号没有周期额度', html: '' };
+    const al = allowance(acc);
+    const used = Math.max(0, (acc.total || 0) - (acc.available || 0));
+    const endText = al.end
+      ? `${al.end.getFullYear()}-${F.pad(al.end.getMonth() + 1)}-${F.pad(al.end.getDate())}`
+      : '—';
+    const daily = (D.daily || []).slice(-14).reverse();
+    const rows = daily.map(d => {
+      const v = Number(d.consumed) || 0;
+      const over = al.perDay > 0 && v > al.perDay;
+      return [esc(d.date || ''), F.credit(v), over ? '超出' : '额度内',
+        detailBar(al.perDay > 0 ? v / (al.perDay * 2) * 100 : 0)];
+    });
+    return {
+      title: '额度与消耗',
+      sub: '周期额度、可用余额，以及按剩余天数摊出来的每日可花额度',
+      html: detailKpis([
+        ['周期额度', F.credit(acc.total || 0) + ' 分'],
+        ['已用', F.credit(used) + ' 分'],
+        ['可用', F.credit(acc.available || 0) + ' 分'],
+        ['剩余天数', al.leftDays + ' 天'],
+        ['可花天数', leftDaysText(al)],
+        ['每日可用', F.credit(al.perDay) + ' 分'],
+        ['本周可用', F.credit(al.perWeek) + ' 分'],
+        ['签到可补', F.credit(al.signin) + ' 分'],
+        ['周期结束', endText]
+      ]) + detailTable(
+        [{ label: '日期' }, { label: '消耗', num: true }, { label: '对照每日额度' }, { label: '相对额度' }], rows)
+    };
+  }
+
   const DETAIL_SPECS = {
     calendar: detailDaily,
     trend: detailDaily,
@@ -1121,7 +1154,8 @@
     comp: detailComp,
     models: detailModels,
     projects: detailProjects,
-    local: detailLocal
+    local: detailLocal,
+    quota: detailQuota
   };
 
   function openDetail(kind) {
@@ -1132,16 +1166,29 @@
     setText('#detailTitle', d.title);
     setText('#detailSub', d.sub || '');
     const body = $('#detailBody');
-    if (body) { body.innerHTML = d.html || '<p class="set-note">暂无数据</p>'; body.scrollTop = 0; }
+    const foot = `<p class="detail-foot">数据截至 ${esc((D.meta && D.meta.updated) || '—')} · 消耗取本机会话记录，余额与周期取云端</p>`;
+    if (body) {
+      body.innerHTML = (d.html || '<p class="set-note">暂无数据</p>') + foot;
+      body.scrollTop = 0;
+    }
     const veil = $('#detailVeil');
-    if (veil) veil.hidden = false;
+    if (!veil) return;
+    veil.hidden = false;
+    veil.classList.remove('is-closing');
+    void veil.offsetWidth;              // 先落一帧初始态，过渡才会真的跑
+    veil.classList.add('is-in');
     detailOpen = true;
   }
 
   function closeDetail() {
     const veil = $('#detailVeil');
-    if (veil) veil.hidden = true;
+    if (!veil || veil.hidden) { detailOpen = false; return; }
     detailOpen = false;
+    veil.classList.remove('is-in');
+    veil.classList.add('is-closing');
+    const done = () => { veil.hidden = true; veil.classList.remove('is-closing'); };
+    if (motionOff()) done();
+    else setTimeout(done, 180);
   }
 
   /* ---------------- 项目别名 ---------------- */
@@ -3676,7 +3723,7 @@
     /* 卡片进详情：点卡片任意处（行、按钮、下拉、图例除外）打开完整明细浮层 */
     [['.cal-card', 'calendar'], ['.chart-trend', 'trend'], ['.chart-hourly', 'hourly'],
      ['.comp-card', 'comp'], ['#modelList', 'models'], ['#projectRank', 'projects'],
-     ['.local-card', 'local']].forEach(([sel, kind]) => {
+     ['.local-card', 'local'], ['.quota-card', 'quota']].forEach(([sel, kind]) => {
       const anchor = document.querySelector(sel);
       const card = anchor && anchor.closest('.card');
       if (!card) return;
