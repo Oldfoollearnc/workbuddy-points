@@ -1203,6 +1203,8 @@ body.is-dragging .topbar { cursor: default; }
   transition: opacity var(--dur-3) var(--ease-out);
 }
 .kpi:hover::after { opacity: .9; }
+.kpi.is-link { cursor: pointer; transition: border-color var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out); }
+.kpi.is-link:hover { border-color: var(--border-2); transform: translateY(-1px); }
 .kpi-top { display: flex; align-items: center; justify-content: space-between; }
 .kpi-label { font-size: 11.5px; color: var(--text-3); letter-spacing: .01em; }
 .kpi-icon { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; }

@@ -1768,7 +1768,8 @@
       const calls = (m.calls == null) ? '' : ` · ${F.fmt(m.calls)} ${cloudRows() ? '笔' : '次'}`;
       const val = m.points > 0 ? F.credit(m.points) : '<em class="rows-free">免费</em>';
       return `<div class="rows-row" data-name="${esc(m.name)}"
-          data-points="${F.credit(m.points)}" data-pct="${pct.toFixed(1)}" data-calls="${m.calls == null ? '' : m.calls}">
+          data-points="${F.credit(m.points)}" data-pct="${pct.toFixed(1)}" data-calls="${m.calls == null ? '' : m.calls}"
+          data-tokens="${m.tokens == null ? '' : m.tokens}">
         <span class="rows-idx">${String(i + 1).padStart(2, '0')}</span>
         <span class="rows-name" title="${esc(m.name)}${calls}">${esc(m.name)}</span>
         <span class="rows-track"><i data-w="${w.toFixed(1)}" style="width:0%;background:linear-gradient(90deg, ${C.hexToRgba(tone, .45)}, ${tone})"></i></span>
@@ -3239,6 +3240,15 @@
     window.addEventListener('resize', () => { if (acctPop && !acctPop.hidden) positionAccountPop(); });
     const ph = $('#popHide'); if (ph) ph.addEventListener('click', () => bridge.hide());
 
+    /* 四张 KPI 卡直接点进对应页面：看数字之后最常做的就是"再往下看一眼明细" */
+    $$('.kpi').forEach((card, i) => {
+      const target = ['account', 'analytics', 'ledger', 'analytics'][i];
+      if (!target) return;
+      card.classList.add('is-link');
+      card.title = '点击打开「' + (TITLES[target] ? TITLES[target][0] : '') + '」';
+      card.addEventListener('click', () => go(target));
+    });
+
     /* 账户页「今日状态」：三个「立即检查」+ 全部检查，都走同一条只读探测 */
     ['stCkBtn', 'stTvBtn', 'stClBtn', 'stAll'].forEach(id => {
       const b = $('#' + id);
@@ -3379,23 +3389,33 @@
 
     /* ---------------- 排行行悬停提示（模型 / 项目共用） ---------------- */
 
-    document.addEventListener('mouseover', e => {
-      const row = e.target && e.target.closest ? e.target.closest('.rows-row') : null;
-      if (!row || !row.dataset.name) return;
+    /** 排行行悬停内容：消耗 / 占比 / 调用，模型再加 Token 与"每分产出"。 */
+    const rowTip = row => {
       const rows = [
         `<div class="tt-row"><span class="tt-name">消耗</span><span class="tt-val">${row.dataset.points} 分</span></div>`,
         `<div class="tt-row"><span class="tt-name">占比</span><span class="tt-val">${row.dataset.pct}%</span></div>`,
         `<div class="tt-row"><span class="tt-name">调用</span><span class="tt-val">${row.dataset.calls || '—'}</span></div>`
-      ].join('');
-      C.showTip(`<div class="tt-title">${row.dataset.name}</div>${rows}`, e.clientX, e.clientY);
+      ];
+      const tk = row.dataset.tokens ? Number(row.dataset.tokens) : 0;
+      if (tk > 0) {
+        const pts = Number(String(row.dataset.points).replace(/,/g, '')) || 0;
+        rows.push(`<div class="tt-row"><span class="tt-name">Token</span><span class="tt-val">${F.fmtWan(tk)}</span></div>`);
+        if (pts > 0) {
+          rows.push(`<div class="tt-row"><span class="tt-name">每分产出</span><span class="tt-val">${F.fmtWan(Math.round(tk / pts))} Token</span></div>`);
+        }
+      }
+      return `<div class="tt-title">${row.dataset.name}</div>${rows.join('')}`;
+    };
+
+    document.addEventListener('mouseover', e => {
+      const row = e.target && e.target.closest ? e.target.closest('.rows-row') : null;
+      if (!row || !row.dataset.name) return;
+      C.showTip(rowTip(row), e.clientX, e.clientY);
     });
     document.addEventListener('mousemove', e => {
       const row = e.target && e.target.closest ? e.target.closest('.rows-row') : null;
-      if (!row) return;
-      C.showTip(`<div class="tt-title">${row.dataset.name}</div>
-        <div class="tt-row"><span class="tt-name">消耗</span><span class="tt-val">${row.dataset.points} 分</span></div>
-        <div class="tt-row"><span class="tt-name">占比</span><span class="tt-val">${row.dataset.pct}%</span></div>
-        <div class="tt-row"><span class="tt-name">调用</span><span class="tt-val">${row.dataset.calls || '—'}</span></div>`, e.clientX, e.clientY);
+      if (!row || !row.dataset.name) return;
+      C.showTip(rowTip(row), e.clientX, e.clientY);
     });
     document.addEventListener('mouseout', e => {
       const row = e.target && e.target.closest ? e.target.closest('.rows-row') : null;

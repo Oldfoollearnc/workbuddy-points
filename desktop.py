@@ -1677,6 +1677,24 @@ def main():
             set_window_icons()
     threading.Thread(target=_apply_icons, daemon=True).start()
 
+    def _sync_tray_tip():
+        """托盘悬浮提示：今天用了多少、云端还剩多少。每 3 分钟刷一次。"""
+        time.sleep(6)
+        while not app.quitting:
+            try:
+                d = app.usage.get(wait=3) or {}
+                today = float((d.get("today") or {}).get("consumed") or 0)
+                acc = app.account.snapshot() or {}
+                avail = (acc.get("cloud") or {}).get("available")
+                bits = ["今天 %s 分" % (("%.0f" % today) if today >= 10 else ("%.2f" % today))]
+                bits.append(("可用 %.0f 分" % avail) if avail is not None else "未连接账号")
+                if app.tray:
+                    app.tray.set_tip("积分观测台 · " + " · ".join(bits))
+            except Exception as e:
+                log(f"tray tip error: {e}")
+            time.sleep(180)
+    threading.Thread(target=_sync_tray_tip, daemon=True).start()
+
     def _sync_tray_theme():
         """界面主题存在 localStorage 里，Python 不知道 —— 启动后问一次，菜单配色才不会错。"""
         for _ in range(6):

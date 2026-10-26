@@ -377,6 +377,22 @@ class Tray:
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
 
+    def set_tip(self, text):
+        """改托盘悬浮提示（今天用了多少 / 还能用多少），不重建图标。"""
+        text = (text or "")[:120]
+        if text == self.tooltip:
+            return
+        self.tooltip = text
+        nid = getattr(self, "_nid", None)
+        if not nid or not self.hwnd:
+            return
+        try:
+            nid.szTip = text
+            nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP
+            shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(nid))
+        except Exception as e:
+            self.log(f"set_tip failed: {e}")
+
     def stop(self):
         try:
             if self._nid:
