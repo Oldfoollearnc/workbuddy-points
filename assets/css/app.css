@@ -2848,6 +2848,14 @@ body { font-variant-numeric: tabular-nums; }
 }
 .card.is-detail:hover .card-head h2::after { color: var(--brand); border-color: var(--brand); }
 
+/* 小窗正文放大半号：11px 在 1080p / 高 DPI 上偏吃力 */
+.popup-card .pop-block-head h3 { font-size: 12.5px; }
+.popup-card .pop-row { font-size: 11.5px; }
+.popup-card .chip { font-size: 11.5px; }
+
+/* 加载遮罩只盖内容区：顶栏与导航仍可见，不至于像整屏冻住 */
+.loading-veil { inset: 48px 0 0 0; }
+
 /* ===================== 加载遮罩 ===================== */
 
 .loading-veil {
