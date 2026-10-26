@@ -2518,6 +2518,10 @@ body.is-loading .boot-mask { display: flex; }
 body.is-maximized .rz { display: none; }
 body[data-mode="popup"] .rz { display: none; }
 
+/* 点一下就能跳到流水并筛好，光标给出可点的暗示 */
+#projectRank .rows-row,
+#modelList .rows-row { cursor: pointer; }
+
 /* ---------- 本机消耗（用量分析顶部） ---------- */
 .local-card {
   display: flex;

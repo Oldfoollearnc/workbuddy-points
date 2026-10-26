@@ -3469,6 +3469,18 @@
       if (state.mode === 'main' && document.visibilityState === 'visible') readWinState();
     }, 1500);
 
+    /* 点排行里的某一行 → 跳积分流水并筛好这个项目 / 模型，省得再去下拉里找 */
+    document.addEventListener('click', e => {
+      if (!e.target || !e.target.closest) return;
+      const proj = e.target.closest('#projectRank .rows-row');
+      const mdl = proj ? null : e.target.closest('#modelList .rows-row');
+      const row = proj || mdl;
+      if (!row || !row.dataset.name) return;
+      state.ledgerFilter = (proj ? 'project:' : 'model:') + row.dataset.name;
+      state.ledgerLimit = 24;
+      go('ledger');
+    });
+
     /* ---------------- 排行行悬停提示（模型 / 项目共用） ---------------- */
 
     /** 排行行悬停内容：消耗 / 占比 / 调用，模型再加 Token 与"每分产出"。 */
