@@ -391,7 +391,8 @@ def _shutdown_wndproc(hwnd, msg, wparam, lparam):
     old = _shutdown_old.get(hwnd)
     try:
         if old:
-            return user32.CallWindowProcW(old, hwnd, msg, wparam, lparam)
+            # argtypes 里声明的是 c_void_p，必须显式包一层，直接传 int 会 TypeError
+            return user32.CallWindowProcW(ctypes.c_void_p(old), hwnd, msg, wparam, lparam)
         return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
     except Exception:
         return 0
