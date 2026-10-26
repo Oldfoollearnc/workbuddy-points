@@ -811,9 +811,9 @@
       const availW = W - padL - padR;
       const availH = H - padT - padB;
 
-      // 行高：7 行正好铺满容器高度
+      // 行高：7 行正好铺满容器高度；上限放宽到 40，全屏时不再卡在 34 导致四周留白
       let cellH = Math.floor((availH - gap * (rows - 1)) / rows);
-      cellH = Math.max(10, Math.min(34, cellH));
+      cellH = Math.max(10, Math.min(40, cellH));
 
       const day0 = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
       const mondayOf = d => {

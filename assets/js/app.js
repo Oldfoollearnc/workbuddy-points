@@ -52,7 +52,7 @@
     ledgerQuery: '',
     ledgerFilter: '',      // 'model:xxx' / 'project:xxx'
     ledgerLimit: 24,
-    heatRange: '30',      // 热力图范围：7 / 30 / month
+    heatRange: '7',       // 热力图范围：7 / 30 / month
     popQuery: ''
   };
 
@@ -964,30 +964,28 @@
   function renderHeatmap() {
     const box = $('#heatGrid');
     if (!box) return;
-    const rng = state.heatRange || '30';
-    const grid = (D.weekHeat && D.weekHeat[rng]) || null;
-    if (!grid || !grid.length) {
-      box.innerHTML = '<p class="set-note">还没有可用的时段数据</p>';
+    const rng = state.heatRange || '7';
+    const rows = (D.dayHeat && D.dayHeat[rng]) || [];
+    if (!rows.length) {
+      box.innerHTML = '<p class="detail-empty">还没有可用的时段数据</p>';
       return;
     }
-    const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
     let max = 0, total = 0;
-    grid.forEach(row => row.forEach(v => {
+    rows.forEach(r => (r.hours || []).forEach(v => {
       const n = Number(v) || 0;
       if (n > max) max = n;
       total += n;
     }));
-    const parts = [];
-    parts.push('<div class="heat-h"></div>');
+    const parts = ['<div class="heat-h"></div>'];
     for (let h = 0; h < 24; h++) parts.push(`<div class="heat-h">${h % 3 === 0 ? h : ''}</div>`);
-    grid.forEach((row, d) => {
-      parts.push(`<div class="heat-d">${days[d]}</div>`);
-      row.forEach((v, h) => {
+    rows.forEach(r => {
+      // 行标签带具体日期：30 天里的"周一"其实是四个不同的日子，只写星期没法对应
+      parts.push(`<div class="heat-d">${esc(r.date)} 周${esc(r.wd)}</div>`);
+      (r.hours || []).forEach((v, h) => {
         const n = Number(v) || 0;
-        // 0.55 次幂：低值也能看出差别，否则只有最热那一格有颜色
         const a = max > 0 ? Math.pow(n / max, 0.55) : 0;
         const bg = n > 0 ? `rgba(47,111,237,${(0.14 + a * 0.86).toFixed(2)})` : 'var(--surface-3)';
-        parts.push(`<i class="heat-c" style="background:${bg}" title="${days[d]} ${F.pad(h)}:00–${F.pad((h + 1) % 24)}:00 · ${F.credit(n)} 分"></i>`);
+        parts.push(`<i class="heat-c" style="background:${bg}" title="${esc(r.date)} 周${esc(r.wd)} ${F.pad(h)}:00–${F.pad((h + 1) % 24)}:00 · ${F.credit(n)} 分"></i>`);
       });
     });
     const label = rng === '7' ? '近 7 天' : (rng === 'month' ? '本月' : '近 30 天');
@@ -3889,6 +3887,24 @@
         openDetail(kind);
       });
     });
+    const calViewSeg = $('#calViewSeg');
+    if (calViewSeg) calViewSeg.addEventListener('click', e => {
+      const b = e.target.closest('button[data-calview]');
+      if (!b) return;
+      const heat = b.dataset.calview === 'heat';
+      $$('#calViewSeg button').forEach(x => x.classList.toggle('is-active', x === b));
+      const chartEl = $('[data-chart="calendar"]');
+      const wrap = $('#heatWrap');
+      const legend = $('#calLegend');
+      if (chartEl) chartEl.hidden = heat;
+      if (legend) legend.hidden = heat;
+      if (wrap) wrap.hidden = !heat;
+      setText('#calSub', heat
+        ? '每行一天、每列一小时，格子越深花得越多；悬停看具体时段'
+        : '每格一天，从当月起按整月对齐 · 颜色越深消耗越多 · 悬停查看当天用量');
+      if (heat) renderHeatmap();
+    });
+
     const heatSeg = $('#heatSeg');
     if (heatSeg) heatSeg.addEventListener('click', e => {
       const b = e.target.closest('button[data-heat]');

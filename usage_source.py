@@ -758,18 +758,37 @@ class UsageService:
             e["days"].add(dt.datetime.fromtimestamp(r["ts"] / 1000).date())
             e["models"][_friendly_model(r["model"])] += r["credit"]
 
-        # 周几 × 小时 热力矩阵：三档范围各算一份，前端切换不用再请求
-        def _heat(days=None, month=False):
-            grid = [[0.0] * 24 for _ in range(7)]
+        # 逐日 × 小时 热力：行是具体日期（带星期），不再是"周一周二"这种
+        # 聚合行 —— 30 天里的"周一"其实是 4 个不同的日子，没法对应。
+        def _day_heat(days=None, month=False):
+            if month:
+                start = today.replace(day=1)
+            elif days:
+                start = today - dt.timedelta(days=days - 1)
+            else:
+                start = today - dt.timedelta(days=29)
+            rows = []
+            k = start
+            while k <= today:
+                rows.append({"date": k.strftime("%m-%d"),
+                             "wd": "一二三四五六日"[k.weekday()],
+                             "hours": [0.0] * 24})
+                k += dt.timedelta(days=1)
+            idx = {r["date"]: r for r in rows}
             for r in records:
                 t = dt.datetime.fromtimestamp(r["ts"] / 1000)
+                row = idx.get(t.strftime("%m-%d"))
+                if row is None or t.date() > today:
+                    continue
                 if month:
                     if t.year != now.year or t.month != now.month:
                         continue
-                elif days is not None and (today - t.date()).days >= days:
+                elif days and (today - t.date()).days >= days:
                     continue
-                grid[t.weekday()][t.hour] += r["credit"]
-            return [[round(v, 2) for v in row] for row in grid]
+                row["hours"][t.hour] += r["credit"]
+            for r in rows:
+                r["hours"] = [round(v, 2) for v in r["hours"]]
+            return rows
 
         # 近 7 天模型序列（模型是计费主体，归因 100% 准确）
         week_models = defaultdict(float)
@@ -969,7 +988,8 @@ class UsageService:
                   "days": len(v["days"]),
                   "topModel": (max(v["models"].items(), key=lambda kv: kv[1])[0] if v["models"] else "")}
                  for v in proj_deep.values()), key=lambda x: -x["points"]),
-            "weekHeat": {"7": _heat(days=7), "30": _heat(days=30), "month": _heat(month=True)},
+            "dayHeat": {"7": _day_heat(days=7), "30": _day_heat(days=30),
+                        "month": _day_heat(month=True)},
             # 本机全量：有多台机器同用一个账号时，这张"这台机器花了多少"只能由本机回答
             "totalAll": total_all,
             "daysAll": days_all,

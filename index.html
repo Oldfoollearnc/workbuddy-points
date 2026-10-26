@@ -478,30 +478,26 @@
                 <p id="calSub">每格一天，从当月起按整月对齐 · 颜色越深消耗越多 · 悬停查看当天用量</p>
               </div>
               <div class="card-tools">
+                <div class="segmented" id="calViewSeg">
+                  <button data-calview="cal" class="is-active">日历</button>
+                  <button data-calview="heat">热力</button>
+                </div>
                 <span class="cal-legend" id="calLegend"><em>少</em><i></i><i></i><i></i><i></i><i></i><em>多</em></span>
                 <span class="chip" id="calSource">—</span><span class="chip" id="weekSum">—</span>
               </div>
             </header>
             <div class="chart chart-cal" data-chart="calendar"></div>
-          </article>
-        </div>
-
-        <div class="grid">
-          <article class="card chart-card span-12" id="heatCard" style="--i:0">
-            <header class="card-head">
-              <div>
-                <h2>消耗热力图</h2>
-                <p>一周七天 × 24 小时，格子越深花得越多；悬停看该时段具体消耗</p>
-              </div>
-              <div class="card-tools">
+            <div class="heat-wrap" id="heatWrap" hidden>
+              <div class="heat-tools">
                 <div class="segmented" id="heatSeg">
-                  <button data-heat="7">近 7 天</button>
-                  <button data-heat="30" class="is-active">近 30 天</button>
+                  <button data-heat="7" class="is-active">近 7 天</button>
+                  <button data-heat="30">近 30 天</button>
                   <button data-heat="month">本月</button>
                 </div>
+                <span class="set-note">每行一天，格子是当天 24 小时</span>
               </div>
-            </header>
-            <div class="heat-grid" id="heatGrid"></div>
+              <div class="heat-grid" id="heatGrid"></div>
+            </div>
           </article>
         </div>
 

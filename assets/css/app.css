@@ -1259,7 +1259,7 @@ body.is-dragging .topbar { cursor: default; }
 
 .chart-card { display: flex; flex-direction: column; padding: 15px 16px 12px; }
 /* 图表高度跟着窗口走：窗口一矮，先把图压扁，别逼用户滚三屏才看全 */
-.chart-cal { width: 100%; height: clamp(190px, 27vh, 288px); flex: none; }
+.chart-cal { width: 100%; height: clamp(190px, 30vh, 420px); flex: none; }
 .chart { flex: 1 1 auto; min-height: 160px; position: relative; margin-top: 8px; }
 .chart-hourly { min-height: clamp(150px, 23vh, 224px); }
 .chart-donut { min-height: clamp(160px, 23vh, 288px); }
@@ -2844,13 +2844,24 @@ body { font-variant-numeric: tabular-nums; }
 .loading-veil { inset: 48px 0 0 0; }
 
 /* ---------- 消耗热力图：周几 × 小时 ---------- */
+.heat-wrap { padding: 2px 0 6px; }
+.heat-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 2px 10px;
+}
+.heat-tools .set-note { padding: 0; }
 .heat-grid {
   display: grid;
-  grid-template-columns: 38px repeat(24, minmax(0, 1fr));
+  grid-template-columns: 76px repeat(24, minmax(0, 1fr));
   gap: 3px;
-  padding: 14px 2px 4px;
+  padding: 0 2px 6px;
+  max-height: 430px;
+  overflow-y: auto;
 }
-.heat-d { font-size: 10px; color: var(--text-3); display: flex; align-items: center; }
+.heat-d { font-size: 10px; color: var(--text-3); display: flex; align-items: center; white-space: nowrap; }
 .heat-h { font-size: 9px; color: var(--text-3); text-align: center; height: 12px; }
 .heat-c { display: block; height: 18px; border-radius: 3px; background: var(--surface-3); transition: transform 120ms var(--ease-out); }
 .heat-c:hover { transform: scale(1.18); }
