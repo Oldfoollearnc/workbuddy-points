@@ -11,6 +11,7 @@
 """
 import ctypes
 import os
+import time
 from ctypes import wintypes
 
 import app_paths
@@ -436,6 +437,62 @@ def watch_shutdown(hwnd, on_ending):
     except Exception as e:
         _log("watch_shutdown error: %s" % e)
         return False
+
+
+# ---------------- 剪贴板 ----------------
+
+def set_clipboard(text):
+    """把文本写进系统剪贴板（CF_UNICODETEXT）。
+
+    WebView2 在 file:// 下对 navigator.clipboard 有安全限制，走系统 API 最稳。
+    """
+    CF_UNICODETEXT = 13
+    GMEM_MOVEABLE = 0x0002
+    GMEM_ZEROINIT = 0x0040
+    try:
+        kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+        kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+        kernel32.GlobalLock.restype = ctypes.c_void_p
+        kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+        kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+        user32.OpenClipboard.argtypes = [wintypes.HWND]
+        user32.EmptyClipboard.argtypes = []
+        user32.SetClipboardData.restype = wintypes.HANDLE
+        user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+    except Exception:
+        pass
+
+    data = (text or "").encode("utf-16-le") + b"\x00\x00"
+    opened = False
+    for _ in range(5):
+        if user32.OpenClipboard(None):
+            opened = True
+            break
+        time.sleep(0.05)
+    if not opened:
+        return False
+    try:
+        user32.EmptyClipboard()
+        h = kernel32.GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, len(data))
+        if not h:
+            return False
+        p = kernel32.GlobalLock(h)
+        if not p:
+            return False
+        ctypes.memmove(p, data, len(data))
+        kernel32.GlobalUnlock(h)
+        # 成功后内存归系统所有，不能再 GlobalFree
+        if not user32.SetClipboardData(CF_UNICODETEXT, h):
+            return False
+        return True
+    except Exception as e:
+        _log("set_clipboard error: %s" % e)
+        return False
+    finally:
+        try:
+            user32.CloseClipboard()
+        except Exception:
+            pass
 
 
 # ---------------- 单实例 ----------------

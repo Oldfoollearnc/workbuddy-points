@@ -1407,6 +1407,23 @@
     }
   }
 
+  /** 一句话摘要：发群/记笔记用（小窗「复制摘要」）。 */
+  function buildDigestText() {
+    const stat = todayStat();
+    const acc = effAccount();
+    const r = (CHECKIN && CHECKIN.result) || {};
+    const t = r.travel || {};
+    const parts = [`WorkBuddy 今日 ${F.credit(stat.consumed)} 分`];
+    if (stat.consumed) parts.push(`${F.fmt(stat.requests)} 次调用`);
+    if (hasQuota()) parts.push(`可用 ${F.credit(acc.available)} 分`);
+    if (t.state === 'traveling') {
+      parts.push(`猫猫在${t.location || '路上'}，${t.remainingText || '稍后'}回来`);
+    } else if (t.state === 'arrived') {
+      parts.push(`猫猫到家，${t.reward || 0} 分待领`);
+    }
+    return parts.join(' · ');
+  }
+
   function renderPopup() {
     const stat = todayStat();
     const acc = effAccount();
@@ -3571,6 +3588,20 @@
     // 小窗也自动播，节奏比左侧慢一档；每次打开都回到第 1 张
     popSwipe = createSwipe($('#popSwipe'), {
       auto: true, interval: Math.max(0, prefs.popSwipeSec) * 1000 || 0
+    });
+
+    const popCopy = $('#popCopy');
+    if (popCopy) popCopy.addEventListener('click', async () => {
+      if (!bridge.has() || !bridge.can('copy_text')) {
+        toast('浏览器预览无法写剪贴板', 'i-info');
+        return;
+      }
+      try {
+        const r = await bridge.call('copy_text', buildDigestText());
+        toast(r && r.ok ? '摘要已复制' : '复制失败', r && r.ok ? 'i-check' : 'i-alert');
+      } catch (e) {
+        toast('复制失败', 'i-alert');
+      }
     });
 
     const pcl = $('#popCloud');

@@ -58,6 +58,7 @@ from win32_utils import (      # noqa: E402  Win32 底层工具（拆分自本�
     enable_snap_support, MONITORINFO,
     single_instance, signal_show,
     watch_shutdown, shutting_down,
+    set_clipboard,
     SW_MINIMIZE, SW_MAXIMIZE, SW_RESTORE,
     SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE, SWP_FRAMECHANGED,
     GWL_STYLE, KEEP_VISIBLE_X, KEEP_VISIBLE_Y,
@@ -1540,6 +1541,15 @@ class Api:
         self._desk.digest_enabled = bool(flag)
         log("digest enabled -> %s" % self._desk.digest_enabled)
         return {"ok": True, "on": self._desk.digest_enabled}
+
+    def copy_text(self, text):
+        """把一段文本写进剪贴板（小窗「复制摘要」用）。"""
+        try:
+            ok = set_clipboard(str(text or "")[:4000])
+            return {"ok": bool(ok)}
+        except Exception as e:
+            log("copy_text error: %s" % e)
+            return {"ok": False, "error": str(e)[:120]}
 
     def open_data_dir(self):
         try:
