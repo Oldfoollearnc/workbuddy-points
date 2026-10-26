@@ -2054,6 +2054,7 @@ body.is-loading .boot-mask { display: flex; }
 }
 .rows-row:last-child { border-bottom: 0; }
 .rows-row:hover { background: var(--surface-2); }
+.rows-row { transition: background-color 140ms var(--ease-out); }
 .rows-idx { font-size: 10px; font-weight: 600; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .rows-row:first-child .rows-idx { color: var(--brand); }
 .rows-name { color: var(--text-1); font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2805,6 +2806,7 @@ body[data-mode="popup"] .rz { display: none; }
   animation-delay: calc(min(var(--i, 0), 18) * 12ms);
 }
 .detail-table tbody tr:hover { background: var(--surface-2); }
+.detail-table tbody tr { transition: background-color 140ms var(--ease-out); }
 .detail-table tr:last-child td { border-bottom: 0; }
 .detail-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .detail-bar { display: block; height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; min-width: 60px; }
