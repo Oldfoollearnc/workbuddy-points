@@ -46,6 +46,8 @@
     view: HASH_VIEW || 'overview',
     range: 7,
     quotaRange: 'week',
+    localRange: '30',      // 本机消耗卡：7 / 30 / month / all
+    projRange: '7',        // 项目排行：7 / 30 / month
     ledgerType: 'all',
     ledgerQuery: '',
     ledgerFilter: '',      // 'model:xxx' / 'project:xxx'
@@ -136,7 +138,7 @@
     prefs: () => prefs
   });
   const {
-    startOfDay, addDays, diffDays, parseDate, dayKeyOf, round2,
+    startOfDay, addDays, diffDays, parseDate, dayKeyOf, round2, monthDayToDate,
     isWorkday, countWorkdays, allowance, leftDaysText,
     cloudRows, rowTime, lastSyncMs, localTail,
     todayStat, dailySeries, pendingSinceSync, effAccount, quotaWindow
@@ -1776,7 +1778,77 @@
     };
   }
 
+  /* ---------------- 本机消耗（一个账号多台机器时的"这台"口径） ---------------- */
+
+  const LOCAL_LABEL = { '7': '近 7 天', '30': '近 30 天', month: '本月', all: '全部' };
+
+  /** 本机在指定周期的消耗。数据只来自本机会话记录，不掺云端账号口径。 */
+  function localPeriodSum(range) {
+    const daily = Array.isArray(D.daily) ? D.daily : [];
+    const sum = arr => arr.reduce((s, d) => s + (Number(d.consumed) || 0), 0);
+    if (range === 'all') {
+      const all = Number(D.totalAll);
+      return Number.isFinite(all) && all > 0 ? all : sum(daily);
+    }
+    if (range === 'month') {
+      const now = new Date();
+      return sum(daily.filter(d => {
+        const dt = monthDayToDate(d.date, now);
+        return dt && dt.getFullYear() === now.getFullYear() && dt.getMonth() === now.getMonth();
+      }));
+    }
+    return sum(daily.slice(-Number(range)));
+  }
+
+  /** 云端账号级消耗（含其他设备）。没有云端逐笔时返回 null。 */
+  function cloudPeriodSum(range) {
+    const rows = cloudRows();
+    if (!rows || !rows.length) return null;
+    if (range === 'all') return rows.reduce((s, r) => s + (Number(r.points) || 0), 0);
+    let cut;
+    if (range === 'month') {
+      const now = new Date();
+      cut = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    } else {
+      cut = Date.now() - Number(range) * 86400000;
+    }
+    let total = 0, hit = 0;
+    rows.forEach(r => {
+      const t = rowTime(r);
+      if (t && t.getTime() >= cut) { total += Number(r.points) || 0; hit += 1; }
+    });
+    return hit ? total : null;
+  }
+
+  function renderLocalCard() {
+    if (!$('#lcValue')) return;
+    const range = state.localRange || '30';
+    const local = localPeriodSum(range);
+    setText('#lcValue', F.credit(local));
+    setText('#lcMachine', (D.meta && D.meta.machine) ? D.meta.machine : '本机');
+
+    const cloud = cloudPeriodSum(range);
+    if (cloud && cloud > 0) {
+      setText('#lcCloud', F.credit(cloud) + ' 分');
+      setText('#lcShare', Math.round(Math.min(1, local / cloud) * 100) + '%');
+      const other = cloud - local;
+      setText('#lcOther', other > 0.5 ? F.credit(other) + ' 分' : '—');
+    } else {
+      setText('#lcCloud', '—');
+      setText('#lcShare', '—');
+      setText('#lcOther', '连上账号后可对比');
+    }
+
+    const days = Number(D.meta && D.meta.daysAll) || 0;
+    const first = (D.meta && D.meta.firstDayAll) || '';
+    setText('#lcNote', range === 'all'
+      ? (days ? `本机记录共 ${days} 天，从 ${first} 起` : '本机还没有可用记录')
+      : '只统计这台机器的 WorkBuddy 会话记录');
+    $$('#lcSeg button').forEach(b => b.classList.toggle('is-active', b.dataset.lc === range));
+  }
+
   function renderAnalytics() {
+    renderLocalCard();
     const cloudMode = !!cloudRows();
     setText('#modelSub', cloudMode
       ? '近 30 天按模型统计积分与计费笔数'
@@ -1880,13 +1952,21 @@
       }
     }
 
-    /* ---------- 项目消耗排行：本机记录（云端不返回项目） ---------- */
-    const projItems = (D.projects7 || []).map(p => ({ name: p.name, points: p.points }));
+    /* ---------- 项目消耗排行：本机记录（云端不返回项目），周期可切 ---------- */
+    const pr = state.projRange || '7';
+    const projSrc = pr === '30' ? (D.projects30 || D.projects7)
+      : pr === 'month' ? (D.projectsMonth || D.projects7) : D.projects7;
+    const projItems = (projSrc || []).map(p => ({ name: p.name, points: p.points }));
     const pTotal = projItems.reduce((a, b) => a + b.points, 0);
     setText('#projTotal', projItems.length
-      ? `近 7 天 ${cloudMode ? '本机 ' : ''}${F.credit(pTotal)} 分`
+      ? `${LOCAL_LABEL[pr]} ${cloudMode ? '本机 ' : ''}${F.credit(pTotal)} 分`
       : '暂无数据');
-    renderRows($('#projectRank'), projItems, { limit: 6, empty: '近 7 天暂无项目消耗（项目只来自本机会话记录）' });
+    setText('#projSub', `${LOCAL_LABEL[pr]} Top 6 项目，条形长度按消耗占比（仅本机记录，不含其他设备）`);
+    renderRows($('#projectRank'), projItems, {
+      limit: 6,
+      empty: `${LOCAL_LABEL[pr]}暂无项目消耗（项目只来自本机会话记录）`
+    });
+    $$('#projSeg button').forEach(b => b.classList.toggle('is-active', b.dataset.proj === pr));
 
     // 说明：这段在用量分析页，历史上也没有 #insightList 容器，一直未生效；
     // 额度预警已改到总览用 toast 提示（见 maybeWarnQuota）。
@@ -3076,6 +3156,22 @@
     ['stCkBtn', 'stTvBtn', 'stClBtn', 'stAll'].forEach(id => {
       const b = $('#' + id);
       if (b) b.addEventListener('click', () => probeStatus(b));
+    });
+
+    /* 用量分析：本机消耗周期 + 项目排行周期 */
+    const lcSeg = $('#lcSeg');
+    if (lcSeg) lcSeg.addEventListener('click', e => {
+      const b = e.target.closest('button[data-lc]');
+      if (!b) return;
+      state.localRange = b.dataset.lc;
+      renderLocalCard();
+    });
+    const projSeg = $('#projSeg');
+    if (projSeg) projSeg.addEventListener('click', e => {
+      const b = e.target.closest('button[data-proj]');
+      if (!b) return;
+      state.projRange = b.dataset.proj;
+      if (state.view === 'analytics') renderAnalytics();
     });
 
     /* 点小窗外部收起：由 Python 端监听鼠标左键松开 + 光标是否落在小窗内，

@@ -445,6 +445,29 @@
 
       <!-- ---------- 用量分析 ---------- -->
       <section class="view" data-view="analytics">
+        <!-- 本机消耗：一个账号多台机器时，只有本机能回答"这台花了多少" -->
+        <article class="card local-card" style="--i:0">
+          <div class="lc-main">
+            <div class="lc-head">
+              <span class="lc-title">本机消耗</span>
+              <span class="chip" id="lcMachine">本机</span>
+            </div>
+            <div class="lc-num"><span id="lcValue">0</span><em>分</em></div>
+            <div class="segmented segmented-sm lc-seg" id="lcSeg">
+              <button data-lc="7">近 7 天</button>
+              <button class="is-active" data-lc="30">近 30 天</button>
+              <button data-lc="month">本月</button>
+              <button data-lc="all">全部</button>
+            </div>
+          </div>
+          <div class="lc-side">
+            <div class="lc-row"><span>账号同期消耗</span><b id="lcCloud">—</b></div>
+            <div class="lc-row"><span>本机占比</span><b id="lcShare">—</b></div>
+            <div class="lc-row"><span>其他设备</span><b id="lcOther">—</b></div>
+            <p class="lc-note" id="lcNote">只统计这台机器的 WorkBuddy 会话记录</p>
+          </div>
+        </article>
+
         <div class="grid">
           <article class="card chart-card span-12 cal-card" style="--i:0">
             <header class="card-head">
@@ -474,8 +497,15 @@
 
           <article class="card list-card span-6" style="--i:2">
             <header class="card-head">
-              <div><h2>项目消耗排行</h2><p>近 7 天 Top 6 项目，条形长度按消耗占比（仅本机记录，不含其他设备）</p></div>
-              <div class="card-tools"><span class="chip" id="projTotal">—</span></div>
+              <div><h2>项目消耗排行</h2><p id="projSub">近 7 天 Top 6 项目，条形长度按消耗占比（仅本机记录，不含其他设备）</p></div>
+              <div class="card-tools">
+                <div class="segmented segmented-sm" id="projSeg">
+                  <button class="is-active" data-proj="7">7 天</button>
+                  <button data-proj="30">30 天</button>
+                  <button data-proj="month">本月</button>
+                </div>
+                <span class="chip" id="projTotal">—</span>
+              </div>
             </header>
             <div class="rows-head"><span></span><span>项目</span><span></span><span class="ta-r">积分</span><span class="ta-r">占比</span></div>
             <div class="rows" id="projectRank"></div>

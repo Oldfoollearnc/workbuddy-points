@@ -593,18 +593,32 @@ class UsageService:
         days_left = (available / avg7) if (configured and avg7 > 0) else 0
         run_out = now + dt.timedelta(days=days_left) if days_left else now
 
-        # 近 7 天项目构成（用于环形图与排行）
-        by_proj7 = defaultdict(float)
-        for r in records:
-            d = dt.datetime.fromtimestamp(r["ts"] / 1000).date()
-            if (today - d).days < 7:
+        # 项目构成：7 天 / 30 天 / 本月三档。
+        # 一个账号可能两台机器都在用，云端逐笔没有机器标识，只有本机能回答
+        # "这台机器花了多少" —— 所以项目排行固定按本机记录算，只是换了窗口。
+        def proj_window(days=None, month=False):
+            agg = defaultdict(float)
+            for r in records:
+                d = dt.datetime.fromtimestamp(r["ts"] / 1000).date()
+                if month:
+                    if (d.year, d.month) != (today.year, today.month):
+                        continue
+                elif days is not None and (today - d).days >= days:
+                    continue
                 cwd = r["cwd"].rstrip("\\/")
-                by_proj7[os.path.basename(cwd) or "未归类"] += r["credit"]
-        top_proj = sorted(by_proj7.items(), key=lambda kv: -kv[1])[:5]
-        folded = defaultdict(float)
-        for name, v in by_proj7.items():
-            folded[name if name in dict(top_proj) else "其他项目"] += v
-        projects7 = _mix(folded, sum(folded.values()))
+                agg[os.path.basename(cwd) or "未归类"] += r["credit"]
+            total = round(sum(agg.values()), 2)
+            top = sorted(agg.items(), key=lambda kv: -kv[1])[:5]
+            folded = defaultdict(float)
+            for name, v in agg.items():
+                folded[name if name in dict(top) else "其他项目"] += v
+            return {"items": _mix(folded, sum(folded.values())), "total": total,
+                    "projects": len(agg)}
+
+        pw7 = proj_window(days=7)
+        projects7 = pw7["items"]
+        pw30 = proj_window(days=30)
+        pw_month = proj_window(month=True)
 
         # 近 7 天模型序列（模型是计费主体，归因 100% 准确）
         week_models = defaultdict(float)
@@ -729,6 +743,8 @@ class UsageService:
                 "sourcePath": getattr(self, "source", {}).get("home") or "",
                 "sourceKind": "jsonl",
                 "sourceNote": getattr(self, "source", {}).get("note") or "",
+                # 机器名：多机共用同一账号时，界面要能说清"这是哪台机器的账"
+                "machine": os.environ.get("COMPUTERNAME") or "",
             },
             "account": {
                 "total": round(cfg["total"], 2),
@@ -759,6 +775,15 @@ class UsageService:
             "taskDefs": task_defs,
             "projects": projects,
             "projects7": projects7,
+            "projects7Total": pw7["total"],
+            "projects30": pw30["items"],
+            "projects30Total": pw30["total"],
+            "projectsMonth": pw_month["items"],
+            "projectsMonthTotal": pw_month["total"],
+            # 本机全量：有多台机器同用一个账号时，这张"这台机器花了多少"只能由本机回答
+            "totalAll": round(sum(r["credit"] for r in all_records), 2),
+            "daysAll": len(all_days),
+            "firstDayAll": min(all_days).strftime("%Y-%m-%d") if all_days else "",
             "daily": daily,
             "week": week,
             "heat": heat,

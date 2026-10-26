@@ -2468,6 +2468,37 @@ body.is-loading .boot-mask { display: flex; }
 body.is-maximized .rz { display: none; }
 body[data-mode="popup"] .rz { display: none; }
 
+/* ---------- 本机消耗（用量分析顶部） ---------- */
+.local-card {
+  display: flex;
+  gap: 24px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+.lc-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.lc-head { display: flex; align-items: center; gap: 8px; }
+.lc-title { font-size: 12px; color: var(--text-3); }
+.lc-num { display: flex; align-items: baseline; gap: 5px; line-height: 1; }
+.lc-num span { font-size: 32px; font-weight: 680; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+.lc-num em { font-style: normal; font-size: 12px; color: var(--text-3); }
+.lc-seg { align-self: flex-start; }
+.lc-side {
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  padding-left: 24px;
+  border-left: 1px solid var(--border);
+}
+.lc-row { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; color: var(--text-3); }
+.lc-row b { font-size: 12.5px; font-weight: 600; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.lc-note { margin: 2px 0 0; font-size: 10.5px; color: var(--text-3); }
+@media (max-width: 1100px) {
+  .local-card { flex-direction: column; gap: 14px; }
+  .lc-side { flex: none; padding-left: 0; padding-top: 12px; border-left: 0; border-top: 1px solid var(--border); }
+}
+
 /* ===================== 自适应 ===================== */
 
 @media (max-width: 1280px) {
