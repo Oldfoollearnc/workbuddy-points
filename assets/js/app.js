@@ -1164,9 +1164,10 @@
       return [esc(m.name), v > 0 ? F.credit(v) : '免费', F.fmt(Number(m.calls) || 0),
         detailBar(v / total * 100), v > 0 ? (v / total * 100).toFixed(1) + '%' : '—'];
     });
+    const projMax = Math.max(...projs.map(p => Number(p.points) || 0), 0.01);
     const projRows = projs.map(p => [esc(p.name), F.credit(Number(p.points) || 0),
       F.fmt(Number(p.calls) || 0), p.tokens ? F.fmtWan(p.tokens) : '—',
-      detailBar((Number(p.points) || 0) / total * 100)]);
+      detailBar((Number(p.points) || 0) / projMax * 100)]);
     const purRows = purposes.map(p => [esc(p.name), F.credit(Number(p.points) || 0),
       F.fmt(Number(p.calls) || 0),
       (Number(p.calls) || 0) ? F.credit((Number(p.points) || 0) / Number(p.calls)) + ' 分' : '—']);
@@ -1187,7 +1188,7 @@
           { label: '占比' }, { label: '', num: true }], modelRows)
         + '<h3 class="detail-sub">按项目</h3>'
         + detailTable([{ label: '项目' }, { label: '积分', num: true }, { label: '调用', num: true },
-          { label: 'Token', num: true }, { label: '占今日' }], projRows)
+          { label: 'Token', num: true }, { label: '相对最大' }], projRows)
         + '<h3 class="detail-sub">按用途</h3>'
         + detailTable([{ label: '用途' }, { label: '积分', num: true }, { label: '调用', num: true },
           { label: '单次均', num: true }], purRows)
