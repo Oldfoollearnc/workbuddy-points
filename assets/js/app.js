@@ -944,8 +944,11 @@
     }
   }
 
-  /** 当前数据里出现过的项目名（去掉聚合用的占位名）。 */
+  /** 当前数据里出现过的项目名（后端给全量，排行只给 Top5 不能当全量用）。 */
   function aliasCandidates() {
+    if (Array.isArray(D.projectNames) && D.projectNames.length) {
+      return D.projectNames.filter(n => n && n !== '其他项目' && n !== '未归类');
+    }
     const seen = new Set();
     ['projects', 'projects7', 'projects30', 'projectsMonth'].forEach(k => {
       (D[k] || []).forEach(p => { if (p && p.name) seen.add(p.name); });
@@ -958,9 +961,13 @@
   function renderAliases() {
     const box = $('#aliasList');
     if (!box) return;
-    const list = aliasCandidates();
+    const all = aliasCandidates();
+    const kwEl = $('#aliasSearch');
+    const kw = ((kwEl && kwEl.value) || '').trim().toLowerCase();
+    const list = kw ? all.filter(n => n.toLowerCase().includes(kw)) : all;
+    setText('#aliasCount', `${list.length} / ${all.length}`);
     if (!list.length) {
-      box.innerHTML = '<p class="set-note">还没有可改名的项目（先产生一些本机调用记录）</p>';
+      box.innerHTML = `<p class="set-note">${all.length ? '没有匹配的项目名' : '还没有可改名的项目（先产生一些本机调用记录）'}</p>`;
       return;
     }
     const cur = ALIASES || {};
@@ -3011,6 +3018,8 @@
       }
     });
     loadAliases().then(() => { if (state.view === 'settings') renderAliases(); });
+    const aliasSearch = $('#aliasSearch');
+    if (aliasSearch) aliasSearch.addEventListener('input', renderAliases);
 
     const diagBtn = $('#btnDiag');
     if (diagBtn) diagBtn.addEventListener('click', async () => {

@@ -577,29 +577,6 @@ class Desktop:
         except Exception:
             return ""
 
-    def _pin_temporarily(self, hwnd, seconds=1.0):
-        """临时置顶：窗口刚出来时压住其它程序，1 秒后自动放开。
-
-        只用来盖住"启动瞬间被别的窗口顶下去"这一下，久了就是在挡用户的路。
-        """
-        try:
-            user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
-        except Exception:
-            return
-        if self.always_on_top:
-            return          # 用户勾了「窗口置顶」：别 1 秒后又把自己放开
-
-        def _unpin():
-            time.sleep(seconds)
-            try:
-                user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0,
-                                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
-            except Exception:
-                pass
-
-        threading.Thread(target=_unpin, daemon=True).start()
-
     def show_main(self):
         # 小窗让位（同时把小窗状态簿记成"已收起"）
         self.hide_popup()
@@ -636,8 +613,6 @@ class Desktop:
             user32.SetForegroundWindow(hwnd)
             if self.always_on_top:
                 self.set_always_on_top(True)      # 唤回窗口时把常驻置顶续上
-            # 启动/展开时先置顶几秒：刚打开就被别的窗口盖住，看起来像"没打开"
-            self._pin_temporarily(hwnd)
             self._safe_js(self.main,
                           "window.App && (App.beforeShow(), App.playEnter('main'))")
         threading.Timer(0.2, lambda: self._safe_js(self.main, "App.refreshLayout()")).start()

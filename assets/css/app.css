@@ -2456,10 +2456,26 @@ body.is-loading .boot-mask { display: flex; }
 .set-row--stack .theme-grid { margin-top: 2px; }
 
 /* ---------- 项目别名 ---------- */
-.alias-list { display: flex; flex-direction: column; gap: 6px; padding: 8px 0 10px; }
-.alias-row { display: flex; align-items: center; gap: 10px; }
+.alias-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px 0;
+}
+.alias-search input { flex: 1 1 auto; min-width: 0; }
+.alias-search .set-note { padding: 0; flex: none; }
+.alias-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* 和上面的 set-row 对齐：左 20px 是行的内边距，别名列表不能贴到卡片边上 */
+  padding: 10px 20px 14px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.alias-row { display: flex; align-items: center; gap: 14px; }
 .alias-row code {
-  flex: 0 0 46%;
+  flex: 0 0 42%;
   min-width: 0;
   font-family: var(--font-mono);
   font-size: 11px;

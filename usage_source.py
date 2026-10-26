@@ -693,6 +693,13 @@ class UsageService:
         pw30 = proj_window(days=30)
         pw_month = proj_window(month=True)
 
+        # 全部项目名（不折叠、不截断）：设置页的别名列表要能看到所有项目，
+        # 而排行只保留 Top 5 + 其他项目，不能拿它当全量。
+        by_proj_all = defaultdict(float)
+        for r in records:
+            by_proj_all[proj_name(r)] += r["credit"]
+        project_names = [k for k, _v in sorted(by_proj_all.items(), key=lambda kv: -kv[1])]
+
         # 近 7 天模型序列（模型是计费主体，归因 100% 准确）
         week_models = defaultdict(float)
         for r in records:
@@ -863,6 +870,7 @@ class UsageService:
             "projects30Total": pw30["total"],
             "projectsMonth": pw_month["items"],
             "projectsMonthTotal": pw_month["total"],
+            "projectNames": project_names,
             # 本机全量：有多台机器同用一个账号时，这张"这台机器花了多少"只能由本机回答
             "totalAll": total_all,
             "daysAll": days_all,
