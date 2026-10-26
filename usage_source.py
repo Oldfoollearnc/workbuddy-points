@@ -699,6 +699,8 @@ class UsageService:
         for r in records:
             by_proj_all[proj_name(r)] += r["credit"]
         project_names = [k for k, _v in sorted(by_proj_all.items(), key=lambda kv: -kv[1])]
+        projects_all = [{"name": k, "points": round(v, 2)}
+                        for k, v in sorted(by_proj_all.items(), key=lambda kv: -kv[1])]
 
         # 近 7 天模型序列（模型是计费主体，归因 100% 准确）
         week_models = defaultdict(float)
@@ -871,6 +873,7 @@ class UsageService:
             "projectsMonth": pw_month["items"],
             "projectsMonthTotal": pw_month["total"],
             "projectNames": project_names,
+            "projectsAll": projects_all,
             # 本机全量：有多台机器同用一个账号时，这张"这台机器花了多少"只能由本机回答
             "totalAll": total_all,
             "daysAll": days_all,

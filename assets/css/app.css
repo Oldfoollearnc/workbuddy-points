@@ -2693,6 +2693,70 @@ body[data-mode="popup"] .rz { display: none; }
   .chart-gauge { min-height: 104px; }
 }
 
+/* ===================== 详情浮层 ===================== */
+
+.detail-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 12, 20, .48);
+}
+.detail-veil[hidden] { display: none; }
+.detail-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(980px, 94vw);
+  height: min(760px, 88vh);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  border: 1px solid var(--border-strong, var(--border));
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .28);
+  overflow: hidden;
+}
+.detail-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.detail-head h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text-1); }
+.detail-head p { margin: 3px 0 0; font-size: 11.5px; color: var(--text-3); }
+.detail-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 20px 20px; }
+
+.detail-kpis { display: flex; flex-wrap: wrap; gap: 26px; padding: 14px 2px 16px; }
+.detail-kpis > div { display: flex; flex-direction: column; gap: 2px; }
+.detail-kpis span { font-size: 11px; color: var(--text-3); }
+.detail-kpis b { font-size: 17px; font-weight: 650; color: var(--text-1); font-variant-numeric: tabular-nums; }
+
+.detail-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.detail-table th {
+  position: sticky; top: 0; z-index: 1;
+  padding: 8px 6px;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.detail-table td { padding: 7px 6px; border-bottom: 1px solid var(--border); color: var(--text-1); }
+.detail-table tr:last-child td { border-bottom: 0; }
+.detail-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.detail-table .dim { color: var(--text-3); }
+.detail-bar { display: block; height: 6px; border-radius: 99px; background: var(--surface-3); overflow: hidden; min-width: 60px; }
+.detail-bar i { display: block; height: 100%; border-radius: 99px; background: var(--brand); }
+
+/* 能点进详情的卡片给个手型与悬停提示 */
+.card.is-detail { cursor: pointer; }
+.card.is-detail:hover { border-color: var(--border-2); }
+
 /* ===================== 加载遮罩 ===================== */
 
 .loading-veil {

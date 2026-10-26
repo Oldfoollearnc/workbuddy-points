@@ -957,6 +957,193 @@
     spotTimer = setTimeout(() => el.classList.remove('is-spot'), 1900);
   }
 
+  /* ---------------- 卡片详情浮层 ---------------- */
+
+  let detailOpen = false;
+
+  function detailKpis(items) {
+    return `<div class="detail-kpis">${items.map(([k, v]) =>
+      `<div><span>${esc(k)}</span><b>${v}</b></div>`).join('')}</div>`;
+  }
+
+  function detailTable(cols, rows) {
+    const th = cols.map(c => `<th class="${c.num ? 'num' : ''}">${esc(c.label)}</th>`).join('');
+    const body = rows.map(r => `<tr>${r.map((c, i) =>
+      `<td class="${cols[i] && cols[i].num ? 'num' : ''}">${c}</td>`).join('')}</tr>`).join('');
+    return `<table class="detail-table"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`;
+  }
+
+  const detailBar = pct => `<span class="detail-bar"><i style="width:${Math.max(2, Math.min(100, pct)).toFixed(1)}%"></i></span>`;
+
+  function detailDaily() {
+    const daily = (D.daily || []).slice();
+    if (!daily.length) return { title: '消耗日历', sub: '还没有可用记录', html: '' };
+    const total = daily.reduce((s, d) => s + (Number(d.consumed) || 0), 0);
+    const calls = daily.reduce((s, d) => s + (Number(d.calls) || 0), 0);
+    const tokens = daily.reduce((s, d) => s + (Number(d.tokens) || 0), 0);
+    const active = daily.filter(d => (Number(d.consumed) || 0) > 0);
+    const max = Math.max(...daily.map(d => Number(d.consumed) || 0), 0.01);
+    let peak = daily[0] || {};
+    daily.forEach(d => { if ((Number(d.consumed) || 0) > (Number(peak.consumed) || 0)) peak = d; });
+    const rows = daily.slice().reverse().map(d => {
+      const v = Number(d.consumed) || 0;
+      return [esc(d.date || ''), F.credit(v), F.fmt(Number(d.calls) || 0),
+        d.tokens ? F.fmtWan(d.tokens) : '—', detailBar(v / max * 100)];
+    });
+    return {
+      title: '消耗日历 · 近 30 天',
+      sub: '每天一行；占比条按区间最高值归一',
+      html: detailKpis([
+        ['区间合计', F.credit(total) + ' 分'],
+        ['日均', F.credit(total / daily.length) + ' 分'],
+        ['有消耗', active.length + ' 天'],
+        ['最高一天', peak.date ? `${esc(peak.date)} · ${F.credit(Number(peak.consumed) || 0)} 分` : '—'],
+        ['调用合计', F.fmt(calls) + ' 次'],
+        ['Token 合计', F.fmtWan(tokens)]
+      ]) + detailTable(
+        [{ label: '日期' }, { label: '消耗', num: true }, { label: '调用', num: true },
+          { label: 'Token', num: true }, { label: '占比' }], rows)
+    };
+  }
+
+  function detailModels() {
+    const list = (D.models30 && D.models30.length ? D.models30 : (D.models || [])).slice();
+    if (!list.length) return { title: '模型使用量', sub: '还没有可用记录', html: '' };
+    const total = list.reduce((s, m) => s + (Number(m.points) || 0), 0) || 1;
+    const calls = list.reduce((s, m) => s + (Number(m.calls) || 0), 0);
+    const rows = list.map(m => {
+      const v = Number(m.points) || 0;
+      return [esc(m.name), F.credit(v), F.fmt(Number(m.calls) || 0),
+        m.tokens ? F.fmtWan(m.tokens) : '—', detailBar(v / total * 100),
+        (v / total * 100).toFixed(1) + '%'];
+    });
+    return {
+      title: '模型使用量 · 全部模型',
+      sub: '近 30 天；排行里只显示前 5，这里是完整列表',
+      html: detailKpis([
+        ['模型数', String(list.length)],
+        ['积分合计', F.credit(total) + ' 分'],
+        ['调用合计', F.fmt(calls) + ' 次']
+      ]) + detailTable(
+        [{ label: '模型' }, { label: '积分', num: true }, { label: '调用', num: true },
+          { label: 'Token', num: true }, { label: '占比' }, { label: '', num: true }], rows)
+    };
+  }
+
+  function detailProjects() {
+    const list = (D.projectsAll && D.projectsAll.length ? D.projectsAll : (D.projects30 || [])).slice();
+    if (!list.length) return { title: '项目消耗排行', sub: '还没有可用记录', html: '' };
+    const total = list.reduce((s, p) => s + (Number(p.points) || 0), 0) || 1;
+    const rows = list.map(p => {
+      const v = Number(p.points) || 0;
+      return [esc(p.name), F.credit(v), detailBar(v / total * 100), (v / total * 100).toFixed(1) + '%'];
+    });
+    return {
+      title: '项目消耗排行 · 全部项目',
+      sub: '仅本机会话记录，按消耗从高到低',
+      html: detailKpis([
+        ['项目数', String(list.length)],
+        ['积分合计', F.credit(total) + ' 分'],
+        ['最高', list[0] ? `${esc(list[0].name)} · ${F.credit(list[0].points || 0)} 分` : '—']
+      ]) + detailTable(
+        [{ label: '项目' }, { label: '积分', num: true }, { label: '占比' }, { label: '', num: true }], rows)
+    };
+  }
+
+  function detailHourly() {
+    const list = (D.hourly || []).filter(h => !h.isFuture);
+    const total = list.reduce((s, h) => s + (Number(h.points) || 0), 0);
+    const max = Math.max(...list.map(h => Number(h.points) || 0), 0.01);
+    let peak = list[0] || {};
+    list.forEach(h => { if ((Number(h.points) || 0) > (Number(peak.points) || 0)) peak = h; });
+    const rows = list.map(h => {
+      const v = Number(h.points) || 0;
+      return [esc(h.label), F.credit(v), F.fmt(Number(h.requests) || 0), detailBar(v / max * 100)];
+    });
+    return {
+      title: '今日消耗时段分布',
+      sub: '按小时统计，只列已经过去的小时',
+      html: detailKpis([
+        ['今日合计', F.credit(total) + ' 分'],
+        ['峰值时段', peak.label ? `${esc(peak.label)} · ${F.credit(Number(peak.points) || 0)} 分` : '—']
+      ]) + detailTable(
+        [{ label: '时段' }, { label: '消耗', num: true }, { label: '调用', num: true }, { label: '相对峰值' }], rows)
+    };
+  }
+
+  function detailComp() {
+    const list = (D.models || []).slice();
+    if (!list.length) return { title: '今日消耗构成', sub: '今天还没有消耗', html: '' };
+    const total = list.reduce((s, m) => s + (Number(m.points) || 0), 0) || 1;
+    const rows = list.map(m => {
+      const v = Number(m.points) || 0;
+      return [esc(m.name), F.credit(v), F.fmt(Number(m.calls) || 0), detailBar(v / total * 100),
+        (v / total * 100).toFixed(1) + '%'];
+    });
+    return {
+      title: '今日消耗构成',
+      sub: '按模型拆今天花的每一分',
+      html: detailKpis([
+        ['今日合计', F.credit(total) + ' 分'],
+        ['模型数', String(list.length)]
+      ]) + detailTable(
+        [{ label: '模型' }, { label: '积分', num: true }, { label: '调用', num: true },
+          { label: '占比' }, { label: '', num: true }], rows)
+    };
+  }
+
+  function detailLocal() {
+    const acc = effAccount();
+    const rows = [['7', '近 7 天'], ['30', '近 30 天'], ['month', '本月'], ['all', '全部']]
+      .map(([k, label]) => {
+        const v = localPeriodSum(k);
+        const c = cloudPeriodSum(k);
+        return [label, F.credit(v) + ' 分', c && c > 0 ? F.credit(c) + ' 分' : '—',
+          c && c > 0 ? (v / c * 100).toFixed(0) + '%' : '—'];
+      });
+    return {
+      title: '本机消耗 · 各周期对比',
+      sub: '本机 = 这台机器的会话记录；账号 = 云端逐笔（含其它设备）',
+      html: detailKpis([
+        ['本机机器', esc((D.meta && D.meta.machine) || '本机')],
+        ['记录覆盖', ((D.meta && D.meta.daysAll) || 0) + ' 天'],
+        ['账号可用', hasQuota() ? F.credit(acc.available) + ' 分' : '—']
+      ]) + detailTable(
+        [{ label: '周期' }, { label: '本机', num: true }, { label: '账号同期', num: true },
+          { label: '本机占比', num: true }], rows)
+    };
+  }
+
+  const DETAIL_SPECS = {
+    calendar: detailDaily,
+    trend: detailDaily,
+    hourly: detailHourly,
+    comp: detailComp,
+    models: detailModels,
+    projects: detailProjects,
+    local: detailLocal
+  };
+
+  function openDetail(kind) {
+    const spec = DETAIL_SPECS[kind];
+    if (!spec) return;
+    let d;
+    try { d = spec(); } catch (e) { d = { title: '详情', sub: '数据暂时不可用', html: '' }; }
+    setText('#detailTitle', d.title);
+    setText('#detailSub', d.sub || '');
+    const body = $('#detailBody');
+    if (body) { body.innerHTML = d.html || '<p class="set-note">暂无数据</p>'; body.scrollTop = 0; }
+    const veil = $('#detailVeil');
+    if (veil) veil.hidden = false;
+    detailOpen = true;
+  }
+
+  function closeDetail() {
+    const veil = $('#detailVeil');
+    if (veil) veil.hidden = true;
+    detailOpen = false;
+  }
+
   /* ---------------- 项目别名 ---------------- */
 
   let ALIASES = null;
@@ -3486,6 +3673,27 @@
 
     /* 图表卡点击见 openDetail()：走浮层详情，不再原地放大 —— 放大后会打乱整个栅格 */
 
+    /* 卡片进详情：点卡片任意处（行、按钮、下拉、图例除外）打开完整明细浮层 */
+    [['.cal-card', 'calendar'], ['.chart-trend', 'trend'], ['.chart-hourly', 'hourly'],
+     ['.comp-card', 'comp'], ['#modelList', 'models'], ['#projectRank', 'projects'],
+     ['.local-card', 'local']].forEach(([sel, kind]) => {
+      const anchor = document.querySelector(sel);
+      const card = anchor && anchor.closest('.card');
+      if (!card) return;
+      card.classList.add('is-detail');
+      card.title = '点击查看完整明细';
+      card.addEventListener('click', e => {
+        if (e.target.closest('.rows-row, button, a, input, select, .segmented, .chip')) return;
+        openDetail(kind);
+      });
+    });
+    const detailClose = $('#detailClose');
+    if (detailClose) detailClose.addEventListener('click', closeDetail);
+    const detailVeil = $('#detailVeil');
+    if (detailVeil) detailVeil.addEventListener('click', e => {
+      if (e.target === detailVeil) closeDetail();
+    });
+
     /* 账户页「今日状态」：三个「立即检查」+ 全部检查，都走同一条只读探测 */
     ['stCkBtn', 'stTvBtn', 'stClBtn', 'stAll'].forEach(id => {
       const b = $('#' + id);
@@ -3807,6 +4015,7 @@
 
     document.addEventListener('keydown', e => {
       if (e.key === 'Escape') {
+        if (detailOpen) { closeDetail(); return; }    // 浮层优先，别顺手把小窗也关了
         if (acctOpen) setAccountPop(false);
         if (state.mode === 'popup') bridge.hide();
       }
