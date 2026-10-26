@@ -2317,9 +2317,24 @@
         g.sum += e.points;
       });
       const seen = {};
-      body.innerHTML = rows.map((e, i) => {
+      // 每天一个小标题：翻到这天才知道"这天一共花了多少"，不用自己心算
+      const daySum = {};
+      rows.forEach(e => {
+        if (e.type === 'earn') return;
+        const t = e.time instanceof Date ? e.time : new Date(e.time);
+        const k = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())}`;
+        daySum[k] = (daySum[k] || 0) + e.points;
+      });
+      const out = [];
+      let lastDay = '';
+      rows.forEach((e, i) => {
         const t = e.time instanceof Date ? e.time : new Date(e.time);
         const wd = '日一二三四五六'[t.getDay()];
+        const dk = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())}`;
+        if (dk !== lastDay) {
+          lastDay = dk;
+          out.push(`<div class="day-sep"><span>${F.dateKey(t)} 周${wd}</span><b>${F.credit(daySum[dk] || 0)} 分</b></div>`);
+        }
         const key = gkeyOf(t, i);
         const group = groups[key] || { list: [], sum: 0 };
         const isFirst = !seen[key];
@@ -2347,7 +2362,7 @@
           ? '<span class="share-cell"><span style="width:auto">—</span></span>'
           : `<span class="share-cell"><i class="share-bar"><i style="width:${Math.max(4, (shownPts / maxPts) * 100).toFixed(1)}%"></i></i><span>${(share * 100) < 1 ? (share * 100).toFixed(2) : (share * 100).toFixed(1)}%</span></span>`;
         const tokenTxt = e.tokens == null ? '' : `<em title="${F.fmt(e.tokens)} Token">${F.fmtWan(e.tokens)} tok</em>`;
-        return `<div class="table-row${isFirst ? '' : ' is-cont'}" style="animation-delay:${Math.min(i, 14) * 22}ms">
+        out.push(`<div class="table-row${isFirst ? '' : ' is-cont'}" style="animation-delay:${Math.min(i, 14) * 22}ms">
           ${timeCell}
           <span><i class="badge-type ${isEarn ? 'badge-earn' : 'badge-consume'}">${isEarn ? '赠送' : '消耗'}</i></span>
           <span class="nm"><i class="legend-dot" style="background:${C.toneColor(e.tone)}"></i><b title="${esc(e.model)}">${esc(e.model)}</b>${tokenTxt}</span>
@@ -2355,8 +2370,9 @@
           <span class="dim col-project">${esc(e.project)}</span>
           ${ptCell}
           ${shareCell}
-        </div>`;
-      }).join('');
+        </div>`);
+      });
+      body.innerHTML = out.join('');
     }
 
     const table = $('#ledgerTable');
@@ -3682,6 +3698,15 @@
     });
 
     setupResize();
+
+    /* 系统明暗切换时实时跟随：主题设为「跟随系统」才有反应，
+       之前只在启动那一刻取一次，系统切了要重启程序才变 */
+    if (window.matchMedia) {
+      const mq = window.matchMedia('(prefers-color-scheme: dark)');
+      const onSysTheme = () => { if (prefs.theme === 'system') applyTheme('system', false); };
+      if (mq.addEventListener) mq.addEventListener('change', onSysTheme);
+      else if (mq.addListener) mq.addListener(onSysTheme);
+    }
 
     // 左下角四张卡：只在侧栏模式下存在（胶囊模式下整条侧栏是隐藏的，不用白跑定时器）
     const sideBox = $('#sideSwipe');
