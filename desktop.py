@@ -27,6 +27,7 @@ import json
 import datetime as dt
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -1324,6 +1325,66 @@ class Api:
         except Exception as e:
             log(f"save_aliases error: {e}")
             return {"ok": False, "error": str(e)[:160]}
+
+    def self_check(self):
+        """启动自检：数据源 / 记录 / 缓存 / 台账 / 账号 / 磁盘，逐项给结论。"""
+        items = []
+
+        def add(name, ok, detail, hint=""):
+            items.append({"name": name, "ok": bool(ok), "detail": str(detail)[:140],
+                          "hint": str(hint)[:140]})
+
+        try:
+            src = data_source.resolve() or {}
+            home = src.get("home") or ""
+            ok = bool(home) and os.path.isdir(home)
+            add("数据目录", ok, home or "没有找到 .workbuddy 目录",
+                "" if ok else "在「数据源」里手动指定讨论目录")
+        except Exception as e:
+            add("数据目录", False, e)
+
+        try:
+            d = self._desk.usage.get(wait=8) or {}
+            meta = d.get("meta") or {}
+            n = int(meta.get("records") or 0)
+            add("会话记录", n > 0,
+                "%s 次调用 · 覆盖 %s 天" % (format(n, ",d"), meta.get("days") or 0),
+                "" if n > 0 else "还没有读到任何 .jsonl 记录")
+        except Exception as e:
+            add("会话记录", False, e)
+
+        try:
+            size = self._desk.usage.cache_size()
+            add("解析缓存", True, "%.1f KB，可写" % ((size or 0) / 1024))
+        except Exception as e:
+            add("解析缓存", False, e, "缓存损坏时可在「维护」里清空重建")
+
+        try:
+            li = usage_source.ledger_info()
+            add("本机台账", True,
+                "%d 天 · %s ~ %s" % (li["days"], li["first"] or "—", li["last"] or "—"))
+        except Exception as e:
+            add("本机台账", False, e)
+
+        try:
+            st = self._desk.account.state.get("status")
+            ok = st == "connected"
+            add("账号连接", ok, "已连接" if ok else "未连接",
+                "" if ok else "未连接时只有本机数据，云端余额与逐笔读不到")
+        except Exception as e:
+            add("账号连接", False, e)
+
+        try:
+            sdisk = shutil.disk_usage(app_paths.data_dir())
+            free = sdisk.free / (1024 ** 3)
+            add("磁盘空间", free > 1, "%.1f GB 可用" % free,
+                "" if free > 1 else "空间不足，台账与日志可能写不进去")
+        except Exception as e:
+            add("磁盘空间", False, e)
+
+        passed = sum(1 for i in items if i["ok"])
+        return {"ok": True, "items": items, "passed": passed, "total": len(items),
+                "at": dt.datetime.now().strftime("%H:%M:%S")}
 
     def export_weekly_report(self):
         """导出近 7 天周报（Markdown）：概览 + 每日 + 项目 Top + 模型 Top。"""

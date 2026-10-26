@@ -2856,6 +2856,30 @@ body { font-variant-numeric: tabular-nums; }
 .heat-c:hover { transform: scale(1.18); }
 .heat-sum { grid-column: 1 / -1; padding: 8px 2px 0; font-size: 11px; color: var(--text-3); }
 
+/* ---------- 启动自检 ---------- */
+.check-item {
+  display: flex;
+  gap: 12px;
+  padding: 13px 2px;
+  border-bottom: 1px solid var(--border);
+  opacity: 0;
+  animation: checkIn 260ms var(--ease-out) forwards;
+}
+.check-item:last-of-type { border-bottom: 0; }
+.check-ico {
+  flex: none;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 12px; font-weight: 600;
+}
+.check-item.is-ok .check-ico { color: var(--good); background: var(--good-soft); }
+.check-item.is-bad .check-ico { color: #B45309; background: rgba(245, 158, 11, .16); }
+.check-item b { display: block; font-size: 12.5px; color: var(--text-1); }
+.check-item em { display: block; margin-top: 3px; font-style: normal; font-size: 11.5px; color: var(--text-3); line-height: 1.5; }
+.check-item .check-hint { color: #B45309; }
+@keyframes checkIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
 /* ===================== 加载遮罩 ===================== */
 
 .loading-veil {

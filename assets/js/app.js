@@ -1265,17 +1265,12 @@
     quota: detailQuota
   };
 
-  function openDetail(kind) {
-    const spec = DETAIL_SPECS[kind];
-    if (!spec) return;
-    let d;
-    try { d = spec(); } catch (e) { d = { title: '详情', sub: '数据暂时不可用', html: detailEmpty() }; }
-    setText('#detailTitle', d.title);
-    setText('#detailSub', d.sub || '');
+  function showDetailPanel(title, sub, html) {
+    setText('#detailTitle', title);
+    setText('#detailSub', sub || '');
     const body = $('#detailBody');
-    const foot = `<p class="detail-foot">数据截至 ${esc((D.meta && D.meta.updated) || '—')} · 消耗取本机会话记录，余额与周期取云端</p>`;
     if (body) {
-      body.innerHTML = (d.html || '<p class="set-note">暂无数据</p>') + foot;
+      body.innerHTML = html || detailEmpty();
       body.scrollTop = 0;
     }
     const veil = $('#detailVeil');
@@ -1285,6 +1280,45 @@
     void veil.offsetWidth;              // 先落一帧初始态，过渡才会真的跑
     veil.classList.add('is-in');
     detailOpen = true;
+  }
+
+  function openDetail(kind) {
+    const spec = DETAIL_SPECS[kind];
+    if (!spec) return;
+    let d;
+    try { d = spec(); } catch (e) { d = { title: '详情', sub: '数据暂时不可用', html: detailEmpty() }; }
+    const foot = `<p class="detail-foot">数据截至 ${esc((D.meta && D.meta.updated) || '—')} · 消耗取本机会话记录，余额与周期取云端</p>`;
+    showDetailPanel(d.title, d.sub || '', (d.html || detailEmpty()) + foot);
+  }
+
+  /** 启动自检：逐项入场，一眼看出哪一步不正常。 */
+  async function runSelfCheck() {
+    if (!bridge.has() || !bridge.can('self_check')) {
+      toast('浏览器预览无法自检', 'i-info');
+      return;
+    }
+    showDetailPanel('运行自检', '正在逐项检查…', '<div class="detail-empty">检查中…</div>');
+    let r = null;
+    try { r = await bridge.call('self_check'); } catch (e) { r = null; }
+    if (!r || !r.ok) {
+      showDetailPanel('运行自检', '检查失败', detailEmpty('自检没有返回结果，可以看 logs/app.log'));
+      return;
+    }
+    const items = r.items || [];
+    const bad = r.total - r.passed;
+    const html = items.map((it, i) => `
+      <div class="check-item ${it.ok ? 'is-ok' : 'is-bad'}" style="animation-delay:${i * 180}ms">
+        <span class="check-ico">${it.ok ? '✓' : '!'}</span>
+        <div>
+          <b>${esc(it.name)}</b>
+          <em>${esc(it.detail)}</em>
+          ${(!it.ok && it.hint) ? `<em class="check-hint">${esc(it.hint)}</em>` : ''}
+        </div>
+      </div>`).join('')
+      + `<p class="detail-foot">检查于 ${esc(r.at || '')} · 自检只读，不会改动任何数据</p>`;
+    setText('#detailSub', bad === 0 ? `全部正常（${r.passed}/${r.total}）` : `${bad} 项需要注意（${r.passed}/${r.total} 正常）`);
+    const body = $('#detailBody');
+    if (body) { body.innerHTML = html; body.scrollTop = 0; }
   }
 
   function closeDetail() {
@@ -3351,6 +3385,12 @@
       } finally {
         ledgerExport.disabled = false;
       }
+    });
+
+    const selfBtn = $('#btnSelfCheck');
+    if (selfBtn) selfBtn.addEventListener('click', async () => {
+      selfBtn.disabled = true;
+      try { await runSelfCheck(); } finally { selfBtn.disabled = false; }
     });
 
     const weeklyBtn = $('#btnWeekly');
