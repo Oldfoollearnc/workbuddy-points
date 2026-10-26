@@ -61,9 +61,14 @@ def _merge_ledger(by_day, by_day_req, now):
     with _ledger_lock:
         led = fsutil.load_json(LEDGER_PATH, {}) or {}
         days = led.get("days") if isinstance(led.get("days"), dict) else {}
+        # 「清空台账」不是删文件：留一个 resetAt，之后只记这一天及以后的数据，
+        # 否则下一次刷新会立刻用 JSONL 把历史重建回来，等于没清。
+        reset_at = str(led.get("resetAt") or "")
         changed = False
         for d, v in by_day.items():
             key = d.isoformat()
+            if reset_at and key < reset_at:
+                continue
             old = days.get(key) or {}
             old_pts = float(old.get("points") or 0)
             old_calls = int(old.get("calls") or 0)

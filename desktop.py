@@ -1307,12 +1307,15 @@ class Api:
         }
 
     def clear_usage_ledger(self):
-        """清空本机台账（不动 WorkBuddy 记录、也不动解析缓存）。"""
+        """清空本机台账历史：只保留今天起的记录。
+
+        不能直接删文件 —— 下一轮聚合会用 WorkBuddy 的会话记录把历史重建回来。
+        改成写一个 resetAt 时间戳，聚合时跳过它之前的数据。
+        """
         try:
             p = usage_source.LEDGER_PATH
-            if os.path.exists(p):
-                os.remove(p)
-            log("clear_usage_ledger -> %s" % p)
+            fsutil.save_json(p, {"days": {}, "resetAt": dt.date.today().isoformat()})
+            log("clear_usage_ledger -> resetAt %s" % dt.date.today().isoformat())
             return {"ok": True}
         except Exception as e:
             log(f"clear_usage_ledger error: {e}")
