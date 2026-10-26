@@ -2413,8 +2413,8 @@ body.is-loading .boot-mask { display: flex; }
   padding: 15px 20px 12px;
   border-bottom: 1px solid var(--border);
 }
-.set-group-head h2 { font-size: 13.5px; font-weight: 650; letter-spacing: -.01em; }
-.set-group-head p { margin-top: 2px; font-size: 10.5px; color: var(--text-3); }
+.set-group-head h2 { font-size: 14.5px; font-weight: 650; letter-spacing: -.01em; }
+.set-group-head p { margin-top: 4px; font-size: 11px; color: var(--text-3); line-height: 1.5; }
 .set-rows { display: flex; flex-direction: column; }
 .set-row {
   display: flex; align-items: center; justify-content: space-between; gap: 18px;
@@ -2830,6 +2830,23 @@ body[data-mode="popup"] .rz { display: none; }
 /* 能点进详情的卡片给个手型与悬停提示 */
 .card.is-detail { cursor: pointer; }
 .card.is-detail:hover { border-color: var(--border-2); }
+
+/* 数字统一等宽：表格里的积分、调用、日期竖向对齐靠这个，不靠肉眼 */
+body { font-variant-numeric: tabular-nums; }
+
+/* 能点进详情的卡片给个明确标签，不用悬停去猜 */
+.card.is-detail .card-head h2::after {
+  content: "明细";
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  font-size: 9.5px;
+  font-weight: 400;
+  color: var(--text-3);
+  vertical-align: 2px;
+}
+.card.is-detail:hover .card-head h2::after { color: var(--brand); border-color: var(--brand); }
 
 /* ===================== 加载遮罩 ===================== */
 
