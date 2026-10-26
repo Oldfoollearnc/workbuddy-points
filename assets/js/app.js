@@ -59,7 +59,7 @@
   /* ---------------- 偏好 ---------------- */
   const PREF_KEY = 'pi.prefs.v1';
   const prefs = Object.assign(
-    { theme: 'light', motion: 'full', countUp: true, labels: true, tray: true, onTop: false,
+    { theme: 'light', motion: 'full', countUp: true, labels: true, tray: true, onTop: false, digest: true,
       holiday: true, signin: true, localRefresh: 60,
       calGlow: true, calIntro: true, groupMinute: true, notice: true,
       checkinAuto: true, checkinTravel: true, checkinDismissed: '',
@@ -2470,6 +2470,7 @@
     $('#optLabels').checked = !!prefs.labels;
     $('#optTray').checked = !!prefs.tray;
     if ($('#optOnTop')) $('#optOnTop').checked = !!prefs.onTop;
+    if ($('#optDigest')) $('#optDigest').checked = prefs.digest !== false;
     if ($('#optCalGlow')) $('#optCalGlow').checked = prefs.calGlow !== false;
     if ($('#optCalIntro')) $('#optCalIntro').checked = prefs.calIntro !== false;
     if ($('#optGroupMinute')) $('#optGroupMinute').checked = prefs.groupMinute !== false;
@@ -3006,6 +3007,18 @@
         if (bridge.has()) bridge.call('set_always_on_top', prefs.onTop);
       });
       if (prefs.onTop && bridge.has()) bridge.call('set_always_on_top', true);
+    }
+
+    /* 每晚小结：默认开，Python 侧 22:00 后推一条 */
+    const dgEl = $('#optDigest');
+    if (dgEl) {
+      dgEl.checked = prefs.digest !== false;
+      dgEl.addEventListener('change', () => {
+        prefs.digest = dgEl.checked;
+        savePrefs();
+        if (bridge.has()) bridge.call('set_digest', prefs.digest);
+      });
+      if (bridge.has()) bridge.call('set_digest', prefs.digest !== false);
     }
 
     const warnBelowEl = $('#optWarnBelow');

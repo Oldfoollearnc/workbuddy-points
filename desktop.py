@@ -48,6 +48,7 @@ import app_paths
 import autostart
 import data_source
 import diagnostics
+import fsutil
 import logutil
 
 from win32_utils import (      # noqa: E402  Win32 底层工具（拆分自本文件，行为未变）
@@ -73,6 +74,7 @@ INDEX = "file:///" + os.path.join(BASE, "index.html").replace("\\", "/")
 ICON = os.path.join(BASE, "assets", "icon.ico")
 LOG_DIR = os.path.join(app_paths.data_dir(), "logs")
 LOG_PATH = os.path.join(LOG_DIR, "app.log")
+DIGEST_PATH = app_paths.data_path("digest.json")   # 记录"今天的小结发过没"
 VERSION_FILE = os.path.join(BASE, "version.json")
 
 POPUP_TITLE = "WorkBuddy 积分观测台"
@@ -271,6 +273,12 @@ class Desktop:
         self.quitting = False
         self.close_to_tray = True
         self.always_on_top = False      # 用户偏好（界面开关），决定 _pin_temporarily 的行为
+        self.digest_enabled = True      # 每晚小结
+        self._digest_sent = ""
+        try:
+            self._digest_sent = (fsutil.load_json(DIGEST_PATH, {}) or {}).get("date") or ""
+        except Exception:
+            pass
         self.scale = dpi_scale()
         self.pop_size = (POP_W, POP_H)
         # 小窗状态簿记：意图（而非可见性）驱动托盘单击的开/关，避免与"点外部收起"互相打架
@@ -376,6 +384,7 @@ class Desktop:
         threading.Thread(target=self._watch_minimize, daemon=True).start()
         threading.Thread(target=self._watch_popup_click, daemon=True).start()
         threading.Thread(target=self._watch_shutdown, daemon=True).start()
+        threading.Thread(target=self._watch_digest, daemon=True).start()
         log(f"windows created, scale={s}, popup={pw}x{ph}, main={main_w}x{main_h}")
 
     # ---------- 显隐 ----------
@@ -970,6 +979,47 @@ class Desktop:
             self._safe_js(win, "window.App && App.reloadUsage()")
         return True
 
+    # ---------- 每晚小结 ----------
+
+    def _watch_digest(self):
+        """22:00 之后推一条当日小结，一天只推一次（发过就落盘记住）。"""
+        while not self.quitting:
+            try:
+                now = dt.datetime.now()
+                key = now.strftime("%Y-%m-%d")
+                if self.digest_enabled and now.hour >= 22 and self._digest_sent != key:
+                    self._digest_sent = key
+                    try:
+                        fsutil.save_json(DIGEST_PATH, {"date": key})
+                    except Exception:
+                        pass
+                    self._send_digest()
+            except Exception as e:
+                log(f"digest watch error: {e}")
+            time.sleep(600)
+
+    def _send_digest(self):
+        d = getattr(self.usage, "_data", None) or {}
+        today = d.get("today") or {}
+        used = float(today.get("consumed") or 0)
+        parts = ["今日 %s 分" % format(int(round(used)), ",d")]
+        req = int(today.get("requests") or 0)
+        if req:
+            parts.append("%d 次调用" % req)
+        try:
+            delta = today.get("deltaPct")
+            if delta is not None:
+                v = float(delta)
+                parts.append("较昨日 %s%d%%" % ("+" if v >= 0 else "", round(v)))
+        except Exception:
+            pass
+        avail = (self.account.state.get("cloud") or {}).get("available")
+        if avail is not None:
+            parts.append("可用 %s" % format(int(round(float(avail))), ",d"))
+        msg = " · ".join(parts)
+        self.notify(msg, "info")
+        log("digest -> %s" % msg)
+
     # ---------- 退出 ----------
 
     def _watch_shutdown(self):
@@ -1484,6 +1534,12 @@ class Api:
 
     def set_always_on_top(self, flag):
         return self._desk.set_always_on_top(flag)
+
+    def set_digest(self, flag):
+        """每晚小结开关（界面偏好，Python 侧只需知道要不要发）。"""
+        self._desk.digest_enabled = bool(flag)
+        log("digest enabled -> %s" % self._desk.digest_enabled)
+        return {"ok": True, "on": self._desk.digest_enabled}
 
     def open_data_dir(self):
         try:

@@ -6,6 +6,7 @@ logs/
 run.out
 checkin.json
 usage-ledger.json
+digest.json
 
 # 账号凭证与本地私有配置（绝不入库）
 session.bin
