@@ -1098,22 +1098,24 @@ body.is-dragging .topbar { cursor: default; }
 .view.is-active { display: block; animation: viewIn 300ms var(--ease-out) both; }
 
 /* 总览：两行图表吃掉剩余高度，窗口多大就填多满，底部不留死白。
-   注意 .view 必须自己先拿到容器高度（flex: 1 0 auto），
-   否则内部 grid 的 flex 分配到的是 0，行高会塌成 0、卡片互相重叠。 */
-.views { display: flex; flex-direction: column; }
-.view[data-view="overview"].is-active {
-  display: flex;
-  flex-direction: column;
-  flex: 1 0 auto;
-  min-height: 0;
+   只在宽屏启用 —— 窄屏（<1281）卡片会堆成单列，一个 .grid 里有 4 张卡，
+   再按"填满一屏"切高度就会互相重叠。 */
+@media (min-width: 1281px) {
+  .views { display: flex; flex-direction: column; }
+  .view[data-view="overview"].is-active {
+    display: flex;
+    flex-direction: column;
+    flex: 1 0 auto;
+    min-height: 0;
+  }
+  .view[data-view="overview"].is-active > .grid {
+    flex: 1 1 0;
+    min-height: 0;
+    grid-auto-rows: minmax(240px, 1fr);
+  }
+  .view[data-view="overview"] .comp-donut { max-height: 320px; }
+  .view[data-view="overview"] .chart-gauge { flex: 1 1 auto; }
 }
-.view[data-view="overview"].is-active > .grid {
-  flex: 1 1 0;
-  min-height: 0;
-  grid-auto-rows: minmax(240px, 1fr);
-}
-.view[data-view="overview"] .comp-donut { max-height: 320px; }
-.view[data-view="overview"] .chart-gauge { flex: 1 1 auto; }
 
 .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
 .grid + .grid { margin-top: 16px; }
