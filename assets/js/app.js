@@ -930,6 +930,26 @@
     setAct('stClAct', pending > 0, '立即领取', 'claim');
   }
 
+  /* ---------------- 定位高亮 ---------------- */
+
+  let spotTimer = 0;
+
+  /** 滚到目标并闪一下：从 KPI 跳过来时，得让人知道"看哪儿"。 */
+  function spotlight(sel) {
+    const el = typeof sel === 'string' ? document.querySelector(sel) : sel;
+    if (!el) return;
+    try {
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    } catch (e) {
+      try { el.scrollIntoView(); } catch (e2) { /* ignore */ }
+    }
+    el.classList.remove('is-spot');
+    void el.offsetWidth;                    // 强制回流，动画才能重播
+    el.classList.add('is-spot');
+    clearTimeout(spotTimer);
+    spotTimer = setTimeout(() => el.classList.remove('is-spot'), 1900);
+  }
+
   /* ---------------- 项目别名 ---------------- */
 
   let ALIASES = null;
@@ -2547,6 +2567,9 @@
       : (st === 'expired' ? '登录已过期' : '未连接账号'));
     setText('#pgAccPhone', u.phone || '—');
     setText('#pgAccSync', ACCOUNT.lastSync ? F.relTime(ACCOUNT.lastSync) : '—');
+    // 可用积分单列一行：从总览 KPI 点进来时，要有个明确的落点可以高亮
+    const accEff = effAccount();
+    setText('#pgAccAvail', hasQuota() ? F.credit(accEff.available) + ' 分' : '—');
     const cloud = ACCOUNT.cloud || {};
     setText('#pgAccQuota', cloud.total
       ? `${F.credit(cloud.used || 0)} / ${F.credit(cloud.total)}`
@@ -3433,13 +3456,22 @@
     window.addEventListener('resize', () => { if (acctPop && !acctPop.hidden) positionAccountPop(); });
     const ph = $('#popHide'); if (ph) ph.addEventListener('click', () => bridge.hide());
 
-    /* 四张 KPI 卡直接点进对应页面：看数字之后最常做的就是"再往下看一眼明细" */
+    /* 四张 KPI 卡：点进去之后要落在对应的那一格上，不能只是换个页面 */
+    const kpiTargets = [
+      { view: 'account', spot: '#rowAvail', label: '可用积分' },
+      { view: 'ledger', spot: '#ledgerSummary > div:nth-child(1)', label: '今日消耗' },
+      { view: 'ledger', spot: '#ledgerSummary > div:nth-child(2)', label: '今日计费笔数' },
+      { view: 'ledger', spot: '#ledgerSummary > div:nth-child(3)', label: '今日 Token' }
+    ];
     $$('.kpi').forEach((card, i) => {
-      const target = ['account', 'analytics', 'ledger', 'analytics'][i];
-      if (!target) return;
+      const t = kpiTargets[i];
+      if (!t) return;
       card.classList.add('is-link');
-      card.title = '点击打开「' + (TITLES[target] ? TITLES[target][0] : '') + '」';
-      card.addEventListener('click', () => go(target));
+      card.title = `点击查看${t.label}明细`;
+      card.addEventListener('click', () => {
+        go(t.view);
+        setTimeout(() => spotlight(t.spot), 280);   // 等页面切过去再定位
+      });
     });
 
     /* 账户页「今日状态」：三个「立即检查」+ 全部检查，都走同一条只读探测 */

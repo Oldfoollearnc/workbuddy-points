@@ -2564,6 +2564,17 @@ body.is-loading .boot-mask { display: flex; }
 body.is-maximized .rz { display: none; }
 body[data-mode="popup"] .rz { display: none; }
 
+/* 从 KPI 卡跳转过来时闪一下目标格：不然只是换了页，不知道该看哪儿 */
+.is-spot {
+  border-radius: 10px;
+  animation: spotPulse 1.9s var(--ease-out);
+}
+@keyframes spotPulse {
+  0% { box-shadow: 0 0 0 0 rgba(47, 111, 237, .40); background: var(--brand-soft); }
+  30% { box-shadow: 0 0 0 7px rgba(47, 111, 237, .10); background: var(--brand-soft); }
+  100% { box-shadow: 0 0 0 0 rgba(47, 111, 237, 0); background: transparent; }
+}
+
 /* 点一下就能跳到流水并筛好，光标给出可点的暗示 */
 #projectRank .rows-row,
 #modelList .rows-row { cursor: pointer; }
