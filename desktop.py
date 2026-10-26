@@ -397,6 +397,7 @@ class Desktop:
         threading.Thread(target=self._watch_popup_click, daemon=True).start()
         threading.Thread(target=self._watch_shutdown, daemon=True).start()
         threading.Thread(target=self._watch_digest, daemon=True).start()
+        threading.Thread(target=self._watch_tip, daemon=True).start()
         log(f"windows created, scale={s}, popup={pw}x{ph}, main={main_w}x{main_h}")
 
     # ---------- 显隐 ----------
@@ -993,6 +994,17 @@ class Desktop:
         return True
 
     # ---------- 每晚小结 ----------
+
+    def _watch_tip(self):
+        """托盘悬浮提示跟着今日消耗走：鼠标一停就能看到，不用点开。"""
+        while not self.quitting:
+            try:
+                txt = self.tray_status()
+                if txt and self.tray:
+                    self.tray.set_tip("%s · 单击打开" % txt)
+            except Exception as e:
+                log(f"tip update error: {e}")
+            time.sleep(90)
 
     def _watch_digest(self):
         """22:00 之后推一条当日小结，一天只推一次（发过就落盘记住）。"""
