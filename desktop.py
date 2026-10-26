@@ -175,6 +175,17 @@ def log(msg):
     logutil.log(LOG_PATH, msg)
 
 
+def _fmt_num(v):
+    """周报里的数字：整数带千分位，小数保留两位。"""
+    try:
+        n = float(v)
+    except Exception:
+        return "0"
+    if abs(n) >= 10:
+        return format(int(round(n)), ",d")
+    return ("%.2f" % n).rstrip("0").rstrip(".") or "0"
+
+
 def _csv_cell(v):
     """CSV 单元格转义：Excel 会把 = + - @ 开头的值当公式执行（DDE / 外链）。
 
@@ -1311,6 +1322,68 @@ class Api:
             log("clear_logs -> %s" % ok)
             return {"ok": bool(ok)}
         except Exception as e:
+            return {"ok": False, "error": str(e)[:160]}
+
+    def export_weekly_report(self):
+        """导出近 7 天周报（Markdown）：概览 + 每日 + 项目 Top + 模型 Top。"""
+        try:
+            d = self._desk.usage.get() or {}
+            daily = list(d.get("daily") or [])[-7:]
+            if not daily:
+                return {"ok": False, "error": "还没有可导出的数据"}
+            total = sum(float(x.get("consumed") or 0) for x in daily)
+            calls = sum(int(x.get("calls") or 0) for x in daily)
+            active = [x for x in daily if float(x.get("consumed") or 0) > 0]
+            avg_all = total / len(daily)
+            avg_active = (total / len(active)) if active else 0
+            first, last = daily[0].get("date") or "", daily[-1].get("date") or ""
+            acc = self._desk.account.snapshot() or {}
+            cloud = acc.get("cloud") or {}
+            avail = cloud.get("available")
+            cycle = (cloud.get("cycleEnd") or "")[:10]
+
+            lines = ["# WorkBuddy 用量周报（%s ~ %s）" % (first, last), "", "## 概览", ""]
+            lines.append("- 本周消耗：**%s 分**" % _fmt_num(total))
+            lines.append("- 日均：%s 分（有消耗的 %d 天里均 %s 分）"
+                         % (_fmt_num(avg_all), len(active), _fmt_num(avg_active)))
+            lines.append("- 调用：%s 次" % _fmt_num(calls))
+            if avail is not None:
+                lines.append("- 账号可用：%s 分%s"
+                             % (_fmt_num(avail), ("（周期至 %s）" % cycle) if cycle else ""))
+            lines += ["", "## 每日消耗", "", "| 日期 | 消耗(分) | 调用 |", "|---|---:|---:|"]
+            for x in daily:
+                lines.append("| %s | %s | %d |" % (x.get("date") or "", _fmt_num(x.get("consumed") or 0),
+                                                   int(x.get("calls") or 0)))
+            proj = (d.get("projects7") or [])[:5]
+            if proj:
+                lines += ["", "## 项目 Top（近 7 天，仅本机）", "", "| 项目 | 积分 | 占比 |", "|---|---:|---:|"]
+                for p in proj:
+                    lines.append("| %s | %s | %.1f%% |" % (str(p.get("name") or "").replace("|", "\\|"),
+                                                           _fmt_num(p.get("points") or 0),
+                                                           float(p.get("share") or 0) * 100))
+            mods = (d.get("models30") or (d.get("cloudModels") or []))[:5]
+            if mods:
+                msum = sum(float(m.get("points") or 0) for m in mods) or 1
+                lines += ["", "## 模型 Top（近 30 天）", "", "| 模型 | 积分 | 占比 |", "|---|---:|---:|"]
+                for m in mods:
+                    lines.append("| %s | %s | %.1f%% |" % (str(m.get("name") or "").replace("|", "\\|"),
+                                                           _fmt_num(m.get("points") or 0),
+                                                           float(m.get("points") or 0) / msum * 100))
+            lines += ["", "---", "", "生成时间：%s · 数据口径：本机会话记录（消耗）+ 云端（余额）"
+                                     % dt.datetime.now().strftime("%Y-%m-%d %H:%M")]
+
+            win = self._desk.main or self._desk.popup
+            fn = "WorkBuddy周报-%s.md" % dt.datetime.now().strftime("%Y%m%d")
+            picked = win.create_file_dialog(webview.SAVE_DIALOG, save_filename=fn)
+            if not picked:
+                return {"ok": False, "cancelled": True}
+            path = picked[0] if isinstance(picked, (list, tuple)) else picked
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines) + "\n")
+            log("export_weekly_report -> %s" % path)
+            return {"ok": True, "path": path}
+        except Exception as e:
+            log(f"export_weekly_report error: {e}")
             return {"ok": False, "error": str(e)[:160]}
 
     def export_diagnostics(self):

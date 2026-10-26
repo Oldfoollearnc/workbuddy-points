@@ -2905,6 +2905,24 @@
       }
     });
 
+    const weeklyBtn = $('#btnWeekly');
+    if (weeklyBtn) weeklyBtn.addEventListener('click', async () => {
+      if (!bridge.has() || !bridge.can('export_weekly_report')) {
+        toast('浏览器预览无法导出', 'i-info');
+        return;
+      }
+      weeklyBtn.disabled = true;
+      try {
+        const r = await bridge.call('export_weekly_report');
+        if (r && r.ok) toast('周报已保存：' + r.path);
+        else if (!(r && r.cancelled)) toast('导出失败：' + ((r && r.error) || '未知错误'), 'i-alert');
+      } catch (e) {
+        toast('导出失败', 'i-alert');
+      } finally {
+        weeklyBtn.disabled = false;
+      }
+    });
+
     const diagBtn = $('#btnDiag');
     if (diagBtn) diagBtn.addEventListener('click', async () => {
       if (!bridge.has() || !bridge.can('export_diagnostics')) return;
