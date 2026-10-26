@@ -2233,8 +2233,6 @@
     if ($('#optSignin')) $('#optSignin').checked = prefs.signin !== false;
     if ($('#optCheckinAuto')) $('#optCheckinAuto').checked = prefs.checkinAuto !== false;
     if ($('#optCheckinTravel')) $('#optCheckinTravel').checked = prefs.checkinTravel !== false;
-    const ssSel = $('#optSideSwipe');
-    if (ssSel && document.activeElement !== ssSel) ssSel.value = String(prefs.sideSwipeSec ?? 3);
     const psSel = $('#optPopSwipe');
     if (psSel && document.activeElement !== psSel) psSel.value = String(prefs.popSwipeSec ?? 5);
     const lrSel = $('#optLocalRefresh');
@@ -2433,8 +2431,7 @@
           bridge.call('checkin_run').then(r => { if (r) { CHECKIN = r; renderCheckin(); } });
         }
       },
-      { label: '切换浅色 / 深色', kind: '动作', run: () => { const b = $('#themeBtn'); if (b) b.click(); } },
-      { label: '收起 / 展开侧栏', kind: '动作', run: () => { const b = $('#navCollapse'); if (b) b.click(); } }
+      { label: '切换浅色 / 深色', kind: '动作', run: () => { const b = $('#themeBtn'); if (b) b.click(); } }
     ];
 
     const paint = () => {
@@ -2719,12 +2716,6 @@
       }
     });
 
-    const ssOpt = $('#optSideSwipe');
-    if (ssOpt) ssOpt.addEventListener('change', () => {
-      prefs.sideSwipeSec = +ssOpt.value;
-      savePrefs();
-      if (sideSwipe) sideSwipe.setInterval(prefs.sideSwipeSec * 1000 || 0);
-    });
     const psOpt = $('#optPopSwipe');
     if (psOpt) psOpt.addEventListener('change', () => {
       prefs.popSwipeSec = +psOpt.value;
@@ -3177,10 +3168,11 @@
 
     setupResize();
 
-    // 左下角四张卡：额度 / 签到 / 猫猫 / 任务，左右滑或等它自己翻
-    sideSwipe = createSwipe($('#sideSwipe'), {
-      auto: true, interval: Math.max(0, prefs.sideSwipeSec) * 1000 || 0
-    });
+    // 左下角四张卡：只在侧栏模式下存在（胶囊模式下整条侧栏是隐藏的，不用白跑定时器）
+    const sideBox = $('#sideSwipe');
+    sideSwipe = sideBox && document.body.dataset.nav !== 'b'
+      ? createSwipe(sideBox, { auto: true, interval: Math.max(0, prefs.sideSwipeSec) * 1000 || 0 })
+      : null;
     // 小窗也自动播，节奏比左侧慢一档；每次打开都回到第 1 张
     popSwipe = createSwipe($('#popSwipe'), {
       auto: true, interval: Math.max(0, prefs.popSwipeSec) * 1000 || 0

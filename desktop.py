@@ -56,6 +56,7 @@ from win32_utils import (      # noqa: E402  Win32 底层工具（拆分自本�
     set_app_id, find_hwnd, on_taskbar, round_corners, strip_nonclient,
     enable_snap_support, MONITORINFO,
     single_instance, signal_show,
+    watch_shutdown, shutting_down,
     SW_MINIMIZE, SW_MAXIMIZE, SW_RESTORE,
     SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_NOACTIVATE, SWP_FRAMECHANGED,
     GWL_STYLE, KEEP_VISIBLE_X, KEEP_VISIBLE_Y,
@@ -79,7 +80,9 @@ MAIN_TITLE = "WorkBuddy 积分观测台 · 完整面板"
 
 POP_W, POP_H = 424, 656      # 客户区目标尺寸
 MAIN_W, MAIN_H = 1408, 916
-MIN_W, MIN_H = 1024, 680     # 自绘缩放的最小尺寸（与 create_window(min_size) 一致）
+# 自绘缩放的最小尺寸。原来是 1024×680，在 1366×768 / 1K 100% 缩放的机器上
+# 已经贴着任务栏了，窗口一开就顶满整屏，看起来"什么都很粗很大"。
+MIN_W, MIN_H = 940, 600
 MARGIN = 8                   # 距工作区右下角（逻辑像素）
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -298,10 +301,12 @@ class Desktop:
             pw, ph = int(pw * ratio), int(avail_h - 80)
         self.pop_size = (pw, ph)
 
-        main_w = int(min(MAIN_W, avail_w - 60))
-        main_h = int(min(MAIN_H, avail_h - 60))
+        # 主窗尺寸：大屏保持 1408×916 的舒适版式；小屏（1366×768、1080p@100%）
+        # 按可用区域的 86%~88% 收，别一开就顶满整屏 —— 那样每个控件都显得又粗又大。
+        main_w = int(min(MAIN_W, max(MIN_W, avail_w * 0.86), avail_w - 48))
+        main_h = int(min(MAIN_H, max(MIN_H, avail_h * 0.88), avail_h - 48))
         main_x = int((avail_w - main_w) / 2)
-        main_y = int(max(20, (avail_h - main_h) / 2))
+        main_y = int(max(12, (avail_h - main_h) / 2))
         # 目标客户区尺寸：加回系统边框后要按它补回来，否则内容会被吃掉 16×39
         self.main_size = (main_w, main_h)
 
@@ -321,7 +326,7 @@ class Desktop:
             height=main_h,
             x=main_x,
             y=main_y,
-            min_size=(1024, 680),
+            min_size=(MIN_W, MIN_H),
             frameless=True,          # 自绘标题栏：去掉 Windows 原生标题，避免两套标题重复
             easy_drag=False,
             shadow=False,
@@ -369,6 +374,7 @@ class Desktop:
         self.account.attach(self.login_win)
         threading.Thread(target=self._watch_minimize, daemon=True).start()
         threading.Thread(target=self._watch_popup_click, daemon=True).start()
+        threading.Thread(target=self._watch_shutdown, daemon=True).start()
         log(f"windows created, scale={s}, popup={pw}x{ph}, main={main_w}x{main_h}")
 
     # ---------- 显隐 ----------
@@ -929,6 +935,46 @@ class Desktop:
 
     # ---------- 退出 ----------
 
+    def _watch_shutdown(self):
+        """给三个窗口挂上"系统要关机"的应答，避免被 Windows 判成阻止关机。
+
+        pywebview 的关闭事件被我们改成了"收起托盘"，关机时系统发来的
+        WM_QUERYENDSESSION 没人应答，5 秒后就会弹「此应用阻止关机」。
+        """
+        hooked = set()
+        for _ in range(40):
+            if self.quitting:
+                return
+            for title in (MAIN_TITLE, POPUP_TITLE, LOGIN_TITLE):
+                if title in hooked:
+                    continue
+                hwnd = find_hwnd(title)
+                if hwnd and watch_shutdown(hwnd, self._on_system_shutdown):
+                    hooked.add(title)
+            if len(hooked) >= 3:
+                log("shutdown guard installed on all windows")
+                return
+            time.sleep(1.5)
+
+    def _on_system_shutdown(self):
+        """系统关机/注销：立刻放行并结束进程，不做任何挽留。"""
+        log("system shutdown detected -> exit immediately")
+        self.quitting = True
+        threading.Thread(target=self._fast_exit, daemon=True).start()
+
+    def _fast_exit(self):
+        try:
+            self.checkin.stop_watch()
+        except Exception:
+            pass
+        try:
+            if self.tray:
+                self.tray.stop()
+        except Exception:
+            pass
+        time.sleep(0.05)
+        os._exit(0)
+
     def _watch_minimize(self):
         """系统最小化按钮 → 收起为右下角小窗（而不是进任务栏）。"""
         hwnd = None
@@ -954,7 +1000,7 @@ class Desktop:
                 hwnd = None
 
     def _on_login_closing(self):
-        if self.quitting:
+        if self.quitting or shutting_down():
             return True
         try:
             self.login_win.hide()
@@ -963,7 +1009,8 @@ class Desktop:
         return False
 
     def _on_main_closing(self):
-        if self.quitting or not self.close_to_tray:
+        # 系统关机/注销时不要在"收起到托盘"里打转：直接放行，让系统把窗口关掉。
+        if self.quitting or not self.close_to_tray or shutting_down():
             return True
         self.hide_main()
         self.show_popup()

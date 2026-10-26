@@ -358,6 +358,85 @@ def _snap_wndproc(hwnd, msg, wparam, lparam):
         return 0
 
 
+# ---------------- 系统关机 ----------------
+
+WM_QUERYENDSESSION = 0x0011
+WM_ENDSESSION = 0x0016
+SM_SHUTTINGDOWN = 0x2000
+
+_shutdown_proc = None          # WNDPROC 必须常驻，否则被 GC 后窗口消息直接崩
+_shutdown_old = {}             # hwnd -> 原子类化前的窗口过程
+_shutdown_cb = {}              # hwnd -> 关机回调
+
+
+def shutting_down():
+    """系统是否正在走关机/注销流程。"""
+    try:
+        return bool(user32.GetSystemMetrics(SM_SHUTTINGDOWN))
+    except Exception:
+        return False
+
+
+def _shutdown_wndproc(hwnd, msg, wparam, lparam):
+    if msg in (WM_QUERYENDSESSION, WM_ENDSESSION):
+        cb = _shutdown_cb.get(hwnd)
+        if cb:
+            try:
+                cb()
+            except Exception as e:
+                _log("shutdown callback error: %s" % e)
+        # 一律放行：我们是"收起到托盘"的程序，没有任何需要保存的状态，
+        # 拦下关机只会让 Windows 弹「此应用阻止关机」。
+        return 1
+    old = _shutdown_old.get(hwnd)
+    try:
+        if old:
+            return user32.CallWindowProcW(old, hwnd, msg, wparam, lparam)
+        return user32.DefWindowProcW(hwnd, msg, wparam, lparam)
+    except Exception:
+        return 0
+
+
+def watch_shutdown(hwnd, on_ending):
+    """让窗口在系统关机时立刻放行，并在放行前回调 on_ending。
+
+    背景：关闭按钮被做成"收起托盘"，pywebview 的 closing 回调会拦下 WM_CLOSE。
+    关机时系统先发 WM_QUERYENDSESSION，这条消息走的是窗口过程而不是 pywebview 的
+    closing 事件，子类化后就能在这里抢先应答 —— 否则 Windows 等 5 秒仍收不到答复，
+    就会弹「此应用阻止关机」。
+    """
+    global _shutdown_proc
+    if not hwnd:
+        return False
+    try:
+        if hwnd in _shutdown_old:
+            _shutdown_cb[hwnd] = on_ending      # 回调可替换，不必重复子类化
+            return True
+        try:
+            user32.SetWindowLongPtrW.restype = ctypes.c_void_p
+            user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+            setter = user32.SetWindowLongPtrW
+        except Exception:
+            user32.SetWindowLongW.restype = ctypes.c_long
+            user32.SetWindowLongW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_long]
+            setter = user32.SetWindowLongW
+        user32.CallWindowProcW.restype = LRESULT
+        user32.CallWindowProcW.argtypes = [ctypes.c_void_p, wintypes.HWND, ctypes.c_uint,
+                                           wintypes.WPARAM, wintypes.LPARAM]
+        if _shutdown_proc is None:
+            _shutdown_proc = WNDPROC(_shutdown_wndproc)
+        old = setter(hwnd, GWL_WNDPROC, ctypes.cast(_shutdown_proc, ctypes.c_void_p))
+        if not old:
+            return False
+        _shutdown_old[hwnd] = old
+        _shutdown_cb[hwnd] = on_ending
+        _log("watch_shutdown: hooked hwnd=%s" % hwnd)
+        return True
+    except Exception as e:
+        _log("watch_shutdown error: %s" % e)
+        return False
+
+
 # ---------------- 单实例 ----------------
 
 

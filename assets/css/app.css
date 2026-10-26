@@ -1504,12 +1504,21 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
 .setting-label b { font-size: 12px; font-weight: 600; }
 .setting-label span { font-size: 10.5px; color: var(--text-3); }
 
-.theme-grid, .theme-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-/* 设置页里是三选一，不需要拉满整行宽度 */
-.set-row .theme-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); max-width: 720px; }
+/* 三选一卡片：用 flex 换行而不是固定三列 grid。
+   之前是 repeat(3, minmax(0, 1fr))，屏幕/窗口一窄就被压成极细的一条
+   （有用户那边只剩一根"柱子"），flex + min-width 能保证每张卡都有实体。 */
+.theme-grid, .theme-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  max-width: 720px;
+}
 .theme-card {
   position: relative;
   display: flex; flex-direction: column; gap: 8px;
+  flex: 1 1 150px;
+  min-width: 134px;
+  max-width: 240px;
   padding: 9px;
   border-radius: var(--r-md);
   border: 1px solid var(--border);
@@ -1526,11 +1535,12 @@ html[data-motion="off"] .cal-cell.is-hot { transform: none; filter: none; }
   border: 1px solid var(--border);
   overflow: hidden;
 }
-.theme-preview i { flex: 1; border-radius: 3px 3px 1px 1px; background: currentColor; opacity: .85; }
+.theme-preview i { flex: 1 1 0; min-width: 4px; border-radius: 3px 3px 1px 1px; background: currentColor; opacity: .85; }
 .theme-preview i:nth-child(1) { height: 42%; }
 .theme-preview i:nth-child(2) { height: 78%; }
 .theme-name { font-size: 11px; color: var(--text-2); font-weight: 550; }
 .theme-preview i:nth-child(3) { height: 58%; }
+.theme-preview i:nth-child(4) { height: 46%; }
 .theme-preview--light, .preview-light { background: linear-gradient(160deg, #ffffff, #eef4ff); color: #2563eb; }
 .theme-preview--dark, .preview-dark { background: linear-gradient(160deg, #16233a, #0a1120); color: #6ea8ff; }
 .theme-preview--system, .preview-auto { background: linear-gradient(110deg, #ffffff 0 48%, #0e1829 48% 100%); color: #4f8dfd; }
@@ -2438,6 +2448,28 @@ body[data-mode="popup"] .rz { display: none; }
   .table-head, .table-row { grid-template-columns: 92px 66px minmax(90px, 1.2fr) minmax(80px, 1fr) 78px 74px; }
   .table-head span:nth-child(5), .table-row > *:nth-child(5) { display: none; }
   .ledger-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* 100% 缩放的 1080p / 1366 屏：同样写死的 12px、14.5px，在这类屏上
+   物理尺寸比 125% 缩放的高分屏大一档，观感就是"按钮和字都偏大"。
+   这里统一收一档密度，布局结构不变，只压字号与留白。 */
+@media (max-width: 1400px) {
+  .views { padding: 14px 16px 20px; }
+  .topbar { padding: 0 14px; }
+  .card-head h2 { font-size: 13.5px; }
+  .kpi { min-height: 126px; padding: 12px 14px 0; }
+  .kpi-value span { font-size: 26px; }
+  .side-card { padding: 11px 12px; }
+}
+
+/* 低高度窗口（768p 笔记本、窗口被压矮）：先保证一屏能看全，
+   图表不强行占满 300px。 */
+@media (max-height: 820px) {
+  .views { padding-top: 10px; }
+  .kpi { min-height: 116px; }
+  .chart-trend { min-height: 232px; }
+  .chart-hourly { min-height: 220px; }
+  .chart-cal { height: 232px; }
 }
 
 /* ===================== 加载遮罩 ===================== */
