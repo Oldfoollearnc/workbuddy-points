@@ -2835,19 +2835,6 @@ body[data-mode="popup"] .rz { display: none; }
 body { font-variant-numeric: tabular-nums; }
 
 /* 能点进详情的卡片给个明确标签，不用悬停去猜 */
-.card.is-detail .card-head h2::after {
-  content: "明细";
-  margin-left: 8px;
-  padding: 1px 6px;
-  border-radius: 99px;
-  border: 1px solid var(--border);
-  font-size: 9.5px;
-  font-weight: 400;
-  color: var(--text-3);
-  vertical-align: 2px;
-}
-.card.is-detail:hover .card-head h2::after { color: var(--brand); border-color: var(--brand); }
-
 /* 小窗正文放大半号：11px 在 1080p / 高 DPI 上偏吃力 */
 .popup-card .pop-block-head h3 { font-size: 12.5px; }
 .popup-card .pop-row { font-size: 11.5px; }
@@ -2855,6 +2842,19 @@ body { font-variant-numeric: tabular-nums; }
 
 /* 加载遮罩只盖内容区：顶栏与导航仍可见，不至于像整屏冻住 */
 .loading-veil { inset: 48px 0 0 0; }
+
+/* ---------- 消耗热力图：周几 × 小时 ---------- */
+.heat-grid {
+  display: grid;
+  grid-template-columns: 38px repeat(24, minmax(0, 1fr));
+  gap: 3px;
+  padding: 14px 2px 4px;
+}
+.heat-d { font-size: 10px; color: var(--text-3); display: flex; align-items: center; }
+.heat-h { font-size: 9px; color: var(--text-3); text-align: center; height: 12px; }
+.heat-c { display: block; height: 18px; border-radius: 3px; background: var(--surface-3); transition: transform 120ms var(--ease-out); }
+.heat-c:hover { transform: scale(1.18); }
+.heat-sum { grid-column: 1 / -1; padding: 8px 2px 0; font-size: 11px; color: var(--text-3); }
 
 /* ===================== 加载遮罩 ===================== */
 

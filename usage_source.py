@@ -758,6 +758,19 @@ class UsageService:
             e["days"].add(dt.datetime.fromtimestamp(r["ts"] / 1000).date())
             e["models"][_friendly_model(r["model"])] += r["credit"]
 
+        # 周几 × 小时 热力矩阵：三档范围各算一份，前端切换不用再请求
+        def _heat(days=None, month=False):
+            grid = [[0.0] * 24 for _ in range(7)]
+            for r in records:
+                t = dt.datetime.fromtimestamp(r["ts"] / 1000)
+                if month:
+                    if t.year != now.year or t.month != now.month:
+                        continue
+                elif days is not None and (today - t.date()).days >= days:
+                    continue
+                grid[t.weekday()][t.hour] += r["credit"]
+            return [[round(v, 2) for v in row] for row in grid]
+
         # 近 7 天模型序列（模型是计费主体，归因 100% 准确）
         week_models = defaultdict(float)
         for r in records:
@@ -956,6 +969,7 @@ class UsageService:
                   "days": len(v["days"]),
                   "topModel": (max(v["models"].items(), key=lambda kv: kv[1])[0] if v["models"] else "")}
                  for v in proj_deep.values()), key=lambda x: -x["points"]),
+            "weekHeat": {"7": _heat(days=7), "30": _heat(days=30), "month": _heat(month=True)},
             # 本机全量：有多台机器同用一个账号时，这张"这台机器花了多少"只能由本机回答
             "totalAll": total_all,
             "daysAll": days_all,

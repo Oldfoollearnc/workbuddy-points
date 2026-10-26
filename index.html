@@ -486,6 +486,25 @@
           </article>
         </div>
 
+        <div class="grid">
+          <article class="card chart-card span-12" id="heatCard" style="--i:0">
+            <header class="card-head">
+              <div>
+                <h2>消耗热力图</h2>
+                <p>一周七天 × 24 小时，格子越深花得越多；悬停看该时段具体消耗</p>
+              </div>
+              <div class="card-tools">
+                <div class="segmented" id="heatSeg">
+                  <button data-heat="7">近 7 天</button>
+                  <button data-heat="30" class="is-active">近 30 天</button>
+                  <button data-heat="month">本月</button>
+                </div>
+              </div>
+            </header>
+            <div class="heat-grid" id="heatGrid"></div>
+          </article>
+        </div>
+
         <div class="grid grid--lists ana-row2">
           <article class="card list-card span-6" style="--i:1">
             <header class="card-head">

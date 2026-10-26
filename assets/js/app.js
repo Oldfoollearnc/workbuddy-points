@@ -52,6 +52,7 @@
     ledgerQuery: '',
     ledgerFilter: '',      // 'model:xxx' / 'project:xxx'
     ledgerLimit: 24,
+    heatRange: '30',      // 热力图范围：7 / 30 / month
     popQuery: ''
   };
 
@@ -640,6 +641,7 @@
       safeRender('设置', renderSettings);
       safeRender('今日状态', renderTodayStatus);
       safeRender('项目别名', renderAliases);
+      safeRender('热力图', renderHeatmap);
     }
     try { revealCharts(); } catch (e) { /* ignore */ }
   }
@@ -955,6 +957,42 @@
     el.classList.add('is-spot');
     clearTimeout(spotTimer);
     spotTimer = setTimeout(() => el.classList.remove('is-spot'), 1900);
+  }
+
+  /* ---------------- 消耗热力图（周几 × 小时） ---------------- */
+
+  function renderHeatmap() {
+    const box = $('#heatGrid');
+    if (!box) return;
+    const rng = state.heatRange || '30';
+    const grid = (D.weekHeat && D.weekHeat[rng]) || null;
+    if (!grid || !grid.length) {
+      box.innerHTML = '<p class="set-note">还没有可用的时段数据</p>';
+      return;
+    }
+    const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    let max = 0, total = 0;
+    grid.forEach(row => row.forEach(v => {
+      const n = Number(v) || 0;
+      if (n > max) max = n;
+      total += n;
+    }));
+    const parts = [];
+    parts.push('<div class="heat-h"></div>');
+    for (let h = 0; h < 24; h++) parts.push(`<div class="heat-h">${h % 3 === 0 ? h : ''}</div>`);
+    grid.forEach((row, d) => {
+      parts.push(`<div class="heat-d">${days[d]}</div>`);
+      row.forEach((v, h) => {
+        const n = Number(v) || 0;
+        // 0.55 次幂：低值也能看出差别，否则只有最热那一格有颜色
+        const a = max > 0 ? Math.pow(n / max, 0.55) : 0;
+        const bg = n > 0 ? `rgba(47,111,237,${(0.14 + a * 0.86).toFixed(2)})` : 'var(--surface-3)';
+        parts.push(`<i class="heat-c" style="background:${bg}" title="${days[d]} ${F.pad(h)}:00–${F.pad((h + 1) % 24)}:00 · ${F.credit(n)} 分"></i>`);
+      });
+    });
+    const label = rng === '7' ? '近 7 天' : (rng === 'month' ? '本月' : '近 30 天');
+    parts.push(`<div class="heat-sum">${label}合计 ${F.credit(total)} 分 · 最费的一格 ${F.credit(max)} 分</div>`);
+    box.innerHTML = parts.join('');
   }
 
   /* ---------------- 卡片详情浮层 ---------------- */
@@ -1786,14 +1824,14 @@
     if (tv) {
       const claim = pending > 0;
       const dep = t.state === 'idle' && !t.limitReached;
-      const done = t.state === 'idle' && !!t.limitReached;
-      // 完成态不置灰：它已经是"做完了"，只是没得再点
-      const off = !can || (!claim && !dep && !done);
+      // 已完成就不能再点：之前把"今日已派"当成可点，点下去什么也不会发生
+      const off = !can || (!claim && !dep);
       tv.classList.toggle('is-off', off);
       tv.dataset.act = claim ? 'claim' : (dep ? 'travel' : '');
       tv.title = claim ? `点击领取 ${pending} 分`
         : dep ? '点击派猫猫出门'
-          : t.state === 'traveling' ? '猫猫还在路上' : '今日名额已用完';
+          : t.state === 'traveling' ? '猫猫还在路上'
+            : '今日名额已用完，明天再来';
     }
   }
 
@@ -3811,6 +3849,15 @@
         openDetail(kind);
       });
     });
+    const heatSeg = $('#heatSeg');
+    if (heatSeg) heatSeg.addEventListener('click', e => {
+      const b = e.target.closest('button[data-heat]');
+      if (!b) return;
+      state.heatRange = b.dataset.heat;
+      $$('#heatSeg button').forEach(x => x.classList.toggle('is-active', x === b));
+      renderHeatmap();
+    });
+
     const detailClose = $('#detailClose');
     if (detailClose) detailClose.addEventListener('click', closeDetail);
     const detailVeil = $('#detailVeil');
