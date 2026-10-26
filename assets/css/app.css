@@ -2804,6 +2804,15 @@ body[data-mode="popup"] .rz { display: none; }
   letter-spacing: .01em;
 }
 .detail-sub:first-of-type { margin-top: 4px; }
+.detail-note {
+  margin: 12px 2px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.6;
+}
 .detail-foot { margin: 16px 0 0; padding-top: 12px; border-top: 1px solid var(--border); font-size: 10.5px; color: var(--text-3); }
 
 /* 能点进详情的卡片给个手型与悬停提示 */

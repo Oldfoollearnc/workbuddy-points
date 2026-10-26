@@ -961,9 +961,13 @@
 
   let detailOpen = false;
 
+  const plainText = s => String(s).replace(/<[^>]*>/g, '').trim();
+
   function detailKpis(items) {
+    // 值太长会被省略号吃掉（比如「最高一天 10-22 · 320.01 分」），
+    // 所以每个值都带 title，鼠标停一下能看全。
     return `<div class="detail-kpis">${items.map(([k, v]) =>
-      `<div><span>${esc(k)}</span><b>${v}</b></div>`).join('')}</div>`;
+      `<div><span>${esc(k)}</span><b title="${esc(plainText(v))}">${v}</b></div>`).join('')}</div>`;
   }
 
   function detailTable(cols, rows) {
@@ -982,27 +986,32 @@
     const calls = daily.reduce((s, d) => s + (Number(d.calls) || 0), 0);
     const tokens = daily.reduce((s, d) => s + (Number(d.tokens) || 0), 0);
     const active = daily.filter(d => (Number(d.consumed) || 0) > 0);
-    const max = Math.max(...daily.map(d => Number(d.consumed) || 0), 0.01);
-    let peak = daily[0] || {};
-    daily.forEach(d => { if ((Number(d.consumed) || 0) > (Number(peak.consumed) || 0)) peak = d; });
-    const rows = daily.slice().reverse().map(d => {
+    const idle = daily.filter(d => (Number(d.consumed) || 0) <= 0);
+    const max = Math.max(...active.map(d => Number(d.consumed) || 0), 0.01);
+    let peak = active[0] || {};
+    active.forEach(d => { if ((Number(d.consumed) || 0) > (Number(peak.consumed) || 0)) peak = d; });
+    // 只列有消耗的日期：把一堆 0/0/— 铺成十几行，既占地方又像是加错了
+    const rows = active.slice().reverse().map(d => {
       const v = Number(d.consumed) || 0;
       return [esc(d.date || ''), F.credit(v), F.fmt(Number(d.calls) || 0),
         d.tokens ? F.fmtWan(d.tokens) : '—', detailBar(v / max * 100)];
     });
+    const idleNote = idle.length
+      ? `<p class="detail-note">另有 ${idle.length} 天没有消耗记录（${esc(idle[0].date || '')} ~ ${esc(idle[idle.length - 1].date || '')}），未逐行列示。</p>`
+      : '';
     return {
       title: '消耗日历 · 近 30 天',
-      sub: '每天一行；占比条按区间最高值归一',
+      sub: '只列有消耗的日期；占比条按区间最高值归一',
       html: detailKpis([
         ['区间合计', F.credit(total) + ' 分'],
-        ['日均', F.credit(total / daily.length) + ' 分'],
+        ['日均', F.credit(active.length ? total / active.length : 0) + ' 分'],
         ['有消耗', active.length + ' 天'],
         ['最高一天', peak.date ? `${esc(peak.date)} · ${F.credit(Number(peak.consumed) || 0)} 分` : '—'],
         ['调用合计', F.fmt(calls) + ' 次'],
         ['Token 合计', F.fmtWan(tokens)]
       ]) + detailTable(
         [{ label: '日期' }, { label: '消耗', num: true }, { label: '调用', num: true },
-          { label: 'Token', num: true }, { label: '占比' }], rows)
+          { label: 'Token', num: true }, { label: '占比' }], rows) + idleNote
     };
   }
 
@@ -1159,13 +1168,18 @@
     const endText = al.end
       ? `${al.end.getFullYear()}-${F.pad(al.end.getMonth() + 1)}-${F.pad(al.end.getDate())}`
       : '—';
-    const daily = (D.daily || []).slice(-14).reverse();
-    const rows = daily.map(d => {
+    const recent = (D.daily || []).slice(-14);
+    const activeDays = recent.filter(d => (Number(d.consumed) || 0) > 0).slice().reverse();
+    const idleDays = recent.length - activeDays.length;
+    const rows = activeDays.map(d => {
       const v = Number(d.consumed) || 0;
       const over = al.perDay > 0 && v > al.perDay;
       return [esc(d.date || ''), F.credit(v), over ? '超出' : '额度内',
         detailBar(al.perDay > 0 ? v / (al.perDay * 2) * 100 : 0)];
     });
+    const note = idleDays > 0
+      ? `<p class="detail-note">最近 14 天里有 ${idleDays} 天没有消耗记录，未逐行列示。</p>`
+      : '';
     return {
       title: '额度与消耗',
       sub: '周期额度、可用余额，以及按剩余天数摊出来的每日可花额度',
@@ -1180,7 +1194,7 @@
         ['签到可补', F.credit(al.signin) + ' 分'],
         ['周期结束', endText]
       ]) + detailTable(
-        [{ label: '日期' }, { label: '消耗', num: true }, { label: '对照每日额度' }, { label: '相对额度' }], rows)
+        [{ label: '日期' }, { label: '消耗', num: true }, { label: '对照每日额度' }, { label: '相对额度' }], rows) + note
     };
   }
 
