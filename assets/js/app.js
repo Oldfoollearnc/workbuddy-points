@@ -1849,18 +1849,20 @@
 
     const ck = $('#popCkChip');
     if (ck) {
-      const off = !can || !!c.done;
-      ck.classList.toggle('is-off', off);
-      ck.dataset.act = off ? '' : 'checkin';
-      ck.title = c.done ? '今天已经签过' : (can ? '点击立即签到' : '桌面端才能签到');
+      const done = !!c.done;
+      // 完成态：保持绿色、不置灰、没有 hover 上手型，也点不动
+      ck.classList.toggle('is-done', done);
+      ck.classList.toggle('is-off', !can);
+      ck.dataset.act = (can && !done) ? 'checkin' : '';
+      ck.title = done ? '今天已经签过' : (can ? '点击立即签到' : '桌面端才能签到');
     }
     const tv = $('#popTravelChip');
     if (tv) {
       const claim = pending > 0;
       const dep = t.state === 'idle' && !t.limitReached;
-      // 已完成就不能再点：之前把"今日已派"当成可点，点下去什么也不会发生
-      const off = !can || (!claim && !dep);
-      tv.classList.toggle('is-off', off);
+      const done = t.state === 'idle' && !!t.limitReached;
+      tv.classList.toggle('is-done', done);
+      tv.classList.toggle('is-off', !can);
       tv.dataset.act = claim ? 'claim' : (dep ? 'travel' : '');
       tv.title = claim ? `点击领取 ${pending} 分`
         : dep ? '点击派猫猫出门'
