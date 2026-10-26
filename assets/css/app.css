@@ -1147,7 +1147,8 @@ body.is-dragging .topbar { cursor: default; }
   background: var(--surface);
   box-shadow: var(--shadow-1);
   animation: rise 420ms var(--ease-out) backwards;
-  animation-delay: calc(var(--i, 0) * 45ms);
+  /* 卡片多的时候（总览 + 用量分析）最后一张别等太久，上限 4 档 = 180ms */
+  animation-delay: calc(min(var(--i, 0), 4) * 45ms);
   transition: border-color var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out), transform var(--dur-2) var(--ease-out);
 }
 .view.is-active .card { animation-name: rise; }
@@ -2800,7 +2801,8 @@ body[data-mode="popup"] .rz { display: none; }
 .detail-table td { padding: 8px; border-bottom: 1px solid var(--border); color: var(--text-1); }
 .detail-table tbody tr {
   animation: detailRow 260ms var(--ease-out) backwards;
-  animation-delay: calc(var(--i, 0) * 12ms);
+  /* 上限 18 行：30 天的表如果按行号一直累加，最后一行要等半秒才出来 */
+  animation-delay: calc(min(var(--i, 0), 18) * 12ms);
 }
 .detail-table tbody tr:hover { background: var(--surface-2); }
 .detail-table tr:last-child td { border-bottom: 0; }
