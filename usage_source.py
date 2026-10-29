@@ -569,7 +569,10 @@ class UsageService:
         yest_recs = [r for r in records if day_of(r) == today - dt.timedelta(days=1)]
 
         today_credit = sum(r["credit"] for r in today_recs)
-        yest_credit = sum(r["credit"] for r in yest_recs)
+        # 同比卡到"此刻"：昨天同一时刻之前的累计。拿今天到现在的消耗比昨天全天，
+        # 早上 8 点永远显示 -90%，那个百分比既不准也没用。
+        yest_cut = (now - dt.timedelta(days=1)).timestamp() * 1000
+        yest_credit = sum(r["credit"] for r in yest_recs if r["ts"] <= yest_cut)
         today_tokens = sum(r["tokens"] for r in today_recs)
         today_reqs = len(today_recs)
 

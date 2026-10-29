@@ -124,8 +124,9 @@ ok('今日 = 云端今日 + 同步后本机（昨天的不算）', () => {
   assert.strictEqual(st.cloud, true);
   assert.strictEqual(st.consumed, 7);       // 1.5 + 2.5 + 3
   assert.strictEqual(st.requests, 3);
-  // 当前小时的桶 = 云端两条(1.5+2.5) + 本机补足(3)：两路都落在同一小时里
-  assert.strictEqual(st.hours[NOW.getHours()].points, 7);
+  // 云端两条 + 本机补足(3) 都要进时段桶；不钉死"同一小时"——
+  // 整点附近跑测试时，NOW 与 NOW-5min 会落在两个桶里，那是真实行为，不是 bug
+  assert.strictEqual(st.hours.reduce((a, h) => a + h.points, 0), 7);
   assert.strictEqual(st.models.length, 2);
   assert.strictEqual(st.tokens, 55);        // Token 仍取本机
 });

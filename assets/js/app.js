@@ -2090,7 +2090,7 @@
         todayNote.textContent = byClient.map(c => `${clientShort(c.name)} ${F.credit(c.points)}`).join(' · ');
         todayNote.title = byClient.map(c => `${c.name}：${F.credit(c.points)} 分 / ${F.fmt(c.calls)} 笔`).join('\n');
       } else {
-        todayNote.textContent = '较昨日';
+        todayNote.textContent = '较昨日同期';
         todayNote.title = '';
       }
     }
@@ -2438,11 +2438,15 @@
     const year = new Date().getFullYear();
     const src = (Array.isArray(D.dailyAll) && D.dailyAll.length)
       ? D.dailyAll
-      : (D.daily || []).map(d => ({
-        date: d.date && d.date.length === 5 ? `${year}-${d.date}` : d.date,
-        points: d.consumed || 0,
-        calls: d.calls || 0
-      }));
+      : (D.daily || []).map(d => {
+        // 5 位 MM-DD 要用 monthDayToDate 还原：直接拼当前年，1 月看去年 12 月会错到明年
+        const dt = d.date && d.date.length === 5 ? monthDayToDate(d.date) : null;
+        return {
+          date: dt ? dayKeyOf(dt) : d.date,
+          points: d.consumed || 0,
+          calls: d.calls || 0
+        };
+      });
     const map = {};
     src.forEach(d => {
       if (d && d.date) map[d.date] = { points: Number(d.points) || 0, calls: Number(d.calls) || 0 };
@@ -3296,7 +3300,7 @@
       const r = await bridge.call('check_update');
       if (!r || !r.ok) return;
       if (r.hasUpdate) {
-        note.innerHTML = `有新版本 <b>v${r.latest}</b>（当前 v${r.current}）· <a href="#" id="updateLink">去下载</a>`;
+        note.innerHTML = `有新版本 <b>v${esc(r.latest)}</b>（当前 v${esc(r.current)}）· <a href="#" id="updateLink">去下载</a>`;
         const link = $('#updateLink');
         if (link) link.addEventListener('click', e => {
           e.preventDefault();
@@ -3456,7 +3460,8 @@
     if (!host) return;
     const n = document.createElement('div');
     n.className = 'toast';
-    n.innerHTML = `<svg class="i"><use href="#${icon || 'i-check'}"/></svg><span>${msg}</span>`;
+    // msg 可能带服务端错误文本、猫猫地点名，必须转义：拼进 innerHTML 会破版甚至注入
+  n.innerHTML = `<svg class="i"><use href="#${icon || 'i-check'}"/></svg><span>${esc(msg)}</span>`;
     host.appendChild(n);
     setTimeout(() => { n.classList.add('is-out'); setTimeout(() => n.remove(), 240); }, 2200);
   }

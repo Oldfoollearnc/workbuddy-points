@@ -1766,12 +1766,23 @@ def main():
 
     if "--sync" in sys.argv:      # 诊断用：启动后立即同步一次并写日志
         def _one_shot():
-            time.sleep(4)
-            try:
-                r = app.account.sync()
-                log("sync(one-shot): " + json.dumps(r, ensure_ascii=False)[:1200])
-            except Exception as e:
-                log(f"sync(one-shot) error: {e}")
+            # 固定 sleep 4 太短：窗口刚建好、页面还没导航完时 sync() 会直接失败，
+            # 日志里只留一行 ok:false，排障的人会以为"同步没问题"。
+            time.sleep(6)
+            for attempt in range(1, 4):
+                try:
+                    r = app.account.sync()
+                except Exception as e:
+                    log("sync(one-shot) #%d error: %s" % (attempt, e))
+                else:
+                    if r.get("ok"):
+                        cloud = ((r.get("state") or {}).get("cloud") or {})
+                        log("sync(one-shot) ok: available=%s rows=%s"
+                            % (cloud.get("available"), cloud.get("cycleRows")))
+                        return
+                    log("sync(one-shot) #%d failed: %s" % (attempt, r.get("error")))
+                time.sleep(6)
+            log("sync(one-shot): 3 次都失败，多半是会话过期或网络不通")
         threading.Thread(target=_one_shot, daemon=True).start()
 
     def _tray_autostart():

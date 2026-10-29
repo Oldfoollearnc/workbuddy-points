@@ -264,6 +264,9 @@
       const now = new Date();
       const todayKey = dayKeyOf(now);
       const yestKey = dayKeyOf(addDays(now, -1));
+      // 同比要卡到"此刻"：拿今天到现在的消耗去比昨天全天，早上必然显示 -90%，
+      // 那个数字没有信息量，还会让人以为今天特别省。
+      const nowMin = now.getHours() * 60 + now.getMinutes();
       const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h, points: 0, requests: 0 }));
       const map = new Map();
       let sum = 0, calls = 0, yday = 0;
@@ -282,7 +285,10 @@
         if (isNaN(d.getTime())) return;
         const credit = Number(r.credit) || 0;
         const key = dayKeyOf(d);
-        if (key === yestKey) yday += credit;
+        if (key === yestKey) {
+          if (d.getHours() * 60 + d.getMinutes() <= nowMin) yday += credit;
+          return;
+        }
         if (key !== todayKey) return;
         fold(d, credit, r.model);
       });
@@ -292,7 +298,10 @@
         if (isNaN(d.getTime())) return;
         const key = dayKeyOf(d);
         const credit = Number(e.points) || 0;
-        if (key === yestKey) { yday += credit; return; }
+        if (key === yestKey) {
+          if (d.getHours() * 60 + d.getMinutes() <= nowMin) yday += credit;
+          return;
+        }
         if (key !== todayKey) return;
         fold(d, credit, e.model);
       });

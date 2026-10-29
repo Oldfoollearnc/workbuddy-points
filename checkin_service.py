@@ -96,6 +96,8 @@ class CheckinService:
         self._running = False
         self._watch_started = False
         self._watch_stop = threading.Event()
+        # 用户改了"自动签到"开关时用它把常驻看猫从长睡里叫醒，否则要等到下一轮
+        self._wake = threading.Event()
         self.on_update = None           # 后台跑完一轮后的回调（刷新界面）
         self._fail_streak = 0           # 连续失败次数，用于退避
         self._tasks = {}                # 成长任务缓存 {"at": ts, "data": {...}}
@@ -120,6 +122,7 @@ class CheckinService:
         if travel is not None:
             self.options["travel"] = bool(travel)
         self._save_cache()
+        self._wake.set()        # 立刻重算下一轮，不用干等到长睡结束
         _log("checkin options: %s" % json.dumps(self.options, ensure_ascii=False))
         return {"ok": True, "options": dict(self.options)}
 
@@ -610,7 +613,12 @@ class CheckinService:
             remain = target - time.time()
             if remain <= 0:
                 return False
-            self._watch_stop.wait(min(remain, 45))
+            # 两种叫醒：停止（退出程序），或设置变更（用户刚打开自动签到）
+            if self._wake.wait(min(remain, 45)):
+                self._wake.clear()
+                return self._watch_stop.is_set()
+            if self._watch_stop.is_set():
+                return True
         return True     # 被 stop 打断
 
     def _watch_loop(self, travel=None):
@@ -639,7 +647,10 @@ class CheckinService:
 
             # 失败时按 1 → 5 → 15 分钟退避，最多三次；成功立刻清零。
             # 不加这个，一次网络抖动就要等到下个自然节点（可能 4 小时后）。
-            if ok:
+            if not self.options.get("auto", True):
+                # 自动签到关掉时别每 15 分钟醒一次空转；用户重新打开开关会走 _wake 叫醒
+                wait = 3600.0
+            elif ok:
                 self._fail_streak = 0
                 wait = self._next_wait(travel)
             else:
