@@ -36,6 +36,11 @@ WM_PAINT = 0x000F
 WM_ERASEBKGND = 0x0014
 WM_MOUSEMOVE = 0x0200
 WM_KEYDOWN = 0x0100
+WM_HOTKEY = 0x0312
+HOTKEY_ID = 1
+MOD_ALT, MOD_CONTROL, MOD_NOREPEAT = 0x0001, 0x0002, 0x4000
+user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
+user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
 WM_ACTIVATE = 0x0006
 WM_NCHITTEST = 0x0084
 WM_KILLFOCUS = 0x0008
@@ -374,6 +379,14 @@ class Tray:
             raise OSError("注册托盘图标失败 err=%s" % ctypes.get_last_error())
         self.log("tray icon registered")
 
+        # 全局热键 Ctrl+Alt+W：托盘图标经常被折叠进通知区，热键是唯一可靠的入口。
+        # 被别的程序占用时只记一条日志，不影响托盘本身。
+        if user32.RegisterHotKey(self.hwnd, HOTKEY_ID, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
+                                 ord("W")):
+            self.log("hotkey registered: Ctrl+Alt+W")
+        else:
+            self.log("hotkey register failed (可能被占用): err=%s" % ctypes.get_last_error())
+
         msg = wintypes.MSG()
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
             user32.TranslateMessage(ctypes.byref(msg))
@@ -397,6 +410,8 @@ class Tray:
 
     def stop(self):
         try:
+            if self.hwnd:
+                user32.UnregisterHotKey(self.hwnd, HOTKEY_ID)
             if self._nid:
                 shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(self._nid))
             if self._menu_hwnd:
@@ -420,6 +435,10 @@ class Tray:
                     # 双击已经产生两次 WM_LBUTTONUP（开一次、关一次），这里再开主界面
                     # 会闪一下；主界面只走小窗里的「展开完整面板」或右键菜单。
                     return 0
+                return 0
+            if msg == WM_HOTKEY:
+                # 和"点托盘图标"同一个入口：弹小窗（再按一次收回由前端判断）
+                self._safe(self.on_click)
                 return 0
             if msg == WM_MENU_CMD:
                 self._dispatch(int(wparam or 0))

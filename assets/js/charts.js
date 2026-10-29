@@ -997,6 +997,11 @@
           if (glowOn) focus(rect.__cell);
         });
         rect.addEventListener('mousemove', ev => showTip(`<div class="tt-title">${title}</div>${tipRows(rowsTip)}`, ev.clientX, ev.clientY));
+        // 点某天 → 外层跳去流水并按这天筛好（日历只负责报坐标，不关心业务）
+        rect.style.cursor = 'pointer';
+        rect.addEventListener('click', () => {
+          if (typeof cfg.onPick === 'function') cfg.onPick(key, rec || null);
+        });
         rect.addEventListener('mouseleave', () => { hideTip(); if (glowOn) unfocus(); });
         rect.__cell = cells[cells.length - 1];
       }

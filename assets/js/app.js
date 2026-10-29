@@ -56,6 +56,7 @@
     ledgerType: 'all',
     ledgerQuery: '',
     ledgerFilter: '',      // 'model:xxx' / 'project:xxx' / 'client:xxx'
+    ledgerDay: '',         // 'YYYY-MM-DD'：从日历点进来的单日筛选
     client: '',            // 用量分析页的来源筛选：'' = 全部
     ledgerLimit: 24,
     heatRange: '7',       // 热力图范围：7 / 30 / month
@@ -71,6 +72,7 @@
       calGlow: true, calIntro: true, groupMinute: true, notice: true,
       checkinAuto: true, checkinTravel: true, checkinDismissed: '',
       sideSwipeSec: 3, popSwipeSec: 5, warnDismissed: '', warnBelow: 500,
+      dailyBudget: 0,       // 每日预算（分）；0 = 不设
       trendRange: 30 },
     readPrefs()
   );
@@ -661,17 +663,42 @@
   let localTimer = null;
   /* ---------------- 总览提示条 ---------------- */
 
+  /** 状态栏上的「重新连接 / 重试同步」：错误就地解决，不用再跑到账户页找按钮。 */
+  function renderSyncRetry() {
+    const btn = $('#syncRetry');
+    if (!btn) return;
+    const st = ACCOUNT && ACCOUNT.status;
+    const soft = ACCOUNT && ACCOUNT.softFail;
+    if (st === 'expired') {
+      btn.hidden = false;
+      btn.textContent = '重新连接';
+      btn.dataset.act = 'login';
+      btn.title = '登录已过期，点这里扫码重新连接';
+    } else if (st === 'error' || soft) {
+      btn.hidden = false;
+      btn.textContent = '重试同步';
+      btn.dataset.act = 'sync';
+      btn.title = (ACCOUNT && (ACCOUNT.lastError || soft)) || '上一次同步没成功';
+    } else {
+      btn.hidden = true;
+      btn.dataset.act = '';
+    }
+  }
+
   /** 两段都隐藏时整条状态栏也收起来，别留一条空壳 */
   function syncStatusbar() {
     const bar = $('#statusbar');
     if (!bar) return;
+    renderSyncRetry();
     const data = $('#sbData');
     const ck = $('#sbCheckin');
     const dot = $('#sbDot');
+    const retry = $('#syncRetry');
     const showData = !!(data && !data.hidden);
     const showCk = !!(ck && !ck.hidden);
+    const showRetry = !!(retry && !retry.hidden);
     if (dot) dot.hidden = !(showData && showCk);
-    bar.hidden = !showData && !showCk;
+    bar.hidden = !showData && !showCk && !showRetry;
   }
 
   /** 顶部那条明确提示：说清"哪个数字是实时的、哪个有延迟、当前读的是哪份数据"。 */
@@ -2093,6 +2120,18 @@
         todayNote.textContent = '较昨日同期';
         todayNote.title = '';
       }
+      // 每日预算：设了才接管这条脚注——超了就直说超了多少，没超给个进度
+      const budget = Number(prefs.dailyBudget) || 0;
+      if (budget > 0) {
+        const over = stat.consumed > budget;
+        todayNote.className = 'muted' + (over ? ' warn-text' : '');
+        todayNote.textContent = over
+          ? `超预算 ${F.credit(stat.consumed - budget)} 分`
+          : `预算 ${F.credit(budget)} · 已用 ${Math.min(999, Math.round(stat.consumed / budget * 100))}%`;
+        todayNote.title = `今日预算 ${F.credit(budget)} 分，可在「设置 → 每日积分」里修改`;
+      }
+      const card = todayNote.closest ? todayNote.closest('.kpi') : null;
+      if (card) card.classList.toggle('is-over', budget > 0 && stat.consumed > budget);
     }
 
     countUp($('[data-count="todayReq"]'), stat.requests);
@@ -2758,9 +2797,59 @@
     return opts;
   }
 
+  /** 本周 vs 上周同期（同样天数）：只统计本机记录，跨周对比不受"今天周几"影响。 */
+  function renderWeekCompare() {
+    const box = $('#weekCmp');
+    if (!box) return;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const wd = (today.getDay() + 6) % 7;              // 周一 = 0
+    const monday = new Date(today);
+    monday.setDate(today.getDate() - wd);
+    const days = wd + 1;
+    const lastMon = new Date(monday);
+    lastMon.setDate(monday.getDate() - 7);
+    const map = localDayMap();
+    const sumFrom = (from, n) => {
+      let s = 0;
+      for (let i = 0; i < n; i++) {
+        const d = new Date(from);
+        d.setDate(from.getDate() + i);
+        const rec = map[dayKeyOf(d)];
+        if (rec) s += rec.points;
+      }
+      return round2(s);
+    };
+    const cur = sumFrom(monday, days);
+    const prev = sumFrom(lastMon, days);
+    setText('#weekCmpSub', `本周 ${days} 天 vs 上周同期 ${days} 天 · 只统计这台机器的会话记录`);
+    const chip = $('#weekCmpDelta');
+    if (chip) {
+      if (prev > 0) {
+        const up = cur >= prev;
+        chip.className = 'chip ' + (up ? 'chip-warn' : 'chip-good');
+        chip.textContent = `${up ? '+' : ''}${((cur / prev - 1) * 100).toFixed(0)}%`;
+        chip.title = `本周 ${F.credit(cur)} 分 · 上周同期 ${F.credit(prev)} 分`;
+      } else {
+        chip.className = 'chip';
+        chip.textContent = '上周无数据';
+        chip.title = '';
+      }
+    }
+    const max = Math.max(cur, prev, 1);
+    const bar = (label, val, cls) => `
+      <div class="week-cmp-row ${cls}">
+        <b>${label}</b>
+        <span class="week-cmp-track"><i style="width:${(val / max * 100).toFixed(1)}%"></i></span>
+        <span class="week-cmp-val">${F.credit(val)} 分</span>
+      </div>`;
+    box.innerHTML = bar('本周', cur, '') + bar('上周同期', prev, 'is-prev');
+  }
+
   function renderAnalytics() {
     renderLocalCard();
     renderClientSeg();
+    renderWeekCompare();
     const srcName = state.client ? clientName(state.client) : '';
     const cloudMode = !!cloudRows();
     setText('#modelSub', cloudMode
@@ -2805,7 +2894,8 @@
       calBox.__draw = () => C.calendar(calBox, {
         days: calDays, tone: 'c1',
         glow: prefs.calGlow !== false,        // 悬停光圈 + 邻格联动
-        animate: prefs.calIntro !== false     // 入场多米诺
+        animate: prefs.calIntro !== false,    // 入场多米诺
+        onPick: key => openDayLedger(key)     // 点某天 → 流水只看那天
       });
       if (calSig !== ui.lastCalSig) {
         ui.lastCalSig = calSig;
@@ -2963,6 +3053,8 @@
     return src.filter(e => {
       const t = e.time instanceof Date ? e.time : new Date(e.time);
       const key = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())}`;
+      // 从日历点进来的单日筛选：优先级最高，和"今日/7 天"是两回事
+      if (state.ledgerDay && key !== state.ledgerDay) return false;
       if (state.ledgerType === 'today' && key !== todayKey) return false;
       if (state.ledgerType === 'week' && (now - t) > 7 * 86400000) return false;
       // 模型 / 项目是精确匹配，搜索框是模糊匹配：前者用来"只看这个模型"，
@@ -3030,10 +3122,25 @@
     }
   }
 
+  /** 日历点某天 → 跳流水并只看那天；再点同一天取消。 */
+  function openDayLedger(key) {
+    if (!key) return;
+    state.ledgerDay = (state.ledgerDay === key) ? '' : key;
+    state.ledgerType = 'all';
+    go('ledger');
+    renderLedger(true);
+  }
+
   function renderLedger(reset) {
     if (reset) state.ledgerLimit = 24;
     const full = ledgerAll();
     syncLedgerFilter(full);
+    const dayChip = $('#ledgerDayChip');
+    if (dayChip) {
+      dayChip.hidden = !state.ledgerDay;
+      dayChip.textContent = state.ledgerDay ? `${state.ledgerDay.slice(5)} ✕` : '';
+      dayChip.title = '只看这一天，点一下取消';
+    }
     const all = ledgerRows(full);
     const rows = all.slice(0, state.ledgerLimit);
     const body = $('#ledgerBody');
@@ -3074,7 +3181,7 @@
       ledgerSource,
       // 筛选条件也要进签名：筛成 0 条时 rows 是空的，只靠行内容判断会以为"没变化"，
       // 结果表里还挂着上一次的记录。
-      state.ledgerType, state.ledgerQuery, state.ledgerFilter || '',
+      state.ledgerType, state.ledgerQuery, state.ledgerFilter || '', state.ledgerDay || '',
       all.length,
       rows.map(e => `${e.id}|${new Date(e.time).getTime()}|${e.points}`).join(',')
     ].join('|');
@@ -3984,6 +4091,18 @@
       if (bridge.has()) bridge.call('set_digest', prefs.digest !== false);
     }
 
+    const budgetEl = $('#optBudget');
+    if (budgetEl) {
+      budgetEl.value = String(prefs.dailyBudget == null ? 0 : prefs.dailyBudget);
+      budgetEl.addEventListener('change', () => {
+        const v = Math.max(0, Math.min(200000, Math.round(Number(budgetEl.value) || 0)));
+        prefs.dailyBudget = v;
+        budgetEl.value = String(v);
+        savePrefs();
+        renderActive(true);
+        toast(v > 0 ? `每日预算 ${F.credit(v)} 分` : '已关闭每日预算');
+      });
+    }
     const warnBelowEl = $('#optWarnBelow');
     if (warnBelowEl) {
       warnBelowEl.value = String(prefs.warnBelow == null ? 500 : prefs.warnBelow);
@@ -4058,6 +4177,7 @@
     $$('#ledgerType button').forEach(b => {
       b.addEventListener('click', () => {
         state.ledgerType = b.dataset.type;
+        state.ledgerDay = '';       // 手动切周期 = 退出"只看某天"
         $$('#ledgerType button').forEach(x => x.classList.toggle('is-active', x === b));
         renderLedger(true);
       });
@@ -4079,6 +4199,35 @@
     }
     const more = $('#ledgerMore');
     if (more) more.addEventListener('click', () => { state.ledgerLimit += 24; renderLedger(false); });
+    const dayChip = $('#ledgerDayChip');
+    if (dayChip) dayChip.addEventListener('click', () => {
+      state.ledgerDay = '';
+      renderLedger(true);
+    });
+    const syncRetry = $('#syncRetry');
+    if (syncRetry) syncRetry.addEventListener('click', async () => {
+      if (!bridge.has()) return;
+      const act = syncRetry.dataset.act;
+      if (!act) return;
+      syncRetry.disabled = true;
+      try {
+        if (act === 'login') {
+          const r = await bridge.call('account_login');
+          if (!(r && r.ok)) toast((r && r.error) || '打不开登录窗', 'i-alert');
+          else toast('已打开登录窗，扫码后自动接上');
+        } else {
+          const r = await bridge.call('account_sync');
+          toast(r && r.ok ? '已同步' : ('同步失败：' + ((r && r.error) || '未知错误')),
+            r && r.ok ? 'i-check' : 'i-alert');
+        }
+        await loadAccount();
+        renderActive(true);
+      } catch (e) {
+        toast('操作失败：' + (e && e.message ? e.message : '未知错误'), 'i-alert');
+      } finally {
+        syncRetry.disabled = false;
+      }
+    });
 
     const ps = $('#popSearch');
     if (ps) {

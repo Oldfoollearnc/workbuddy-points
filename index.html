@@ -303,6 +303,7 @@
             <span class="sb-dot" id="sbDot" hidden>·</span>
             <span class="sb-seg sb-checkin" id="sbCheckin" hidden><span id="checkinText"></span></span>
           </div>
+          <button class="sb-link" id="syncRetry" hidden>重试同步</button>
           <button class="sb-link" id="checkinRetry" hidden>重试</button>
           <button class="sb-link" id="noticeSource">数据源</button>
           <button class="sb-link" id="checkinOk">我知道了</button>
@@ -532,6 +533,16 @@
           </article>
         </div>
 
+        <div class="grid">
+          <article class="card span-12 week-cmp-card" style="--i:3">
+            <header class="card-head">
+              <div><h2>本周对比</h2><p id="weekCmpSub">本周与上周同期</p></div>
+              <div class="card-tools"><span class="chip" id="weekCmpDelta">—</span></div>
+            </header>
+            <div class="week-cmp" id="weekCmp"></div>
+          </article>
+        </div>
+
       </section>
 
       <!-- ---------- 积分流水 ---------- -->
@@ -548,6 +559,7 @@
                 <button data-type="today">今日</button>
                 <button data-type="week">7 天</button>
               </div>
+              <span class="chip chip-brand" id="ledgerDayChip" hidden title="只看这一天，点一下取消"></span>
               <label class="search" for="ledgerSearch">
                 <svg class="i"><use href="#i-search"/></svg>
                 <input id="ledgerSearch" type="text" placeholder="搜索模型 / 项目" autocomplete="off">
@@ -783,6 +795,13 @@
               <div class="set-row">
                 <div class="set-label"><b>工作日折算</b><em>剔除周末与法定节假日，计算每日可用积分</em></div>
                 <label class="switch-wrap"><input type="checkbox" id="optHoliday" checked><i class="switch"></i></label>
+              </div>
+              <div class="set-row">
+                <div class="set-label"><b>每日预算</b><em>今日消耗超过它就提醒，KPI 会变色；填 0 关闭</em></div>
+                <div class="set-inline">
+                  <input id="optBudget" class="mini-input" type="number" min="0" max="200000" step="50" value="0">
+                  <span class="set-unit">分</span>
+                </div>
               </div>
               <div class="set-row">
                 <div class="set-label"><b>可用积分预警</b><em>低于这个数值时提醒一次，每天最多一次；填 0 关闭</em></div>

@@ -2603,6 +2603,17 @@ body[data-mode="popup"] .rz { display: none; }
 .lc-row { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; color: var(--text-3); }
 .lc-row b { font-size: 12.5px; font-weight: 600; color: var(--text-1); font-variant-numeric: tabular-nums; }
 .lc-note { margin: 2px 0 0; font-size: 10.5px; color: var(--text-3); }
+/* 今日消耗超预算：整张 KPI 描一圈琥珀，扫一眼就知道 */
+.kpi.is-over { box-shadow: inset 0 0 0 1px var(--warn); }
+.kpi.is-over .kpi-value span { color: var(--warn); }
+/* 本周对比：两根横条 + 数字，不做图表库 */
+.week-cmp { display: flex; flex-direction: column; gap: 10px; padding: 2px 2px 4px; }
+.week-cmp-row { display: flex; align-items: center; gap: 10px; font-size: 11.5px; color: var(--text-3); }
+.week-cmp-row b { min-width: 64px; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.week-cmp-track { flex: 1; height: 8px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.week-cmp-track i { display: block; height: 100%; border-radius: 99px; background: var(--brand); }
+.week-cmp-row.is-prev .week-cmp-track i { background: var(--border-2); }
+.week-cmp-val { min-width: 84px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); }
 /* 本机消耗：自选日期区间（浮层里的月历） */
 .lc-link {
   margin-left: auto; padding: 2px 8px; border: 0; border-radius: 99px;

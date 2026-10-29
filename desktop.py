@@ -176,6 +176,29 @@ def log(msg):
     logutil.log(LOG_PATH, msg)
 
 
+# 上次退出时停在哪个窗口。启动照它开，避免"只想瞄一眼"的人每次都要关一个大窗。
+WIN_STATE = app_paths.data_path("window.json")
+
+
+def read_win_mode():
+    try:
+        d = fsutil.load_json(WIN_STATE, {}) or {}
+        m = str(d.get("mode") or "")
+        return m if m in ("main", "popup") else "popup"     # 首次安装：小窗优先
+    except Exception:
+        return "popup"
+
+
+def save_win_mode(mode):
+    if mode not in ("main", "popup"):
+        return
+    try:
+        fsutil.save_json(WIN_STATE, {"mode": mode,
+                                     "at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
+    except Exception as e:
+        log(f"save_win_mode failed: {e}")
+
+
 def _fmt_num(v):
     """周报里的数字：整数带千分位，小数保留两位。"""
     try:
@@ -405,6 +428,7 @@ class Desktop:
     def show_popup(self):
         if not self.popup:
             return
+        save_win_mode("popup")
         with self._popup_lock:
             # 意图先落地：即使后面 show() 还没返回，下一次单击也能正确判成"该关"
             self._popup_intent = True
@@ -579,6 +603,7 @@ class Desktop:
             return ""
 
     def show_main(self):
+        save_win_mode("main")
         # 小窗让位（同时把小窗状态簿记成"已收起"）
         self.hide_popup()
         hwnd = find_hwnd(MAIN_TITLE)
@@ -966,7 +991,25 @@ class Desktop:
             log(f"refresh error: {e}")
         for win in (self.popup, self.main, getattr(self, "login_win", None)):
             self._safe_js(win, "window.App && App.reloadUsage()")
+        self.update_tray_tip()
         return True
+
+    def update_tray_tip(self):
+        """托盘悬浮提示带上"今日 / 可用"：图标被折叠时，鼠标一停就能看到。"""
+        tray = getattr(self, "tray", None)
+        if not tray or not hasattr(tray, "set_tip"):
+            return
+        try:
+            data = self.usage.get(0.4) or {}
+            today = (data.get("today") or {}).get("consumed") or 0
+            cloud = self.account.state.get("cloud") or {}
+            avail = cloud.get("available")
+            tip = "WorkBuddy 今日 %s 分" % round(float(today), 2)
+            if avail is not None:
+                tip += " · 可用 %s 分" % round(float(avail), 2)
+            tray.set_tip(tip)
+        except Exception as e:
+            log(f"tray tip failed: {e}")
 
     # ---------- 每晚小结 ----------
 
@@ -1844,6 +1887,13 @@ def main():
     except Exception as e:
         log(f"tray error: {e}")
 
+    def _tray_tip_soon():
+        # 托盘线程起来后再填提示：此时 usage 已经读过一次，不会阻塞
+        for delay in (3, 12):
+            time.sleep(delay)
+            app.update_tray_tip()
+    threading.Thread(target=_tray_tip_soon, daemon=True).start()
+
     # 启动即出画面：默认直接上主界面（窗口在 build 时已 hidden=False，这里只做收尾），
     # --show 仍可改为"只弹小窗"。用 webview.start(func) 而不是 Timer(1.0) —— 少等 1 秒。
     def _startup_show():
@@ -1854,8 +1904,11 @@ def main():
                 return
             if "--show" in sys.argv:
                 app.show_popup()
-            else:
+            elif read_win_mode() == "main":
                 app.show_main()
+            else:
+                # 默认（以及上次退出时是小窗）：只弹小窗，不拿大窗糊住屏幕
+                app.show_popup()
             log("startup window shown")
         except Exception as e:
             log(f"startup show error: {e}")
