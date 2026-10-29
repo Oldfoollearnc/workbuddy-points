@@ -189,6 +189,10 @@ class AccountService:
         # 否则会把刚渲染好的二维码整页刷掉 —— 用户看到的就是"二维码刚出来又刷新"。
         self._login_active = False
         self._login_at = 0.0
+        # 会话过期时通知桌面端自动弹登录窗。没有这个回调就退回"顶部提示 + 用户自己点"。
+        # _expired_notified 保证一次过期只弹一次，同步成功后复位。
+        self.on_expired = None
+        self._expired_notified = False
         self.state = {
             "status": "disconnected",   # disconnected | logining | connected | expired | error
             "user": None,
@@ -313,10 +317,19 @@ class AccountService:
                         hidden = True
                     except Exception:
                         pass
-                    res = self.sync()
-                    if res.get("ok"):
-                        return
-                    _log("sync after login failed, keep window open")
+                    # 后台定时同步可能正占着 _sync_lock：这时 sync() 立刻返回 busy。
+                    # 以前把 busy 当成"登录失败"，窗口不关、状态卡在等待登录，
+                    # 用户看到的只是"扫了码没反应"，只能大退重来。
+                    res = None
+                    for _ in range(8):
+                        res = self.sync()
+                        if res.get("ok"):
+                            return
+                        if not res.get("busy"):
+                            break
+                        _log("sync after login busy, retry in 3s")
+                        time.sleep(3)
+                    _log("sync after login failed: %s" % ((res or {}).get("error") or "unknown"))
                     if hidden:
                         try:
                             self.win.show()
@@ -519,22 +532,20 @@ class AccountService:
         if self._login_active:
             _log("try_restore skipped: 用户正在扫码登录，别去动他的窗口")
             return False
-        # 先导一次页面把会话激活（签到要用同源 fetch，也需要页面在 workbuddy 域）
-        self._nav(ORIGINS[0] + "/app", wait=3.5)
+        # 冷却期内一次网络请求都不打 —— 那就连页面都不用导。
+        # 以前是先 sleep 2s + 导航 /app 等 3.5s，才来判断冷却，启动白等 5.5 秒。
+        if self._sync_cooling():
+            _log("try_restore: 距上次同步不足 %s 分钟，直接用缓存，跳过主动同步" % self.interval_min)
+            return bool(self.state.get("cloud"))
+
+        # 需要同步：直接导到 profile 页。billing 接口要的就是"页面刚加载过这里"，
+        # 以前先导 /app 再导这里，等于多等一次整页加载。
+        self._nav(ORIGINS[0] + PROFILE_PATH, wait=4.5)
         if self._login_active:
             _log("try_restore aborted: 用户开始扫码登录")
             return False
         if cdp_enabled() and os.path.exists(COOKIE_FILE):
             self.restore_session()
-
-        if self._sync_cooling():
-            _log("try_restore: 距上次同步不足 %s 分钟，直接用缓存，跳过主动同步" % self.interval_min)
-            return bool(self.state.get("cloud"))
-
-        if self._login_active:
-            _log("try_restore aborted: 用户开始扫码登录")
-            return False
-        self._nav(ORIGINS[0] + PROFILE_PATH, wait=4.5)
         res = self.sync()
         _log(f"try_restore sync ok={res.get('ok')}")
         return bool(res.get("ok"))
@@ -556,7 +567,10 @@ class AccountService:
                     # 页面已经在这个域里就直接发请求，不再每次同步都整页重载一遍
                     # （一次重载要拉 HTML/JS/CSS，几百 KB，纯属白花）。
                     # 兜底：第一次拿不到数据时，重试会强制导航一次再试。
-                    need_nav = (attempt > 0) or (not self._on_origin(origin))
+                    # 扫码成功那一瞬间页面还停在 /login，此时直接 fetch 会 401：
+                    # billing 接口要求页面刚加载过 /profile/plans-usage 才认这个会话。
+                    need_nav = ((attempt > 0) or (not self._on_origin(origin))
+                                or ("/login" in self._href()))
                     if need_nav:
                         self._nav(origin + PROFILE_PATH, wait=4.5)
                     else:
@@ -633,6 +647,7 @@ class AccountService:
                     "suspect": False,
                     "origin": used_origin,
                 })
+            self._expired_notified = False      # 连上了：下次过期可以再提醒一次
             self._save_cache()
             threading.Thread(target=self.save_session, daemon=True).start()
             _log(f"sync ok available={mapped['cloud'].get('available')} "
@@ -664,10 +679,21 @@ class AccountService:
                     self.state["suspect"] = streak >= 3
             self._save_cache()
             _log(f"sync failed ({'auth' if auth_like else 'transient'}): {e}")
+            # 过期就主动弹登录窗：一次过期只弹一次，同步成功后在上面复位。
+            # 注意必须放在 self.lock 之外 —— open_login 自己也要拿这把锁。
+            if auth_like and not self._expired_notified and self.on_expired:
+                self._expired_notified = True
+                threading.Thread(target=self._fire_expired, daemon=True).start()
             return {"ok": False, "error": msg, "state": self.snapshot()}
         finally:
             self._syncing = False
             self._sync_lock.release()
+
+    def _fire_expired(self):
+        try:
+            self.on_expired()
+        except Exception as e:
+            _log(f"on_expired callback failed: {e}")
 
     def _usage_since(self):
         """增量扫描起点（保护账号，避免每次都全量拉 30 天）。

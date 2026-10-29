@@ -1751,6 +1751,17 @@ def main():
     app.usage.start()          # 后台读取本机用量
     app.account.start_polling()  # 账号云同步轮询（默认 60 分钟）
 
+    def _auto_relogin():
+        """会话过期：直接把登录窗弹出来，扫一次码就接上，不用用户自己找按钮。"""
+        try:
+            log("session expired -> open login window")
+            for w in (app.main, app.popup):
+                app._safe_js(w, "window.App && App.toast('登录已过期，扫码后自动接上', 'i-alert')")
+            app.account.open_login()
+        except Exception as e:
+            log(f"auto relogin failed: {e}")
+    app.account.on_expired = _auto_relogin
+
     if "--sync" in sys.argv:      # 诊断用：启动后立即同步一次并写日志
         def _one_shot():
             time.sleep(4)

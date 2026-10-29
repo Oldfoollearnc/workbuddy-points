@@ -39,7 +39,9 @@ class NextWaitTest(unittest.TestCase):
         expect = (nxt - now).total_seconds()
         # 两次取时间之间会有毫秒级差异
         self.assertLess(abs(wait - expect), 5)
-        self.assertGreater(wait, 3600)      # 不该被 1 小时上限截断
+        # 不写死 > 3600：凌晨 0:05 之后跑这条，离次日 0:05 只剩几十秒，断言会假红。
+        # 与 expect 的误差已经卡在 5 秒内，本身就说明没被任何上限截断。
+        self.assertGreater(wait, 0)
 
     def test_idle_retries_soon(self):
         self.assertEqual(CheckinService._next_wait(

@@ -1079,9 +1079,10 @@ class CheckinService:
         if getattr(self.account, "_login_active", False):
             out["error"] = "正在扫码登录，先完成登录"
             return out
-        got = self.account._sync_lock.acquire(timeout=20)
+        # 别让用户在"正在签到…"里干等半分钟：超过 10 秒还没轮到就直接说清楚。
+        got = self.account._sync_lock.acquire(timeout=10)
         if not got:
-            out["error"] = "正在同步云端数据，几秒后再试"
+            out["error"] = "云端正在同步，稍等几秒再点一次"
             return out
         try:
             if not self._ensure_page():

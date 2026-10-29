@@ -87,10 +87,14 @@ ok('有效期缺失时回退 30 天窗口', () => {
 
 console.log('今日口径');
 const lastSync = new Date(NOW.getTime() - 30 * 60000);          // 30 分钟前同步
+// 时间戳必须相对"现在"生成：以前写死 `TODAY 10:05`，凌晨跑测试时这两条还没发生，
+// quotaWindow 的 `t <= now` 会把它们排除，于是和 todayStat 对不上（3 ≠ 7）。
+const TODAY_NOW = fmt(NOW);                                     // 就是此刻，恒 <= now
+const YEST_SAME = fmt(new Date(NOW.getTime() - 24 * 3600000));   // 昨天同一时刻
 const rows = [
-  { id: 'a', t: `${TODAY} 10:05:00`, credit: 1.5, model: 'm1', purpose: 'conversation' },
-  { id: 'b', t: `${TODAY} 10:06:00`, credit: 2.5, model: 'm2', purpose: 'conversation' },
-  { id: 'c', t: `${YEST} 09:00:00`, credit: 9, model: 'm1', purpose: 'conversation' }
+  { id: 'a', t: TODAY_NOW, credit: 1.5, model: 'm1', purpose: 'conversation' },
+  { id: 'b', t: TODAY_NOW, credit: 2.5, model: 'm2', purpose: 'conversation' },
+  { id: 'c', t: YEST_SAME, credit: 9, model: 'm1', purpose: 'conversation' }
 ];
 const ledger = [
   { id: 'l1', time: new Date(NOW.getTime() - 5 * 60000), type: 'consume', points: 3, model: 'm1', tokens: 10 },
@@ -120,7 +124,8 @@ ok('今日 = 云端今日 + 同步后本机（昨天的不算）', () => {
   assert.strictEqual(st.cloud, true);
   assert.strictEqual(st.consumed, 7);       // 1.5 + 2.5 + 3
   assert.strictEqual(st.requests, 3);
-  assert.strictEqual(st.hours[10].points, 4);
+  // 当前小时的桶 = 云端两条(1.5+2.5) + 本机补足(3)：两路都落在同一小时里
+  assert.strictEqual(st.hours[NOW.getHours()].points, 7);
   assert.strictEqual(st.models.length, 2);
   assert.strictEqual(st.tokens, 55);        // Token 仍取本机
 });

@@ -41,6 +41,9 @@
     settings: ['设置', '主题、动效、刷新节奏与每日积分']
   };
 
+  /** 官方成长中心（任务页）。原链接带的 utm_* 是投放参数，本地工具不需要。 */
+  const TASKS_URL = 'https://www.workbuddy.cn/profile/growth-center';
+
   const state = {
     mode: HASH_MODE || (qs.get('mode') === 'popup' ? 'popup' : 'main'),
     view: HASH_VIEW || 'overview',
@@ -1409,7 +1412,10 @@
       toast('浏览器预览无法执行', 'i-info');
       return;
     }
-    // 忙碌态用 class：chip 是 span，textContent 一改会把里面的猫猫倒计时冲掉
+    // 点下去立刻给一句话：chip 只有 21px 高，光转圈不够，用户会以为没点上。
+    // 忙碌态用 class：chip 是 span，textContent 一改会把里面的猫猫倒计时冲掉。
+    const LABEL = { checkin: '正在签到…', claim: '正在领取猫猫带回的积分…', travel: '正在派猫猫出门…' };
+    toast(LABEL[kind] || '正在执行…', 'i-info');
     if (btn) btn.classList.add('is-busy');
     try {
       const r = await bridge.call('checkin_action', kind);
@@ -1648,7 +1654,8 @@
       const todo = (tk && tk.total) ? tk.total - tk.completed : null;
       const base = todo === null ? '—' : (todo > 0 ? todo + ' 个可做' : '全做完');
       tkChip.textContent = (p === 'pop' ? '任务 · ' : '') + base;
-      tkChip.className = 'chip' + (todo === 0 ? ' chip-good' : '');
+      // 小窗那颗可以点（跳成长任务页），左侧轮播卡只是展示
+      tkChip.className = 'chip' + (p === 'pop' ? ' chip-act' : '') + (todo === 0 ? ' chip-good' : '');
     }
     const tkNote = $('#' + p + 'TkNote');
     if (tkNote) {
@@ -4103,12 +4110,25 @@
     /* 小窗：状态 chip 本身就是操作入口（不再额外排一行按钮） */
     const popCkChip = $('#popCkChip');
     if (popCkChip) popCkChip.addEventListener('click', () => {
-      if (popCkChip.dataset.act) runAction(popCkChip.dataset.act, popCkChip);
+      if (popCkChip.dataset.act) { runAction(popCkChip.dataset.act, popCkChip); return; }
+      // 没有可执行动作时也必须给一句回应，否则就是"点了一点动静都没有"
+      toast(popCkChip.classList.contains('is-done') ? '今天已经签过了，明天 0 点后可再签'
+        : (popCkChip.classList.contains('is-off') ? '桌面端才能签到' : '签到状态还在读取，稍等'), 'i-info');
     });
     const popTvChip = $('#popTravelChip');
     if (popTvChip) popTvChip.addEventListener('click', () => {
-      if (popTvChip.dataset.act) runAction(popTvChip.dataset.act, popTvChip);
+      if (popTvChip.dataset.act) { runAction(popTvChip.dataset.act, popTvChip); return; }
+      toast(popTvChip.title || '猫猫状态未就绪', 'i-info');
     });
+    // 任务 chip：点开官方成长中心，用系统默认浏览器（不在本程序里塞网页）
+    const popTkChip = $('#popTkChip');
+    if (popTkChip) {
+      popTkChip.title = '打开成长任务页';
+      popTkChip.addEventListener('click', () => {
+        if (!bridge.can('open_url')) { toast('当前环境打不开外链', 'i-info'); return; }
+        bridge.call('open_url', TASKS_URL);
+      });
+    }
 
     /* 用量分析：本机消耗周期 + 项目排行周期 */
     const lcSeg = $('#lcSeg');

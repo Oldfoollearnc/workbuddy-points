@@ -602,6 +602,16 @@ body.is-desktop[data-mode="popup"] .popup-card {
 .chip-act.is-done { cursor: default; opacity: .9; box-shadow: none; }
 .chip-act.is-done:hover { box-shadow: none; }
 .is-busy { opacity: .55; pointer-events: none; }
+/* 点击后要立刻看出"在动"：.is-busy 默认把整体压到 55%，小窗 chip 上等于没反应。
+   这里保持可读，另加一个转圈，配合 runAction 里那条"正在签到…"的提示。 */
+.chip-act.is-busy { opacity: 1; color: var(--brand); background: var(--brand-soft); }
+.chip-act.is-busy::after {
+  content: ''; width: 9px; height: 9px; flex: none; align-self: center;
+  border: 1.6px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: chip-spin .7s linear infinite;
+}
+html[data-motion="off"] .chip-act.is-busy::after { animation: none; }
+@keyframes chip-spin { to { transform: rotate(360deg); } }
 
 .pop-foot {
   flex: none;
