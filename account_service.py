@@ -202,6 +202,8 @@ class AccountService:
             "cloudWeek": None,
             "cloudModels": [],
             "cloudClients": {},
+            # 是否已经为旧缓存补拉过一次完整窗口（补 client）。补过就不再全量拉。
+            "clientSeeded": False,
             "usageRows": [],
             "lastSync": None,
             "lastError": None,
@@ -224,7 +226,7 @@ class AccountService:
             d = fsutil.load_json(CACHE)
             if d is None:
                 raise FileNotFoundError(CACHE)
-            for k in ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "cloudClients", "usageRows", "lastSync", "interval", "origin", "autoLogin"):
+            for k in ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "cloudClients", "clientSeeded", "usageRows", "lastSync", "interval", "origin", "autoLogin"):
                 if k in d:
                     self.state[k] = d[k]
             self.interval_min = 60 if d.get("interval") is None else max(0, int(d.get("interval")))
@@ -235,7 +237,7 @@ class AccountService:
         try:
             # 原子写：这个文件上百 KB，直接 open(w) 截断再写，别的线程读到半截会解析失败
             fsutil.save_json(CACHE, {k: self.state[k] for k in
-                           ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "cloudClients", "usageRows", "lastSync", "interval", "origin", "autoLogin")},
+                           ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "cloudClients", "clientSeeded", "usageRows", "lastSync", "interval", "origin", "autoLogin")},
                            indent=2)
         except Exception:
             pass
@@ -324,6 +326,9 @@ class AccountService:
                     for _ in range(8):
                         res = self.sync()
                         if res.get("ok"):
+                            return
+                        if not self._login_active:
+                            _log("login cancelled during sync retry")
                             return
                         if not res.get("busy"):
                             break
@@ -535,6 +540,12 @@ class AccountService:
         # 冷却期内一次网络请求都不打 —— 那就连页面都不用导。
         # 以前是先 sleep 2s + 导航 /app 等 3.5s，才来判断冷却，启动白等 5.5 秒。
         if self._sync_cooling():
+            # 开发态（CDP）还有一份 Cookie 在 session.bin 里：不回填的话，
+            # 紧随其后的自动签到会 401。生产态 profile 自带持久 Cookie，不必多导一次页面。
+            if cdp_enabled() and os.path.exists(COOKIE_FILE):
+                self._nav(ORIGINS[0] + PROFILE_PATH, wait=4.5)
+                if not self._login_active:
+                    self.restore_session()
             _log("try_restore: 距上次同步不足 %s 分钟，直接用缓存，跳过主动同步" % self.interval_min)
             return bool(self.state.get("cloud"))
 
@@ -638,6 +649,7 @@ class AccountService:
                     "cloudWeek": mapped.get("cloudWeek"),
                     "cloudModels": mapped.get("cloudModels") or [],
                     "cloudClients": mapped.get("cloudClients") or {},
+                    "clientSeeded": True,       # 本次已是完整窗口：下次回增量
                     "usageRows": mapped.get("usageRows") or [],
                     "user": mapped["user"],
                     "lastSync": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -706,10 +718,11 @@ class AccountService:
         """
         today = dt.date.today()
         full = (today - dt.timedelta(days=29)).isoformat()
-        # 缓存里还有没有来源（client）的逐笔：补拉一次完整窗口把它们标上。
-        # 增量的起始点是"最新一天 -2 天"，只靠增量，旧记录永远补不上来源，
-        # 按客户端拆分就会长期缺一大截。
-        if any(not r.get("client") for r in (self.state.get("usageRows") or [])):
+        # 补过一次完整窗口就够了，用 clientSeeded 记住。
+        # 不能拿"还有没有空 client"当判据：服务端有些历史行永远不带 client（实测 13 条），
+        # 那样每次同步都会退化成 30 天全量，正好撞上要避开的频率风控。
+        if not self.state.get("clientSeeded") and any(
+                not r.get("client") for r in (self.state.get("usageRows") or [])):
             return full
         days = [d.get("date") for d in (self.state.get("daily") or []) if d.get("date")]
         if not days:
@@ -1006,7 +1019,7 @@ class AccountService:
         with self.lock:
             self.state.update({"status": "disconnected", "user": None, "cloud": None,
                                "packages": [], "daily": [], "cloudWeek": None, "cloudModels": [],
-                               "cloudClients": {},
+                               "cloudClients": {}, "clientSeeded": False,
                                # usageRows 也要清：否则退出登录后流水页还挂着上一个账号的逐笔记录，
                                # 连导出 CSV 都能把它带出去
                                "usageRows": [],

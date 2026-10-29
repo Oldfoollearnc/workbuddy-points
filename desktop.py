@@ -1201,9 +1201,11 @@ class Api:
             path = picked[0] if isinstance(picked, (list, tuple)) else picked
             with open(path, "w", encoding="utf-8-sig", newline="") as f:
                 w = csv.writer(f)
-                w.writerow(["时间", "模型", "用途", "积分"])
+                # 来源列：界面已经按 WorkBuddy / CodeBuddy 拆开，导出也得对得上
+                w.writerow(["时间", "来源", "模型", "用途", "积分"])
                 for r in rows:
-                    w.writerow([_csv_cell(r.get("t")), _csv_cell(r.get("model")),
+                    w.writerow([_csv_cell(r.get("t")), _csv_cell(r.get("client") or "未标注"),
+                                _csv_cell(r.get("model")),
                                 _csv_cell(r.get("purpose")), r.get("credit") or 0])
             log("export_ledger_csv -> %s (%d 行)" % (path, len(rows)))
             return {"ok": True, "path": path, "count": len(rows)}

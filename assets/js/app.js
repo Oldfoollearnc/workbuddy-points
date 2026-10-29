@@ -3532,12 +3532,16 @@
         const rows = ledgerRows(ledgerAll());
         if (!rows.length) { toast('当前筛选下没有记录', 'i-info'); return; }
         if (bridge.can('export_rows_csv')) {
-          const head = ['时间', '类型', '模型', '动作', '项目', '积分', 'Token'];
+          const head = ['时间', '类型', '来源', '模型', '动作', '项目', '积分', 'Token'];
           const body = rows.map(e => {
             const t = e.time instanceof Date ? e.time : new Date(e.time);
             const stamp = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())} `
               + `${F.pad(t.getHours())}:${F.pad(t.getMinutes())}:${F.pad(t.getSeconds())}`;
-            return [stamp, e.type === 'earn' ? '获得' : '消耗', e.model || '', e.task || '',
+            // 来源列与屏幕一致：云端行按 client，本机补足的记录一定是 WorkBuddy
+            const src = e.src === 'cloud'
+              ? (e.client ? clientName(e.client) : '未标注')
+              : 'WorkBuddy';
+            return [stamp, e.type === 'earn' ? '获得' : '消耗', src, e.model || '', e.task || '',
               e.project || '', e.points || 0, e.tokens == null ? '' : e.tokens];
           });
           const rr = await bridge.call('export_rows_csv', 'WorkBuddy-流水',

@@ -193,6 +193,17 @@ class MapTest(unittest.TestCase):
         self.svc.state["usageRows"][0]["client"] = "WorkBuddy"
         self.assertTrue(self.svc._usage_since() > full, "全都标了来源就回到增量窗口")
 
+    def test_usage_since_stops_full_pull_after_seed(self):
+        """补过一次就够了：残留的空 client（服务端永远不给）不能让每次同步都全量拉。"""
+        import datetime as _dt
+        full = (_dt.date.today() - _dt.timedelta(days=29)).isoformat()
+        recent = _dt.date.today().isoformat()
+        self.svc.state["daily"] = [{"date": recent, "points": 1, "calls": 1}]
+        self.svc.state["usageRows"] = [{"id": "x", "t": recent + " 10:00:00",
+                                        "credit": 1.0, "model": "m", "purpose": "agent"}]
+        self.svc.state["clientSeeded"] = True
+        self.assertTrue(self.svc._usage_since() > full, "已补过来源就该回增量，不再全量")
+
     def test_probe_logs_client_values(self):
         """探针只写结构（字段名与条数），不写单笔金额。"""
         rows = [_row(self.today + " 10:00:00", "r1", 9.99, client="codebuddy")]
