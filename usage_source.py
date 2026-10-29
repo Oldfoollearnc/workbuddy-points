@@ -154,8 +154,9 @@ def save_config(total, cycle_start, cycle_end):
     keep = _load_config()
     cfg = {"total": float(total or 0), "cycle_start": cycle_start or "",
            "cycle_end": cycle_end or "", "cover_days": keep.get("cover_days") or 0}
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    # 原子写：这个文件会被后台每次聚合的 _load_config() 读，
+    # 直接 open(w) 先截断，读端正好落到中间就会把额度当 0（本周期已用瞬间归零）。
+    fsutil.save_json(CONFIG_PATH, cfg, indent=2)
     return cfg
 
 
@@ -168,8 +169,7 @@ def save_cover_days(days):
         days = 0
     out = {"total": cfg["total"], "cycle_start": cfg["cycle_start"],
            "cycle_end": cfg["cycle_end"], "cover_days": days}
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(out, f, ensure_ascii=False, indent=2)
+    fsutil.save_json(CONFIG_PATH, out, indent=2)     # 同 save_config：不能被读端看到半截
     return out
 
 
@@ -297,6 +297,9 @@ class UsageService:
     def __init__(self):
         self._data = None
         self._lock = threading.Lock()
+        # 构建锁：主窗与小窗各自每 60 秒调一次 refresh_usage，两个 js_api 线程
+        # 会同时 _build_safe 扫同一个目录、互相覆盖缓存。拿不到就复用现有结果。
+        self._build_lock = threading.Lock()
         self._thread = None
         self._started_at = 0
         self.source = data_source.resolve()   # 最近一次解析到的数据目录
@@ -348,13 +351,21 @@ class UsageService:
     # ---------- 构建 ----------
 
     def _build_safe(self, force=False):
+        if not self._build_lock.acquire(blocking=False):
+            # 已经有一次构建在跑（另一个窗口刚触发）：直接返回现有结果，
+            # 让调用方 get() 去等那一次，别两倍 IO 扫同一个目录。
+            log("build skipped: another build in progress")
+            return
         try:
-            data = self._build(force)
-        except Exception as e:
-            data = self._empty()
-            data["meta"]["error"] = str(e)
-        with self._lock:
-            self._data = data
+            try:
+                data = self._build(force)
+            except Exception as e:
+                data = self._empty()
+                data["meta"]["error"] = str(e)
+            with self._lock:
+                self._data = data
+        finally:
+            self._build_lock.release()
 
     def _empty(self):
         now = dt.datetime.now()
@@ -380,7 +391,7 @@ class UsageService:
             "hourly": [{"hour": h, "label": f"{h:02d}:00", "points": 0, "requests": 0,
                         "tokens": 0, "isFuture": h > now.hour, "isNow": h == now.hour} for h in range(24)],
             "models": [], "models30": [], "tasks": [], "projects": [], "projects7": [],
-            "daily": daily,
+            "daily": daily, "dailyAll": [],
             "week": [{"date": "", "weekday": "", "total": 0, "values": [0, 0, 0, 0, 0], "isToday": i == 6} for i in range(7)],
             "heat": [], "heatMax": 1, "ledger": [], "recent": [], "insights": [],
             "avg7": 0, "daysLeft": 0, "peakHour": 0, "peakPoints": 0,
@@ -866,6 +877,15 @@ class UsageService:
             days_all = len(all_days)
             first_all = min(all_days).strftime("%Y-%m-%d") if all_days else ""
 
+        # 全量按天（台账口径，跨年保留）：本机消耗卡的「自选区间」要用它。
+        # daily 只有最近 30 天，选一个月前的区间就没数据可查了。
+        daily_all = [{"date": k, "points": round(float(v.get("points") or 0), 2),
+                      "calls": int(v.get("calls") or 0)}
+                     for k, v in sorted((ledger_days or {}).items())]
+        if not daily_all:
+            daily_all = [{"date": d.isoformat(), "points": round(v, 2),
+                          "calls": by_day_req.get(d, 0)} for d, v in sorted(by_day.items())]
+
         # 最近 72 小时逐笔时间线：[毫秒时间戳, 积分]
         # 用途：云端余额是"上次同步那一刻"的快照，减去这段时间本地又花掉的量，
         # 才是此刻真实的可用积分（云端入账有延迟，单靠余额会偏高）。
@@ -996,6 +1016,7 @@ class UsageService:
             "firstDayAll": first_all,
             "ledgerDays": len(ledger_days),
             "daily": daily,
+            "dailyAll": daily_all,
             "week": week,
             "heat": heat,
             "heatMax": heat_max,

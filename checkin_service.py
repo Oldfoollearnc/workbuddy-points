@@ -1017,6 +1017,7 @@ class CheckinService:
             out["ok"] = True
             self._read_truth(out)
             self._reconcile(out)
+            self._save_cache()      # 校准后的结论同样要落盘，否则重启就丢
             return out
         finally:
             if got:
@@ -1098,6 +1099,9 @@ class CheckinService:
             truth = {"ok": True, "checkin": None, "travel": None}
             self._read_truth(truth)
             self._reconcile(truth)
+            # 手动动作的结论也要落盘。run() 里会存，act() 少这一句，
+            # 结果是"刚签完就退出程序"，下次启动又当没签过重新问一遍。
+            self._save_cache()
             return out
         finally:
             if got:

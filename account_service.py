@@ -1031,11 +1031,11 @@ class AccountService:
                 _log("logout: session.bin removed")
         except Exception as e:
             _log(f"logout: remove session failed {e}")
-        # 缓存只留设置项，账号数据不留在磁盘上
+        # 缓存只留设置项，账号数据不留在磁盘上。
+        # 必须原子写：这是唯一一处绕过 _save_cache 的落盘，直接 open(w) 会把文件先截断，
+        # 同一时刻在跑的后台同步或界面读取可能正好读到半截 JSON。
         try:
-            os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-            with open(CACHE, "w", encoding="utf-8") as f:
-                json.dump(keep, f, ensure_ascii=False, indent=2)
+            fsutil.save_json(CACHE, keep, indent=2)
         except Exception as e:
             _log(f"logout: write cache failed {e}")
         self._clear_profile_cookies()

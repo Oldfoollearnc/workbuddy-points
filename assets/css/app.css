@@ -2603,6 +2603,45 @@ body[data-mode="popup"] .rz { display: none; }
 .lc-row { display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; color: var(--text-3); }
 .lc-row b { font-size: 12.5px; font-weight: 600; color: var(--text-1); font-variant-numeric: tabular-nums; }
 .lc-note { margin: 2px 0 0; font-size: 10.5px; color: var(--text-3); }
+/* 本机消耗：自选日期区间（浮层里的月历） */
+.lc-link {
+  margin-left: auto; padding: 2px 8px; border: 0; border-radius: 99px;
+  background: var(--brand-soft); color: var(--brand);
+  font-size: 10.5px; font-weight: 600; cursor: pointer;
+}
+.lc-link:hover { filter: brightness(.96); }
+.lc-link.is-on { background: var(--brand); color: #fff; }
+.rp-head { display: flex; align-items: center; gap: 8px; margin: 2px 0 10px; }
+.rp-nav {
+  width: 24px; height: 24px; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--surface-1); color: var(--text-2); cursor: pointer; line-height: 1;
+}
+.rp-nav:hover { border-color: var(--border-2); }
+.rp-month { font-size: 12.5px; font-weight: 600; color: var(--text-1); min-width: 88px; text-align: center; }
+.rp-quick { margin-left: auto; display: flex; gap: 4px; }
+.rp-quick button {
+  border: 1px solid var(--border); background: var(--surface-1); color: var(--text-2);
+  border-radius: 99px; padding: 2px 8px; font-size: 10.5px; cursor: pointer;
+}
+.rp-quick button:hover { border-color: var(--brand); color: var(--brand); }
+.rp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.rp-wd { text-align: center; font-size: 10px; color: var(--text-3); padding-bottom: 2px; }
+.rp-cell {
+  height: 30px; display: flex; align-items: center; justify-content: center;
+  border-radius: 8px; font-size: 11px; color: var(--text-3);
+  cursor: pointer; user-select: none; font-variant-numeric: tabular-nums;
+}
+.rp-cell.is-blank { cursor: default; }
+.rp-cell.has { color: var(--text-1); background: var(--surface-3); }
+.rp-cell.in { background: var(--brand-soft); color: var(--brand); }
+.rp-cell.edge { background: var(--brand); color: #fff; }
+.rp-cell.is-today { box-shadow: inset 0 0 0 1px var(--border-2); }
+.rp-sum {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border);
+}
+.rp-sum b { font-size: 20px; font-variant-numeric: tabular-nums; }
+.rp-sum span { font-size: 11px; color: var(--text-3); }
 @media (max-width: 1100px) {
   .local-card { flex-direction: column; gap: 14px; }
   .lc-side { flex: none; padding-left: 0; padding-top: 12px; border-left: 0; border-top: 1px solid var(--border); }

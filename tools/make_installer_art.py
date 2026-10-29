@@ -7,6 +7,10 @@
 - 4 倍超采样后再缩小，中文字形在 100%/125%/150% DPI 下都锐利；
 - 版本/文案调整时重跑一次即可，不需要美术资源。
 
+这一版的设计：左图改成整幅深蓝渐变（带两圈光晕 + 斜向高光），文字白系，
+比原来白底 + 三行小字更接近现代安装器的观感；右上角小图保留图标但带透明通道
+（配合 .iss 里的 WizardSmallImageAlphaFormat=defined，深色模式下不会出现白底方块）。
+
 产物（installer/art/）：
     wizard.png / wizard@2x.png         左侧竖图 164x314 / 328x628
     wizard-small.png / @2x            右上小图 55x55 / 110x110
@@ -25,13 +29,10 @@ ICON = os.path.join(ROOT, "assets", "icon.png")
 SS = 4                      # 超采样倍数
 W, H = 164, 314             # modern 样式左侧图尺寸（逻辑像素）
 
-# 配色取自 assets/css/tokens.css 亮色主题，保证安装器与程序同一套观感
+# 与 assets/css/tokens.css 的亮色主题同源：品牌蓝为主，往深蓝压出层次
+TOP = (13, 35, 82)          # 顶部：近黑的深蓝
+BOT = (37, 99, 235)         # 底部：--brand
 WHITE = (255, 255, 255)
-INK = (12, 26, 48)          # --text-1  #0c1a30
-INK_2 = (71, 85, 105)       # 次级文字
-INK_3 = (148, 163, 184)     # 弱化文字
-BRAND = (37, 99, 235)       # --brand   #2563eb
-LINE = (226, 232, 240)      # 分隔线
 
 FONT_DIR = os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts")
 
@@ -54,64 +55,104 @@ def px(v):
     return int(round(v * SS))
 
 
+def lerp(a, b, t):
+    return tuple(int(round(a[i] + (b[i] - a[i]) * t)) for i in range(3))
+
+
 def draw_wizard():
-    img = Image.new("RGB", (W * SS, H * SS), WHITE)
-    d = ImageDraw.Draw(img)
+    img = Image.new("RGBA", (W * SS, H * SS), TOP + (255,))
+    d = ImageDraw.Draw(img, "RGBA")
 
-    # 顶部 3px 品牌色带：给白底一个明确的起点，不喧哗
-    d.rectangle([0, 0, W * SS, px(3)], fill=BRAND)
+    # 竖向渐变：每行一条，超采样下也没有可见条带
+    for y in range(H * SS):
+        t = y / float(H * SS - 1)
+        # 前 2/3 慢一点过渡，底部快速提亮，视觉重心落在文字区
+        t = t ** 0.85
+        d.line([(0, y), (W * SS, y)], fill=lerp(TOP, BOT, t) + (255,))
 
-    # 图标 52x52，圆角已在 png 内
-    icon_px = px(52)
+    # 右上角光晕：两圈半透明白，营造"聚光"
+    cx, cy = px(150), px(20)
+    for r, a in ((px(96), 26), (px(64), 30), (px(38), 34)):
+        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(255, 255, 255, a))
+
+    # 左下斜向高光带
+    d.polygon([(0, px(196)), (W * SS, px(132)), (W * SS, px(168)), (0, px(232))],
+              fill=(255, 255, 255, 14))
+
+    # 图标放在半透明圆角方块里，避免深底上图标边缘发灰
+    icon_px = px(56)
+    tile = px(64)
+    ix, iy = px(22), px(38)
+    d.rounded_rectangle([ix - px(4), iy - px(4), ix - px(4) + tile, iy - px(4) + tile],
+                        radius=px(18), fill=(255, 255, 255, 34))
     icon = Image.open(ICON).convert("RGBA").resize((icon_px, icon_px), Image.LANCZOS)
-    ix, iy = px(24), px(40)
     img.paste(icon, (ix, iy), icon)
 
-    f_en = font("seguisb.ttf", px(22), "segoeuib.ttf")
-    f_zh = font("msyhbd.ttc", px(19), "msyh.ttc")
-    f_body = font("msyh.ttc", px(10.5))
-    f_foot = font("msyh.ttc", px(8.5))
+    f_en = font("seguisb.ttf", px(21), "segoeuib.ttf")
+    f_zh = font("msyhbd.ttc", px(18), "msyh.ttc")
+    f_tag = font("msyh.ttc", px(9))
+    f_body = font("msyh.ttc", px(9.5))
+    f_foot = font("msyh.ttc", px(8))
 
-    y = iy + icon_px + px(18)
-    d.text((px(24), y), "WorkBuddy", font=f_en, fill=INK)
+    y = iy + tile + px(16)
+    d.text((px(22), y), "WorkBuddy", font=f_en, fill=WHITE)
+    y += px(27)
+    d.text((px(22), y), "积分观测台", font=f_zh, fill=(235, 242, 255))
+
+    # 品牌短横线（白，半透明）
     y += px(30)
-    d.text((px(24), y), "积分观测台", font=f_zh, fill=INK)
+    d.rounded_rectangle([px(22), y, px(22) + px(28), y + px(2.4)],
+                        radius=px(1.2), fill=(255, 255, 255, 210))
 
-    # 品牌短横线
-    y += px(36)
-    d.rectangle([px(24), y, px(24) + px(26), y + px(2)], fill=BRAND)
+    y += px(15)
+    d.text((px(22), y), "看得见每一分花在哪", font=f_tag, fill=(210, 225, 250))
 
-    # 三行卖点，等距排列
-    y += px(16)
+    # 三条卖点：左侧小白点 + 文案
+    y += px(30)
     for line in ("本机额度实时可见", "云端逐笔可对账", "数据只留本机"):
-        d.text((px(24), y), line, font=f_body, fill=INK_2)
-        y += px(19)
+        d.ellipse([px(22), y + px(4), px(22) + px(3.2), y + px(7.2)], fill=(255, 255, 255, 230))
+        d.text((px(30), y), line, font=f_body, fill=(222, 233, 250))
+        y += px(20)
 
     # 底部说明
-    fy = H * SS - px(38)
-    d.line([px(24), fy - px(10), W * SS - px(24), fy - px(10)], fill=LINE, width=max(1, px(0.6)))
-    d.text((px(24), fy), "升级安装保留登录状态", font=f_foot, fill=(100, 116, 139))
+    fy = H * SS - px(34)
+    d.line([px(22), fy - px(12), W * SS - px(22), fy - px(12)], fill=(255, 255, 255, 60),
+           width=max(1, px(0.6)))
+    d.text((px(22), fy), "升级安装保留登录状态", font=f_foot, fill=(200, 216, 240))
 
     return img
 
 
 def draw_small():
-    img = Image.new("RGBA", (55 * SS, 55 * SS), (0, 0, 0, 0))
-    icon_px = px(44)
+    """右上角小图：品牌色圆角块 + 图标。
+
+    Inno 对「小图」没有 alpha 指令，透明 PNG 会被合到白底上，深色向导里就是一块白方块；
+    所以这里直接画成不透明的圆角方块，浅色/深色都成立。
+    """
+    size = 55 * SS
+    img = Image.new("RGB", (size, size), TOP)
+    d = ImageDraw.Draw(img)
+    for y in range(size):
+        d.line([(0, y), (size, y)], fill=lerp(TOP, BOT, y / float(size - 1)))
+    mask = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, size - 1, size - 1], radius=px(13), fill=255)
+    out = Image.new("RGB", (size, size), (255, 255, 255))
+    out.paste(img, (0, 0), mask)
+    icon_px = px(38)
     icon = Image.open(ICON).convert("RGBA").resize((icon_px, icon_px), Image.LANCZOS)
-    img.paste(icon, ((55 * SS - icon_px) // 2, (55 * SS - icon_px) // 2), icon)
-    return img
+    out.paste(icon, ((size - icon_px) // 2, (size - icon_px) // 2), icon)
+    return out
 
 
 def main():
     os.makedirs(OUT, exist_ok=True)
     big = draw_wizard()
     big.resize((W, H), Image.LANCZOS).save(os.path.join(OUT, "wizard.png"))
-    big.save(os.path.join(OUT, "wizard@2x.png"))
+    big.save(os.path.join(OUT, "wizard@2x.png"))       # 328x628，2x DPI
 
     small = draw_small()
     small.resize((55, 55), Image.LANCZOS).save(os.path.join(OUT, "wizard-small.png"))
-    small.save(os.path.join(OUT, "wizard-small@2x.png"))
+    small.save(os.path.join(OUT, "wizard-small@2x.png"))   # 保留 RGBA
 
     for name in ("wizard.png", "wizard@2x.png", "wizard-small.png", "wizard-small@2x.png"):
         p = os.path.join(OUT, name)

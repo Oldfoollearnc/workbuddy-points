@@ -49,7 +49,9 @@
     view: HASH_VIEW || 'overview',
     range: 7,
     quotaRange: 'week',
-    localRange: '30',      // 本机消耗卡：7 / 30 / month / all
+    localRange: '30',      // 本机消耗卡：7 / 30 / month / all / custom
+    localSel: null,        // 自选区间 {start:'YYYY-MM-DD', end:'YYYY-MM-DD'}
+    rpMonth: '',           // 区间选择器当前显示的月份 'YYYY-MM'
     projRange: '7',        // 项目排行：7 / 30 / month
     ledgerType: 'all',
     ledgerQuery: '',
@@ -1162,7 +1164,11 @@
   }
 
   function detailComp() {
-    const models = (D.modelsToday && D.modelsToday.length ? D.modelsToday : (D.models || [])).slice();
+    // 云端口径优先：本机没有 WorkBuddy 会话时（比如整天只用 CodeBuddy），
+    // D.modelsToday 是空的，但 todayStat() 里还有云端逐笔，不能报"今天还没有消耗"。
+    const stat = todayStat();
+    const models = (D.modelsToday && D.modelsToday.length ? D.modelsToday
+      : (stat.models && stat.models.length ? stat.models : (D.models || []))).slice();
     const projs = (D.projectsToday || []).slice();
     const purposes = (D.purposesToday || []).slice();
     if (!models.length && !projs.length) return { title: '今日消耗构成', sub: '今天还没有消耗', html: detailEmpty() };
@@ -1233,7 +1239,7 @@
       sub: '本机 = 这台机器的会话记录；账号 = 云端逐笔（含其它设备）',
       html: detailKpis([
         ['本机机器', esc((D.meta && D.meta.machine) || '本机')],
-        ['记录覆盖', ((D.meta && D.meta.daysAll) || 0) + ' 天'],
+        ['记录覆盖', ((D.meta && (D.meta.daysAll || D.meta.daysTotal)) || 0) + ' 天'],
         ['账号可用', hasQuota() ? F.credit(acc.available) + ' 分' : '—']
       ]) + detailTable(
         [{ label: '周期' }, { label: '本机', num: true }, { label: '账号同期', num: true },
@@ -2407,6 +2413,10 @@
   function localPeriodSum(range) {
     const daily = Array.isArray(D.daily) ? D.daily : [];
     const sum = arr => arr.reduce((s, d) => s + (Number(d.consumed) || 0), 0);
+    if (range === 'custom') {
+      const sel = state.localSel;
+      return sel ? rangeSum(sel.start, sel.end).points : 0;
+    }
     if (range === 'all') {
       const all = Number(D.totalAll);
       return Number.isFinite(all) && all > 0 ? all : sum(daily);
@@ -2419,6 +2429,180 @@
       }));
     }
     return sum(daily.slice(-Number(range)));
+  }
+
+  /* ---------------- 本机消耗：自选日期区间 ---------------- */
+
+  /** 本机按天全量：优先 dailyAll（台账口径、跨年保留），旧缓存只有近 30 天的 daily。 */
+  function localDayMap() {
+    const year = new Date().getFullYear();
+    const src = (Array.isArray(D.dailyAll) && D.dailyAll.length)
+      ? D.dailyAll
+      : (D.daily || []).map(d => ({
+        date: d.date && d.date.length === 5 ? `${year}-${d.date}` : d.date,
+        points: d.consumed || 0,
+        calls: d.calls || 0
+      }));
+    const map = {};
+    src.forEach(d => {
+      if (d && d.date) map[d.date] = { points: Number(d.points) || 0, calls: Number(d.calls) || 0 };
+    });
+    return map;
+  }
+
+  /** [start, end] 闭区间的本机消耗；起止写反了自动交换。 */
+  function rangeSum(start, end) {
+    const a = start <= end ? start : end;
+    const b = start <= end ? end : start;
+    const map = localDayMap();
+    let points = 0, calls = 0, days = 0, active = 0;
+    const cur = new Date(a + 'T00:00:00');
+    const last = new Date(b + 'T00:00:00');
+    while (cur <= last) {
+      days += 1;
+      const rec = map[dayKeyOf(cur)];
+      if (rec) {
+        points += rec.points;
+        calls += rec.calls;
+        if (rec.points > 0) active += 1;
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+    return { start: a, end: b, points: round2(points), calls, days, active };
+  }
+
+  let rpDrag = false;
+  window.addEventListener('pointerup', () => { rpDrag = false; });
+
+  function applyRange(sel) {
+    state.localSel = sel;
+    state.localRange = 'custom';
+    renderLocalCard();
+    const btn = $('#lcPick');
+    if (btn) btn.classList.add('is-on');
+  }
+
+  function rpRender() {
+    const [y, m] = String(state.rpMonth || dayKeyOf(new Date()).slice(0, 7)).split('-').map(Number);
+    const first = new Date(y, m - 1, 1);
+    const total = new Date(y, m, 0).getDate();
+    const lead = (first.getDay() + 6) % 7;      // 周一开头
+    const map = localDayMap();
+    const sel = state.localSel || {};
+    const a = sel.start, b = sel.end;
+    const lo = a && b ? (a <= b ? a : b) : '', hi = a && b ? (a <= b ? b : a) : '';
+    const today = dayKeyOf(new Date());
+
+    let html = '一二三四五六日'.split('').map(w => `<span class="rp-wd">${w}</span>`).join('');
+    for (let i = 0; i < lead; i++) html += '<span class="rp-cell is-blank"></span>';
+    for (let d = 1; d <= total; d++) {
+      const key = `${y}-${F.pad(m)}-${F.pad(d)}`;
+      const rec = map[key];
+      const cls = ['rp-cell'];
+      if (rec && rec.points > 0) cls.push('has');
+      if (lo && key >= lo && key <= hi) cls.push('in');
+      if (key === a || key === b) cls.push('edge');
+      if (key === today) cls.push('is-today');
+      const tip = rec && rec.points > 0 ? ` title="${esc(F.credit(rec.points))} 分"` : '';
+      html += `<span class="${cls.join(' ')}" data-d="${key}"${tip}>${d}</span>`;
+    }
+    setText('#rpMonth', `${y} 年 ${m} 月`);
+    const grid = $('#rpGrid');
+    if (grid) grid.innerHTML = html;
+
+    const sum = $('#rpSum');
+    if (!sum) return;
+    if (!lo) { sum.innerHTML = '<span>点一天，或按住拖一段</span>'; return; }
+    const r = rangeSum(lo, hi);
+    const avg = r.active ? r.points / r.active : 0;
+    sum.innerHTML = `<b>${F.credit(r.points)} 分</b><span>${lo === hi ? lo : lo + ' ~ ' + hi}`
+      + ` · ${r.days} 天（有记录 ${r.active} 天） · 有记录日均 ${F.credit(avg)} 分</span>`;
+  }
+
+  function bindRangePicker() {
+    const grid = $('#rpGrid');
+    if (!grid) return;
+    const prev = $('#rpPrev'), next = $('#rpNext'), quick = $('#rpQuick');
+    const shift = n => {
+      const [y, m] = state.rpMonth.split('-').map(Number);
+      const d = new Date(y, m - 1 + n, 1);
+      state.rpMonth = `${d.getFullYear()}-${F.pad(d.getMonth() + 1)}`;
+      rpRender();
+    };
+    if (prev) prev.addEventListener('click', () => shift(-1));
+    if (next) next.addEventListener('click', () => shift(1));
+    if (quick) quick.addEventListener('click', e => {
+      const b = e.target.closest('button[data-rp]');
+      if (!b) return;
+      const now = new Date();
+      const end = dayKeyOf(now);
+      let start = end;
+      if (b.dataset.rp === '7' || b.dataset.rp === '30') {
+        start = dayKeyOf(new Date(now.getTime() - (Number(b.dataset.rp) - 1) * 86400000));
+      } else if (b.dataset.rp === 'month') {
+        start = `${end.slice(0, 7)}-01`;
+      } else {
+        const keys = Object.keys(localDayMap()).sort();
+        start = keys.length ? keys[0] : end;
+      }
+      state.rpMonth = end.slice(0, 7);
+      applyRange({ start, end });
+      rpRender();
+    });
+
+    const cellAt = e => {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      return el && el.closest ? el.closest('.rp-cell[data-d]') : null;
+    };
+    grid.addEventListener('pointerdown', e => {
+      const c = e.target.closest ? e.target.closest('.rp-cell[data-d]') : null;
+      if (!c) return;
+      e.preventDefault();
+      const cur = state.localSel || {};
+      // 已经选中了单日时，再点另一天 = 设终点（不拖也能选区间）
+      if (cur.start && cur.end && cur.start === cur.end && c.dataset.d !== cur.start) {
+        applyRange({ start: cur.start, end: c.dataset.d });
+        rpDrag = false;
+      } else {
+        applyRange({ start: c.dataset.d, end: c.dataset.d });
+        rpDrag = true;
+        try { grid.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      }
+      rpRender();
+    });
+    grid.addEventListener('pointermove', e => {
+      if (!rpDrag) return;
+      const c = cellAt(e);
+      if (!c) return;
+      const cur = state.localSel || {};
+      if (c.dataset.d === cur.end) return;
+      applyRange({ start: cur.start || c.dataset.d, end: c.dataset.d });
+      rpRender();
+    });
+  }
+
+  function openRangePicker() {
+    const today = dayKeyOf(new Date());
+    const sel = state.localSel || { start: today, end: today };
+    state.localSel = sel;
+    state.rpMonth = (state.rpMonth || sel.end || today).slice(0, 7);
+    showDetailPanel('本机消耗 · 按日期',
+      '点一天 = 单日；再点另一天 = 区间；也可以按住拖动选一段。只统计这台机器的会话记录',
+      `<div class="rp-head">
+        <button class="rp-nav" id="rpPrev" aria-label="上个月">‹</button>
+        <span class="rp-month" id="rpMonth">—</span>
+        <button class="rp-nav" id="rpNext" aria-label="下个月">›</button>
+        <span class="rp-quick" id="rpQuick">
+          <button data-rp="7">近 7 天</button>
+          <button data-rp="30">近 30 天</button>
+          <button data-rp="month">本月</button>
+          <button data-rp="all">全部</button>
+        </span>
+      </div>
+      <div class="rp-grid" id="rpGrid"></div>
+      <div class="rp-sum" id="rpSum"></div>`);
+    bindRangePicker();
+    rpRender();
   }
 
   /** 云端逐笔的积分字段叫 credit（本机 ledger 才叫 points），两个都认。 */
@@ -2435,7 +2619,8 @@
     if (range === 'all') {
       // 「全部」要对齐本机记录的起点，否则本机 60 天、云端 30 天，
       // 两边时间窗不一样，算出来的"其他设备"是假的。
-      const first = (D.meta && D.meta.firstDayAll) || '';
+      // 后端给的是 meta.firstDay，早期前端写的是 firstDayAll，两个都认。
+      const first = (D.meta && (D.meta.firstDayAll || D.meta.firstDay)) || '';
       const from = first ? new Date(first + 'T00:00:00').getTime() : NaN;
       if (!Number.isFinite(from)) return rows.reduce((s, r) => s + rowCredit(r), 0);
       cut = from;
@@ -2459,7 +2644,7 @@
     if (!days || !days.length) return null;
     let cut;
     if (range === 'all') {
-      const first = (D.meta && D.meta.firstDayAll) || '';
+      const first = (D.meta && (D.meta.firstDayAll || D.meta.firstDay)) || '';
       const from = first ? new Date(first + 'T00:00:00').getTime() : NaN;
       cut = Number.isFinite(from) ? from : -Infinity;
     } else if (range === 'month') {
@@ -2515,12 +2700,23 @@
     }
 
     const dailyArr = Array.isArray(D.daily) ? D.daily : [];
-    const days = Number(D.meta && D.meta.daysAll)
+    const days = Number(D.meta && (D.meta.daysAll || D.meta.daysTotal))
       || dailyArr.filter(d => (Number(d.consumed) || 0) > 0).length;
-    const first = (D.meta && D.meta.firstDayAll) || '';
-    let note = range === 'all'
-      ? (days ? `本机记录共 ${days} 天${first ? '，从 ' + first + ' 起' : ''}` : '本机还没有可用记录')
-      : '只统计这台机器的 WorkBuddy 会话记录';
+    const first = (D.meta && (D.meta.firstDayAll || D.meta.firstDay)) || '';
+    let note;
+    if (range === 'custom' && state.localSel) {
+      const r = rangeSum(state.localSel.start, state.localSel.end);
+      note = `${r.start === r.end ? r.start : r.start + ' ~ ' + r.end} · 自选区间，仅本机记录`;
+    } else {
+      note = range === 'all'
+        ? (days ? `本机记录共 ${days} 天${first ? '，从 ' + first + ' 起' : ''}` : '本机还没有可用记录')
+        : '只统计这台机器的 WorkBuddy 会话记录';
+    }
+    const pickBtn = $('#lcPick');
+    if (pickBtn) {
+      pickBtn.classList.toggle('is-on', range === 'custom');
+      pickBtn.textContent = range === 'custom' ? '换日期' : '按日期';
+    }
     if (!(cloud && cloud > 0)) {
       note += connected ? ' · 云端同期没有逐笔数据' : ' · 连上账号后可对比占比';
     }
@@ -4140,8 +4336,11 @@
       const b = e.target.closest('button[data-lc]');
       if (!b) return;
       state.localRange = b.dataset.lc;
+      state.localSel = null;          // 点预设周期 = 退出自选区间
       renderLocalCard();
     });
+    const lcPick = $('#lcPick');
+    if (lcPick) lcPick.addEventListener('click', openRangePicker);
     const projSeg = $('#projSeg');
     if (projSeg) projSeg.addEventListener('click', e => {
       const b = e.target.closest('button[data-proj]');

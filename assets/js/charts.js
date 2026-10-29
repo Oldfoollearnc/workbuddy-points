@@ -165,6 +165,14 @@
     return tipEl;
   }
 
+  /**
+   * HTML 转义：tooltip 是 innerHTML 拼的，模型名来自服务端、项目名来自本地目录名，
+   * 都可能带 < > & 。不转义时一个叫 `a<img onerror=...>` 的项目就能在图例提示里执行脚本。
+   * app.js 有自己的 esc()，这里是 charts 内部用的同一套规则（charts 不依赖 app.js）。
+   */
+  const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
   function showTip(html, x, y) {
     const t = tipNode();
     if (!t) return;
@@ -471,7 +479,7 @@
           const rows = [{ color, name: valLabel, value: `${fmt(d.value)} ${valUnit}` }];
           if (typeof cfg.extraTip === 'function') rows.push(...(cfg.extraTip(d) || []));
           rows.push({ name: '占比', value: pct(share) });
-          return `<div class="tt-title">${d.name}</div>${tipRows(rows)}`;
+          return `<div class="tt-title">${esc(d.name)}</div>${tipRows(rows)}`;
         };
         const seg = el('circle', {
           cx, cy, r, fill: 'none',
@@ -636,12 +644,12 @@
         });
 
         row.addEventListener('mouseenter', ev => {
-          showTip(`<div class="tt-title">${d.name}</div>${tipRows([
+          showTip(`<div class="tt-title">${esc(d.name)}</div>${tipRows([
             { color: d.tone ? toneColor(d.tone) : token('--brand'), name: '消耗', value: fmt(d.value) + ' 分' },
             { name: '占今日', value: pct(d.value / total) }
           ])}`, ev.clientX, ev.clientY);
         });
-        row.addEventListener('mousemove', ev => showTip(`<div class="tt-title">${d.name}</div>${tipRows([
+        row.addEventListener('mousemove', ev => showTip(`<div class="tt-title">${esc(d.name)}</div>${tipRows([
           { color: d.tone ? toneColor(d.tone) : token('--brand'), name: '消耗', value: fmt(d.value) + ' 分' },
           { name: '占今日', value: pct(d.value / total) }
         ])}`, ev.clientX, ev.clientY));
@@ -670,12 +678,12 @@
           cell.style.background = v <= 0 ? 'var(--surface-3)' : hexToRgba(base, a.toFixed(3));
           cell.style.animationDelay = (ri * 46 + i * 6) + 'ms';
           cell.addEventListener('mouseenter', ev => {
-            showTip(`<div class="tt-title">${row.name} · ${String(i).padStart(2, '0')}:00</div>${tipRows([
+            showTip(`<div class="tt-title">${esc(row.name)} · ${String(i).padStart(2, '0')}:00</div>${tipRows([
               { color: base, name: '消耗', value: fmt(v) + ' 分' },
               { name: '占今日', value: pct(v / (cfg.total || 1)) }
             ])}`, ev.clientX, ev.clientY);
           });
-          cell.addEventListener('mousemove', ev => showTip(`<div class="tt-title">${row.name} · ${String(i).padStart(2, '0')}:00</div>${tipRows([
+          cell.addEventListener('mousemove', ev => showTip(`<div class="tt-title">${esc(row.name)} · ${String(i).padStart(2, '0')}:00</div>${tipRows([
             { color: base, name: '消耗', value: fmt(v) + ' 分' },
             { name: '占今日', value: pct(v / (cfg.total || 1)) }
           ])}`, ev.clientX, ev.clientY));

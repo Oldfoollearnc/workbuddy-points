@@ -8,8 +8,11 @@
 ; 2) 唯一外部依赖是微软 WebView2 运行时（Win10 1803+ 通常自带，Win11 自带）。
 ;    安装前检测，缺失时提示下载地址，不静默失败。
 ; 3) 用户数据写在 %APPDATA%\WorkBuddyPoints，升级/卸载默认保留（登录态、额度缓存、日志）。
-; 4) 重复安装：检测已装版本——高于已装版本提示"更新/卸载"，同版本提示"重装/卸载"，
-;    低于已装版本提示"降级/卸载"，三个分支都不会动 %APPDATA% 里的用户数据。
+; 4) 重复安装：检测已装版本——高于已装版本提示"更新"，同版本提示"重装"，
+;    低于已装版本提示"降级"，都不动 %APPDATA% 里的用户数据。
+; 5) **本安装包只负责安装，不提供卸载**：Uninstallable=no，不生成 unins000.exe、
+;    不在「应用和功能」里留卸载项、开始菜单也没有卸载快捷方式。
+;    要彻底移除时直接删掉安装目录即可（用户数据在 %APPDATA%，本来就不在安装目录里）。
 
 #define MyAppName "WorkBuddy 积分观测台"
 #define MyAppShortName "WorkBuddy Points"
@@ -35,17 +38,24 @@ DisableProgramGroupPage=yes
 OutputDir=Output
 OutputBaseFilename=WorkBuddyPoints-Setup-{#MyVersion}
 SetupIconFile=..\assets\icon.ico
-UninstallDisplayIcon={app}\{#MyAppExeName}
-UninstallDisplayName={#MyAppName}
+; 安装包不提供卸载：不生成卸载程序、不写「应用和功能」条目
+Uninstallable=no
+AppPublisherURL=https://github.com/Oldfoollearnc/workbuddy-points
+AppSupportURL=https://github.com/Oldfoollearnc/workbuddy-points/issues
+AppUpdatesURL=https://github.com/Oldfoollearnc/workbuddy-points/releases
 ; lzma2/max 与 ultra64 实测只差 ~60KB，但 ultra64 要 1GB+ 内存、偶发 "Out of memory"，
 ; 压缩比收益远小于编译失败风险，保持 max
 Compression=lzma2/max
 SolidCompression=yes
-WizardStyle=modern
-; 左侧品牌图 164x314（modern 样式），第二份是 200% DPI；右上角 55x55 小图
+; modern dynamic：跟随系统深色模式（Inno 6.3+），浅色/深色两套都不刺眼
+WizardStyle=modern dynamic
+; 左侧品牌图 164x314（modern 样式），第二份是 2x DPI；右上角 55x55 小图
 WizardImageFile=art\wizard.png,art\wizard@2x.png
 WizardSmallImageFile=art\wizard-small.png,art\wizard-small@2x.png
 WizardImageStretch=no
+; 左图整幅铺满并带 alpha；右上小图做成不透明的品牌色圆角块（Inno 对小图没有 alpha 指令，
+; 透明 PNG 会被合成到白底上，深色模式下会露白方块）
+WizardImageAlphaFormat=defined
 ; 文件属性里的版本信息，右键"属性 → 详细信息"能看出是什么包
 VersionInfoVersion={#MyVersion}
 VersionInfoProductName={#MyAppName}
@@ -84,7 +94,6 @@ Source: "安装说明.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--main"
-Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--main"; Tasks: desktopicon
 
 [Run]
@@ -92,10 +101,8 @@ Filename: "{app}\{#MyAppExeName}"; Parameters: "--main"; Description: "立即启
 
 [Registry]
 Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "WorkBuddyPoints"; ValueData: """{app}\WorkBuddyPoints.exe"" --tray"; Flags: uninsdeletevalue; Tasks: startupicon
-
-[UninstallDelete]
-; 只删程序目录；%APPDATA%\WorkBuddyPoints（登录态/缓存/日志）保留，避免卸载后重装要重新扫码
-Type: filesandordirs; Name: "{app}"
+; 自报版本：不生成卸载器就没有 Uninstall 注册表项，用这一条判断"本机装的是哪一版"
+Root: HKA; Subkey: "Software\WorkBuddyPoints"; ValueType: string; ValueName: "Version"; ValueData: "{#MyVersion}"; Flags: uninsdeletekey
 
 [Code]
 const
@@ -119,7 +126,13 @@ var
   v: String;
 begin
   Result := '';
-  if RegQueryStringValue(HKLM64, UNINST_KEY, 'DisplayVersion', v) then
+  { 新版本：安装包自己写的版本标记 }
+  if RegQueryStringValue(HKLM64, 'Software\WorkBuddyPoints', 'Version', v) then
+    Result := v
+  else if RegQueryStringValue(HKCU, 'Software\WorkBuddyPoints', 'Version', v) then
+    Result := v
+  { 旧版本（1.5x 及更早装了卸载器的）：从 Uninstall 项读，保证升级路径不断 }
+  else if RegQueryStringValue(HKLM64, UNINST_KEY, 'DisplayVersion', v) then
     Result := v
   else if RegQueryStringValue(HKLM32, UNINST_KEY, 'DisplayVersion', v) then
     Result := v
@@ -172,28 +185,6 @@ begin
   end;
 end;
 
-function UninstallPrevious(): Boolean;
-var
-  cmd: String;
-  rc: Integer;
-begin
-  Result := False;
-  if RegQueryStringValue(HKLM64, UNINST_KEY, 'UninstallString', cmd)
-     or RegQueryStringValue(HKLM32, UNINST_KEY, 'UninstallString', cmd)
-     or RegQueryStringValue(HKCU, UNINST_KEY, 'UninstallString', cmd) then
-  begin
-    cmd := RemoveQuotes(cmd);
-    if FileExists(cmd) then
-      Result := Exec(cmd, '/SILENT /NORESTART', '', SW_SHOW, ewWaitUntilTerminated, rc);
-  end;
-  if Result then
-    MsgBox('已卸载已安装版本。安装程序将退出；如需重新安装，请再次运行本安装包。',
-           mbInformation, MB_OK)
-  else
-    MsgBox('未能自动卸载。请到「设置 → 应用 → 已安装的应用」中手动卸载后重试。',
-           mbError, MB_OK);
-end;
-
 function InitializeSetup(): Boolean;
 var
   cur, question: String;
@@ -201,27 +192,26 @@ var
 begin
   Result := True;
 
-  { ---------- 已安装检测：更新 / 重装 / 降级 / 卸载 ---------- }
+  { ---------- 已安装检测：只提示更新 / 重装 / 降级，不提供卸载 ---------- }
   cur := GetInstalledVersion();
   if cur <> '' then
   begin
     cmp := CompareVer('{#MyVersion}', cur);
     if cmp > 0 then
       question := '检测到本机已安装 ' + cur + '，本安装包为 {#MyVersion}。' + #13#10 + #13#10 +
-                  '是(Y)：更新到 {#MyVersion}（账号登录、额度缓存、日志等本机数据全部保留）' + #13#10 +
-                  '否(N)：卸载已安装版本（卸载同样不删除用户数据）'
+                  '继续：更新到 {#MyVersion}（账号登录、额度缓存、日志等本机数据全部保留）' + #13#10 +
+                  '取消：什么都不做，直接退出安装'
     else if cmp = 0 then
       question := '本机已安装相同版本 ' + cur + '。' + #13#10 + #13#10 +
-                  '是(Y)：重新安装（覆盖程序文件，用户数据保留）' + #13#10 +
-                  '否(N)：卸载已安装版本'
+                  '继续：重新安装（覆盖程序文件，用户数据保留）' + #13#10 +
+                  '取消：什么都不做，直接退出安装'
     else
       question := '本机已安装更高版本 ' + cur + '，本安装包为 {#MyVersion}（属于降级安装）。' + #13#10 + #13#10 +
-                  '是(Y)：继续降级安装（用户数据保留）' + #13#10 +
-                  '否(N)：卸载已安装版本';
+                  '继续：继续降级安装（用户数据保留）' + #13#10 +
+                  '取消：什么都不做，直接退出安装';
 
     if MsgBox(question, mbConfirmation, MB_YESNO) = IDNO then
     begin
-      UninstallPrevious();
       Result := False;
       Exit;
     end;

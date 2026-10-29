@@ -34,6 +34,7 @@ import sqlite3
 import tempfile
 
 import app_paths
+import fsutil
 
 CONFIG = "datasource.json"
 DB_NAME = "workbuddy.db"
@@ -91,9 +92,10 @@ def read_config():
 
 
 def write_config(cfg):
+    # 原子写：这份配置每次聚合都会 read_config()，直接 open(w) 会先截断，
+    # 读端正好撞上就会拿到 {}，于是 resolve() 回落成自动探测 —— 数据目录会"自己跳走"。
     path = os.path.join(app_paths.data_dir(), CONFIG)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    fsutil.save_json(path, cfg, indent=2)
     return path
 
 

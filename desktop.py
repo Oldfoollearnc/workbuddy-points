@@ -1341,7 +1341,7 @@ class Api:
             home = src.get("home") or ""
             ok = bool(home) and os.path.isdir(home)
             add("数据目录", ok, home or "没有找到 .workbuddy 目录",
-                "" if ok else "在「数据源」里手动指定讨论目录")
+                "" if ok else "在「数据源」里手动指定数据目录")
         except Exception as e:
             add("数据目录", False, e)
 
