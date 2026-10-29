@@ -23,7 +23,7 @@
   const qs = new URLSearchParams(location.search);
 
   const HASH = location.hash.replace('#', '').split('&').filter(Boolean);
-  const HASH_MODE = HASH.find(x => x === 'popup' || x === 'main') || null;
+  const HASH_MODE = HASH.find(x => x === 'popup' || x === 'main' || x === 'mini') || null;
   const HASH_VIEW = HASH.find(x => ['overview', 'analytics', 'ledger', 'account', 'settings'].includes(x)) || null;
 
   // #tooltip 在标记里被包进了 .app-shell，而小窗模式下 .app-shell 是 display:none，
@@ -638,6 +638,7 @@
     const now = performance.now();
     if (!force && now - lastRender < 250) return;
     lastRender = now;
+    if (state.mode === 'mini') { safeRender('迷你条', renderMini); return; }
     if (state.mode === 'popup') { safeRender('小窗', renderPopup); return; }
     // 先统一标记"只出终态"，渲染完再把视野内的重绘成带生长动画的版本
     try { $$('[data-chart]').forEach(el => { el.dataset.anim = '0'; }); } catch (e) { /* ignore */ }
@@ -1948,6 +1949,62 @@
       parts.push(`猫猫到家，${t.reward || 0} 分待领`);
     }
     return parts.join(' · ');
+  }
+
+  /* ---------------- 迷你条（独立窗口） ---------------- */
+
+  /** 只回答三件事：今天花了多少、还能用多少、谁花的。 */
+  function renderMini() {
+    const stat = todayStat();
+    const acc = effAccount();
+    const configured = hasQuota();
+    setText('#miniToday', F.credit(stat.consumed));
+    setText('#miniAvail', configured ? F.credit(acc.available) : '—');
+    const opts = clientOptions();
+    const split = (opts ? opts.filter(o => o.id) : [])
+      .filter(o => o.points > 0).slice(0, 2)
+      .map(o => `${clientShort(o.name)} ${Math.round(o.points)}`);
+    setText('#miniSrc', split.length ? split.join(' · ') : (stat.cloud ? '云端' : '本机'));
+    const dot = $('#miniDot');
+    const budget = Number(prefs.dailyBudget) || 0;
+    if (dot) {
+      dot.classList.toggle('is-over', budget > 0 && stat.consumed > budget);
+      dot.classList.toggle('is-off', !(ACCOUNT && ACCOUNT.status === 'connected'));
+      dot.title = budget > 0
+        ? (stat.consumed > budget ? `超预算 ${F.credit(stat.consumed - budget)} 分` : `预算 ${F.credit(budget)} 分`)
+        : (ACCOUNT && ACCOUNT.status) || '';
+    }
+  }
+
+  /** 迷你条交互：拖 = 移动窗口，单击 = 展开小窗，双击 = 展开主窗，× = 收起。 */
+  function bindMini() {
+    const root = $('#miniShell');
+    if (!root || root.dataset.bound) return;
+    root.dataset.bound = '1';
+    let clickTimer = 0;
+    root.addEventListener('mousedown', e => {
+      if (e.button !== 0 || !bridge.has()) return;
+      if (e.target.closest('button')) return;
+      e.preventDefault();
+      if (bridge.can('mini_drag_start')) bridge.call('mini_drag_start');
+    });
+    root.addEventListener('click', e => {
+      if (e.target.closest('button')) return;
+      clearTimeout(clickTimer);
+      clickTimer = setTimeout(() => {
+        if (bridge.can('mini_expand')) bridge.call('mini_expand');
+      }, 220);
+    });
+    root.addEventListener('dblclick', e => {
+      if (e.target.closest('button')) return;
+      clearTimeout(clickTimer);
+      if (bridge.can('mini_main')) bridge.call('mini_main');
+    });
+    const close = $('#miniClose');
+    if (close) close.addEventListener('click', e => {
+      e.stopPropagation();
+      if (bridge.can('mini_hide')) bridge.call('mini_hide');
+    });
   }
 
   function renderPopup() {
@@ -4475,6 +4532,12 @@
       toast(popTvChip.title || '猫猫状态未就绪', 'i-info');
     });
     // 任务 chip：点开官方成长中心，用系统默认浏览器（不在本程序里塞网页）
+    // 小窗 → 迷你条：收起大块内容，只留一行数字，贴在屏幕边上不碍事
+    const popMini = $('#popMini');
+    if (popMini) popMini.addEventListener('click', () => {
+      if (bridge.can('mini_toggle')) bridge.call('mini_toggle');
+      else toast('桌面端才能收成迷你条', 'i-info');
+    });
     const popTkChip = $('#popTkChip');
     if (popTkChip) {
       popTkChip.title = '打开成长任务页';
@@ -4935,6 +4998,7 @@
 
     startBootText();
     bind();
+    if (state.mode === 'mini') bindMini();   // 迷你条只有三个交互：拖、点、关
     $$('#rangeSeg button').forEach(b => b.classList.toggle('is-active', String(b.dataset.range) === String(state.range)));
     setText('#syncTime', D.meta.updated || '—');
 

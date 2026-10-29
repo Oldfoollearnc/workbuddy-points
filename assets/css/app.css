@@ -2614,6 +2614,33 @@ body[data-mode="popup"] .rz { display: none; }
 .week-cmp-track i { display: block; height: 100%; border-radius: 99px; background: var(--brand); }
 .week-cmp-row.is-prev .week-cmp-track i { background: var(--border-2); }
 .week-cmp-val { min-width: 84px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); }
+
+/* ---------- 迷你条（独立窗口，常驻置顶） ---------- */
+.mini-shell { display: none; }
+body[data-mode="mini"] { background: transparent; overflow: hidden; }
+body[data-mode="mini"] .mini-shell {
+  display: flex; align-items: center; gap: 9px;
+  height: 100vh; box-sizing: border-box; padding: 0 10px;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, .14);
+  cursor: move; user-select: none;
+}
+.mini-shell b { font-size: 15px; font-variant-numeric: tabular-nums; color: var(--text-1); }
+.mini-shell em { font-style: normal; font-size: 10px; color: var(--text-3); margin-left: 1px; }
+.mini-sub { font-size: 10px; color: var(--text-3); margin-left: 5px; }
+.mini-side {
+  margin-left: auto; display: flex; flex-direction: column; align-items: flex-end;
+  gap: 1px; font-size: 9.5px; color: var(--text-3); line-height: 1.2;
+}
+.mini-side b { font-size: 11px; color: var(--text-2); }
+.mini-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); flex: none; }
+.mini-dot.is-over { background: var(--warn); }
+.mini-dot.is-off { background: var(--border-2); }
+.mini-close {
+  border: 0; background: none; color: var(--text-3); cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 2px 3px; border-radius: 6px;
+}
+.mini-close:hover { background: var(--surface-3); color: var(--text-1); }
 /* 本机消耗：自选日期区间（浮层里的月历） */
 .lc-link {
   margin-left: auto; padding: 2px 8px; border: 0; border-radius: 99px;

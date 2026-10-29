@@ -37,7 +37,8 @@ WM_ERASEBKGND = 0x0014
 WM_MOUSEMOVE = 0x0200
 WM_KEYDOWN = 0x0100
 WM_HOTKEY = 0x0312
-HOTKEY_ID = 1
+HOTKEY_ID = 1        # Ctrl+Alt+W：小窗
+HOTKEY_MINI = 2      # Ctrl+Alt+M：迷你条
 MOD_ALT, MOD_CONTROL, MOD_NOREPEAT = 0x0001, 0x0002, 0x4000
 user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wintypes.UINT]
 user32.UnregisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int]
@@ -241,7 +242,7 @@ class Tray:
 
     def __init__(self, icon_path, on_click=None, on_open_main=None, on_refresh=None, on_exit=None,
                  on_sync=None, on_autostart=None, autostart_state=None, on_settings=None,
-                 on_update=None, status_provider=None,
+                 on_update=None, status_provider=None, on_mini=None,
                  tooltip="WorkBuddy 积分观测台 · 单击查看今日积分", logger=None):
         self.log = logger or (lambda msg: None)
         self.icon_path = icon_path
@@ -254,6 +255,7 @@ class Tray:
         self.autostart_state = autostart_state      # 返回 bool，用来画勾
         self.on_settings = on_settings
         self.on_update = on_update
+        self.on_mini = on_mini
         self.status_provider = status_provider   # 返回菜单顶部那行只读信息
         self.tooltip = tooltip[:120]
 
@@ -386,6 +388,11 @@ class Tray:
             self.log("hotkey registered: Ctrl+Alt+W")
         else:
             self.log("hotkey register failed (可能被占用): err=%s" % ctypes.get_last_error())
+        if user32.RegisterHotKey(self.hwnd, HOTKEY_MINI, MOD_CONTROL | MOD_ALT | MOD_NOREPEAT,
+                                 ord("M")):
+            self.log("hotkey registered: Ctrl+Alt+M")
+        else:
+            self.log("mini hotkey register failed: err=%s" % ctypes.get_last_error())
 
         msg = wintypes.MSG()
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
@@ -412,6 +419,7 @@ class Tray:
         try:
             if self.hwnd:
                 user32.UnregisterHotKey(self.hwnd, HOTKEY_ID)
+                user32.UnregisterHotKey(self.hwnd, HOTKEY_MINI)
             if self._nid:
                 shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(self._nid))
             if self._menu_hwnd:
@@ -437,8 +445,11 @@ class Tray:
                     return 0
                 return 0
             if msg == WM_HOTKEY:
-                # 和"点托盘图标"同一个入口：弹小窗（再按一次收回由前端判断）
-                self._safe(self.on_click)
+                if int(wparam or 0) == HOTKEY_MINI:
+                    self._safe(self.on_mini)
+                else:
+                    # 和"点托盘图标"同一个入口：弹小窗（再按一次收回由前端判断）
+                    self._safe(self.on_click)
                 return 0
             if msg == WM_MENU_CMD:
                 self._dispatch(int(wparam or 0))

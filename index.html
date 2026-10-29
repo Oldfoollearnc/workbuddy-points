@@ -53,6 +53,7 @@
       </button>
       <div class="pop-drag" id="popDrag" title="拖动小窗"></div>
       <div class="pop-tools">
+        <button class="icon-btn" id="popMini" title="收成迷你条" aria-label="收成迷你条"><svg class="i"><use href="#i-minus"/></svg></button>
         <button class="icon-btn" id="popExpandTop" title="展开完整面板" aria-label="展开完整面板"><svg class="i"><use href="#i-expand"/></svg></button>
         <button class="icon-btn icon-btn--close" id="popHide" title="收起到系统托盘" aria-label="收起到系统托盘"><svg class="i"><use href="#i-close"/></svg></button>
       </div>
@@ -105,6 +106,20 @@
       </div>
     </footer>
   </div>
+</div>
+
+<!-- ===================== 迷你条（独立窗口） ===================== -->
+<div class="mini-shell" id="miniShell">
+  <span class="mini-dot" id="miniDot" title="数据状态"></span>
+  <div class="mini-main">
+    <b id="miniToday">—</b><em>分</em>
+    <span class="mini-sub" id="miniSub">今日</span>
+  </div>
+  <div class="mini-side">
+    <span>可用 <b id="miniAvail">—</b></span>
+    <span class="mini-src" id="miniSrc"></span>
+  </div>
+  <button class="mini-close" id="miniClose" title="收起迷你条" aria-label="收起">×</button>
 </div>
 
 <!-- ===================== 主界面 ===================== -->

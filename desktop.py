@@ -83,6 +83,8 @@ POPUP_TITLE = "WorkBuddy 积分观测台"
 MAIN_TITLE = "WorkBuddy 积分观测台 · 完整面板"
 
 POP_W, POP_H = 424, 656      # 客户区目标尺寸
+MINI_TITLE = "WorkBuddy 迷你条"
+MINI_W, MINI_H = 360, 52     # 迷你条客户区：一行数字，贴边不碍事
 MAIN_W, MAIN_H = 1408, 916
 # 自绘缩放的最小尺寸。原来是 1024×680，在 1366×768 / 1K 100% 缩放的机器上
 # 已经贴着任务栏了，窗口一开就顶满整屏，看起来"什么都很粗很大"。
@@ -180,23 +182,33 @@ def log(msg):
 WIN_STATE = app_paths.data_path("window.json")
 
 
-def read_win_mode():
+def read_win_state():
     try:
         d = fsutil.load_json(WIN_STATE, {}) or {}
-        m = str(d.get("mode") or "")
-        return m if m in ("main", "popup") else "popup"     # 首次安装：小窗优先
+        return d if isinstance(d, dict) else {}
     except Exception:
-        return "popup"
+        return {}
+
+
+def patch_win_state(**kw):
+    """往 window.json 里合并几个键（mode / mini 坐标），不覆盖别的状态。"""
+    d = read_win_state()
+    d.update(kw)
+    d["at"] = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        fsutil.save_json(WIN_STATE, d)
+    except Exception as e:
+        log(f"patch_win_state failed: {e}")
+
+
+def read_win_mode():
+    m = str(read_win_state().get("mode") or "")
+    return m if m in ("main", "popup") else "popup"     # 首次安装：小窗优先
 
 
 def save_win_mode(mode):
-    if mode not in ("main", "popup"):
-        return
-    try:
-        fsutil.save_json(WIN_STATE, {"mode": mode,
-                                     "at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")})
-    except Exception as e:
-        log(f"save_win_mode failed: {e}")
+    if mode in ("main", "popup"):
+        patch_win_state(mode=mode)
 
 
 def _fmt_num(v):
@@ -305,6 +317,7 @@ class Desktop:
     def __init__(self):
         self.popup = None
         self.main = None
+        self.mini = None
         self.tray = None
         self.quitting = False
         self.close_to_tray = True
@@ -401,6 +414,33 @@ class Desktop:
             zoomable=False,
         )
 
+        # 迷你条：独立窗口，常驻置顶、可拖动，和小窗互斥但各自独立存在
+        mini_x = int(max(0, avail_w - MINI_W - MARGIN))
+        mini_y = int(max(0, avail_h - MINI_H - MARGIN))
+        st = read_win_state().get("mini") or {}
+        try:
+            if st.get("x") is not None:
+                mini_x, mini_y = int(st["x"]), int(st["y"])
+        except Exception:
+            pass
+        self.mini = webview.create_window(
+            MINI_TITLE,
+            INDEX + "#mini",
+            width=MINI_W + 2,
+            height=MINI_H + 2,
+            x=mini_x,
+            y=mini_y,
+            resizable=False,
+            frameless=True,
+            easy_drag=False,
+            on_top=True,
+            shadow=True,
+            hidden=True,
+            background_color="#FFFFFF",
+            text_select=False,
+            zoomable=False,
+        )
+
         # 账号登录窗：这个窗口加载的是**远端页面**（workbuddy.cn），
         # 绝不能把桌面 Api 暴露给它 —— 否则页面上的任何脚本（含第三方脚本、跳转页）
         # 都能直接调 get_usage / choose_data_dir / account_sync / win_*。
@@ -429,6 +469,7 @@ class Desktop:
         if not self.popup:
             return
         save_win_mode("popup")
+        self.hide_mini()          # 小窗与迷你条互斥，别两个都挂在屏幕上
         with self._popup_lock:
             # 意图先落地：即使后面 show() 还没返回，下一次单击也能正确判成"该关"
             self._popup_intent = True
@@ -604,7 +645,8 @@ class Desktop:
 
     def show_main(self):
         save_win_mode("main")
-        # 小窗让位（同时把小窗状态簿记成"已收起"）
+        # 小窗与迷你条让位（同时把状态簿记成"已收起"）
+        self.hide_mini()
         self.hide_popup()
         hwnd = find_hwnd(MAIN_TITLE)
         was_visible = bool(hwnd and user32.IsWindowVisible(hwnd))
@@ -796,6 +838,122 @@ class Desktop:
                 log(f"drag end: {moved} steps -> ({rc.left},{rc.top})")
             # 结束态交回前端：解除拖动光标、补一次窗口状态
             self._safe_js(self.main, "window.App && App.__dragEnd()")
+
+    # ---------- 迷你条 ----------
+
+    def mini_visible(self):
+        hwnd = find_hwnd(MINI_TITLE)
+        try:
+            return bool(hwnd and user32.IsWindowVisible(hwnd))
+        except Exception:
+            return False
+
+    def mini_pos(self):
+        hwnd = find_hwnd(MINI_TITLE)
+        try:
+            if not hwnd:
+                return None
+            rc = RECT()
+            user32.GetWindowRect(hwnd, ctypes.byref(rc))
+            return {"x": rc.left, "y": rc.top, "w": rc.right - rc.left, "h": rc.bottom - rc.top}
+        except Exception:
+            return None
+
+    def mini_move(self, x, y):
+        hwnd = find_hwnd(MINI_TITLE)
+        try:
+            if not hwnd:
+                return {"ok": False}
+            wa = work_area()
+            x = int(min(max(wa[0], int(x)), max(wa[0], wa[2] - MINI_W)))
+            y = int(min(max(wa[1], int(y)), max(wa[1], wa[3] - MINI_H)))
+            user32.SetWindowPos(hwnd, -1, x, y, 0, 0,
+                                SWP_NOSIZE | SWP_NOACTIVATE)   # -1 = HWND_TOPMOST
+            patch_win_state(mini={"x": x, "y": y})
+            return {"ok": True, "x": x, "y": y}
+        except Exception as e:
+            log(f"mini_move failed: {e}")
+            return {"ok": False}
+
+    def _mini_drag_loop(self, hwnd):
+        """和主窗同一套跟手拖动，只在结束时把坐标记到 window.json。"""
+        pt = wintypes.POINT()
+        rc = RECT()
+        try:
+            user32.GetWindowRect(hwnd, ctypes.byref(rc))
+            user32.GetCursorPos(ctypes.byref(pt))
+            off_x, off_y = pt.x - rc.left, pt.y - rc.top
+            deadline = time.time() + 300
+            while user32.GetAsyncKeyState(VK_LBUTTON) & 0x8000:
+                if self.quitting or not user32.IsWindow(hwnd) or time.time() > deadline:
+                    break
+                if not user32.GetCursorPos(ctypes.byref(pt)):
+                    break
+                x, y = int(pt.x - off_x), int(pt.y - off_y)
+                if x != rc.left or y != rc.top:
+                    user32.SetWindowPos(hwnd, None, x, y, 0, 0,
+                                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE)
+                    rc.left, rc.top = x, y
+                time.sleep(DRAG_TICK)
+        except Exception as e:
+            log(f"mini drag error: {e}")
+        finally:
+            self._dragging = False
+            if rc.left or rc.top:
+                patch_win_state(mini={"x": rc.left, "y": rc.top})
+
+    def mini_drag_start(self):
+        hwnd = find_hwnd(MINI_TITLE)
+        if not hwnd:
+            return {"ok": False}
+        if getattr(self, "_dragging", False):
+            return {"ok": True, "busy": True}
+        self._dragging = True
+        threading.Thread(target=self._mini_drag_loop, args=(hwnd,), daemon=True).start()
+        return {"ok": True}
+
+    def show_mini(self):
+        if not self.mini:
+            return {"ok": False}
+        try:
+            self.mini.show()
+            hwnd = find_hwnd(MINI_TITLE)
+            if hwnd:
+                user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0,
+                                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)  # 提到最前
+            return {"ok": True}
+        except Exception as e:
+            log(f"show_mini failed: {e}")
+            return {"ok": False}
+
+    def hide_mini(self):
+        try:
+            if self.mini:
+                self.mini.hide()
+        except Exception:
+            pass
+        return {"ok": True}
+
+    def toggle_mini(self):
+        """小窗头部按钮/热键都走这里：开着就收，没开就先收小窗再弹迷你条。"""
+        if self.mini_visible():
+            self.hide_mini()
+            return {"ok": True, "visible": False}
+        self.hide_popup()
+        self.show_mini()
+        return {"ok": True, "visible": True}
+
+    def mini_expand(self):
+        """单击迷你条：换成完整小窗。"""
+        self.hide_mini()
+        self.show_popup()
+        return {"ok": True}
+
+    def mini_to_main(self):
+        """双击迷你条：直接进主界面。"""
+        self.hide_mini()
+        self.show_main()
+        return {"ok": True}
 
     def win_min(self):
         """最小化 = 收成右下角小窗，并播放"主窗收拢 → 小窗浮现"的过渡。
@@ -1634,6 +1792,29 @@ class Api:
     def win_resize(self, x, y, w, h):
         return self._desk.win_resize(x, y, w, h)
 
+    # ---------- 迷你条 ----------
+
+    def mini_toggle(self):
+        return self._desk.toggle_mini()
+
+    def mini_hide(self):
+        return self._desk.hide_mini()
+
+    def mini_expand(self):
+        return self._desk.mini_expand()
+
+    def mini_main(self):
+        return self._desk.mini_to_main()
+
+    def mini_pos(self):
+        return self._desk.mini_pos()
+
+    def mini_move(self, x, y):
+        return self._desk.mini_move(x, y)
+
+    def mini_drag_start(self):
+        return self._desk.mini_drag_start()
+
     # ---------- 本地数据源（#7） ----------
 
     def get_version(self):
@@ -1876,6 +2057,7 @@ def main():
         on_autostart=_tray_autostart,
         autostart_state=autostart.is_enabled,
         on_update=_tray_update,
+        on_mini=app.toggle_mini,
         on_exit=app.quit,
         status_provider=app.tray_status,
         logger=log,
