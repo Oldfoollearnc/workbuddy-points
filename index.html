@@ -339,7 +339,7 @@
               <span class="kpi-icon tint-cyan"><svg class="i"><use href="#i-chart"/></svg></span>
             </div>
             <div class="kpi-value"><span data-count="todayUsed">0</span><em>分</em></div>
-            <div class="kpi-foot"><span class="delta" id="kpiTodayDelta">—</span><span class="muted">较昨日</span></div>
+            <div class="kpi-foot"><span class="delta" id="kpiTodayDelta">—</span><span class="muted" id="kpiTodayNote">较昨日</span></div>
             <div class="kpi-spark" data-spark="todayUsed"></div>
           </article>
 
@@ -465,7 +465,7 @@
           <div class="lc-side">
             <div class="lc-row"><span>账号同期消耗</span><b id="lcCloud">—</b></div>
             <div class="lc-row"><span>本机占比</span><b id="lcShare">—</b></div>
-            <div class="lc-row"><span>其他设备</span><b id="lcOther">—</b></div>
+            <div class="lc-row"><span id="lcOtherLabel">其他设备</span><b id="lcOther">—</b></div>
             <p class="lc-note" id="lcNote">只统计这台机器的 WorkBuddy 会话记录</p>
           </div>
         </article>
@@ -478,6 +478,8 @@
                 <p id="calSub">每格一天，从当月起按整月对齐 · 颜色越深消耗越多 · 悬停查看当天用量</p>
               </div>
               <div class="card-tools">
+                <!-- 来源切换：只有云端逐笔带客户端标识时才显示（默认隐藏） -->
+                <div class="segmented segmented-sm" id="clientSeg" hidden></div>
                 <div class="segmented" id="calViewSeg">
                   <button data-calview="cal" class="is-active">日历</button>
                   <button data-calview="heat">热力</button>

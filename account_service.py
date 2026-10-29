@@ -137,6 +137,45 @@ def _date(s):
     return str(s)[5:10] if len(str(s)) >= 10 else str(s)
 
 
+def _probe_sources(bill):
+    """来源探针：确认云端逐笔到底带不带客户端标识（`client`）。
+
+    为什么要探：同一账号既跑 WorkBuddy 也跑 CodeBuddy，两者共用一个积分池。
+    如果逐笔里有 `client`，就能把"消耗"拆到客户端；没有的话界面就不该显示拆分，
+    否则只能靠猜。这个结论必须来自一次真实响应，不能写在纸上。
+
+    只记结构不记内容：字段名集合 + `client` 取值的条数分布，
+    不写请求时间、不写单笔金额（那些已经在 account.json 里，日志再抄一份只会更难读）。
+    """
+    try:
+        rows = ((((bill.get("usage") or {}).get("json") or {}).get("data") or {}).get("data")) or []
+        if not rows:
+            _log("probe sources: usage rows empty")
+            return
+        keys, clients, by_model, by_purpose = set(), {}, {}, {}
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            keys.update(r.keys())
+            c = str(r.get("client") or "")
+            clients[c] = clients.get(c, 0) + 1
+            if c:
+                m = str(r.get("model") or "")
+                by_model[(c, m)] = by_model.get((c, m), 0) + 1
+                p = str(r.get("agentPurpose") or "")
+                by_purpose[(c, p)] = by_purpose.get((c, p), 0) + 1
+        _log("probe sources: rows=%d keys=%s" % (len(rows), ",".join(sorted(keys))))
+        _log("probe sources: client=%s" % json.dumps(clients, ensure_ascii=False, sort_keys=True))
+        if by_model:
+            _log("probe sources: client×model=%s" % json.dumps(
+                {"%s|%s" % k: v for k, v in sorted(by_model.items())}, ensure_ascii=False))
+        if by_purpose:
+            _log("probe sources: client×purpose=%s" % json.dumps(
+                {"%s|%s" % k: v for k, v in sorted(by_purpose.items())}, ensure_ascii=False))
+    except Exception as e:
+        _log("probe sources failed: %s" % e)
+
+
 class AccountService:
     def __init__(self):
         self.win = None
@@ -158,6 +197,7 @@ class AccountService:
             "daily": [],
             "cloudWeek": None,
             "cloudModels": [],
+            "cloudClients": {},
             "usageRows": [],
             "lastSync": None,
             "lastError": None,
@@ -180,7 +220,7 @@ class AccountService:
             d = fsutil.load_json(CACHE)
             if d is None:
                 raise FileNotFoundError(CACHE)
-            for k in ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "usageRows", "lastSync", "interval", "origin", "autoLogin"):
+            for k in ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "cloudClients", "usageRows", "lastSync", "interval", "origin", "autoLogin"):
                 if k in d:
                     self.state[k] = d[k]
             self.interval_min = 60 if d.get("interval") is None else max(0, int(d.get("interval")))
@@ -191,7 +231,7 @@ class AccountService:
         try:
             # 原子写：这个文件上百 KB，直接 open(w) 截断再写，别的线程读到半截会解析失败
             fsutil.save_json(CACHE, {k: self.state[k] for k in
-                           ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "usageRows", "lastSync", "interval", "origin", "autoLogin")},
+                           ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "cloudClients", "usageRows", "lastSync", "interval", "origin", "autoLogin")},
                            indent=2)
         except Exception:
             pass
@@ -547,6 +587,7 @@ class AccountService:
             if not bill or not bill.get("ok"):
                 raise RuntimeError(last_err or "接口未返回数据")
 
+            _probe_sources(bill)
             mapped = self._map(bill, self.state.get("usageRows") or [])
 
             # —— 降级保护 ——
@@ -582,6 +623,7 @@ class AccountService:
                     "daily": mapped["daily"],
                     "cloudWeek": mapped.get("cloudWeek"),
                     "cloudModels": mapped.get("cloudModels") or [],
+                    "cloudClients": mapped.get("cloudClients") or {},
                     "usageRows": mapped.get("usageRows") or [],
                     "user": mapped["user"],
                     "lastSync": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -638,6 +680,11 @@ class AccountService:
         """
         today = dt.date.today()
         full = (today - dt.timedelta(days=29)).isoformat()
+        # 缓存里还有没有来源（client）的逐笔：补拉一次完整窗口把它们标上。
+        # 增量的起始点是"最新一天 -2 天"，只靠增量，旧记录永远补不上来源，
+        # 按客户端拆分就会长期缺一大截。
+        if any(not r.get("client") for r in (self.state.get("usageRows") or [])):
+            return full
         days = [d.get("date") for d in (self.state.get("daily") or []) if d.get("date")]
         if not days:
             return full
@@ -694,15 +741,20 @@ class AccountService:
         #      校验：周期内逐笔合计 2369.92，账号自报"已用"1416.39；按内容去重后 1453.96。
         raw_rows = ((((bill.get("usage") or {}).get("json") or {}).get("data") or {}).get("data")) or []
         merged = {}
-        seen_content = set()
+        seen_content = {}
 
-        def _add(t, credit, model, purpose, rid):
+        def _add(t, credit, model, purpose, rid, client):
             key = (t, model, round(credit, 4), purpose)
-            if key in seen_content:
+            seen_rid = seen_content.get(key)
+            if seen_rid is not None:
+                # 同一条记录重复返回：这次若能拿到来源就补上。
+                # 旧缓存里的行没有 client，只按内容去重会让它们永远显示"未标注"。
+                if client and not merged[seen_rid].get("client"):
+                    merged[seen_rid]["client"] = client
                 return
-            seen_content.add(key)
+            seen_content[key] = rid
             merged[rid] = {"requestTime": t, "credit": credit,
-                           "model": model, "agentPurpose": purpose}
+                           "model": model, "agentPurpose": purpose, "client": client}
 
         for r in (prev_rows or []):
             t = str(r.get("t") or r.get("requestTime") or "")[:19]
@@ -710,14 +762,16 @@ class AccountService:
                 continue
             rid = r.get("id") or r.get("requestId") or "%s|%s|%s" % (t, r.get("model"), r.get("credit"))
             _add(t, _num(r.get("credit")), str(r.get("model") or ""),
-                 str(r.get("purpose") or r.get("agentPurpose") or ""), rid)
+                 str(r.get("purpose") or r.get("agentPurpose") or ""), rid,
+                 str(r.get("client") or ""))
         for r in raw_rows:
             t = str(r.get("requestTime") or "")[:19]
             if not t:
                 continue
             rid = str(r.get("requestId") or "%s|%s|%s" % (t, r.get("model"), r.get("credit")))
             _add(t, _num(r.get("credit")), str(r.get("model") or ""),
-                 str(r.get("agentPurpose") or ""), rid)
+                 str(r.get("agentPurpose") or ""), rid,
+                 str(r.get("client") or ""))
 
         cutoff = (dt.date.today() - dt.timedelta(days=29)).isoformat()
         rows_all = [v for v in merged.values() if str(v.get("requestTime") or "")[:10] >= cutoff]
@@ -726,13 +780,40 @@ class AccountService:
         # 聚合一律用全量。以前先把 rows 截断到 1500 条再算 daily，
         # 重度账号第 30 天那一头会被静默砍掉，日历/趋势与"已用"永远对不上。
         daily = {}
+        # 按来源（客户端）聚合：余额/额度/周期是账号级的，拆不了；
+        # 能拆的只有"消耗"这条线。聚合必须在这里做 —— usageRows 有 1500 条上限，
+        # 前端拿它过滤算日历，重度账号会悄悄少掉历史。
+        client_agg = {}
         for r in rows_all:
             t = str(r.get("requestTime") or "")[:10]
             if not t:
                 continue
+            credit = _num(r.get("credit"))
             rec = daily.setdefault(t, {"points": 0.0, "calls": 0})
-            rec["points"] = round(rec["points"] + _num(r.get("credit")), 2)
+            rec["points"] = round(rec["points"] + credit, 2)
             rec["calls"] += 1
+
+            cid = str(r.get("client") or "")
+            ca = client_agg.setdefault(cid, {"points": 0.0, "calls": 0, "days": {}, "models": {}})
+            ca["points"] = round(ca["points"] + credit, 2)
+            ca["calls"] += 1
+            day = ca["days"].setdefault(t, {"date": t, "points": 0.0, "calls": 0})
+            day["points"] = round(day["points"] + credit, 2)
+            day["calls"] += 1
+            m = str(r.get("model") or "未知模型")
+            ms = ca["models"].setdefault(m, {"points": 0.0, "calls": 0})
+            ms["points"] = round(ms["points"] + credit, 2)
+            ms["calls"] += 1
+
+        cloud_clients = {}
+        for cid, ca in client_agg.items():
+            cloud_clients[cid] = {
+                "points": ca["points"],
+                "calls": ca["calls"],
+                "days": [ca["days"][k] for k in sorted(ca["days"])],
+                "models": [{"name": k, "points": round(v["points"], 2), "calls": v["calls"]}
+                           for k, v in sorted(ca["models"].items(), key=lambda kv: -kv[1]["points"])],
+            }
 
         # 逐笔明细（云端口径）：换一台电脑登录同一账号，看到的也是这一份。
         # 只在这里限量 —— account.json 不能无限长，但统计口径不受这个上限影响。
@@ -742,7 +823,8 @@ class AccountService:
             if t[:10] < cutoff:
                 continue
             usage_rows.append({"id": rid, "t": t, "credit": round(v["credit"], 4),
-                               "model": v["model"], "purpose": v["agentPurpose"]})
+                               "model": v["model"], "purpose": v["agentPurpose"],
+                               "client": v["client"]})
         usage_rows.sort(key=lambda x: x["t"], reverse=True)
         usage_rows = usage_rows[:1500]
 
@@ -831,6 +913,7 @@ class AccountService:
                           "paid": bool(sm.get("IsPaidUser"))}, **ident),
             "cloudWeek": {"models": cloud_models, "days": cloud_week},
             "cloudModels": cloud_models_detail,
+            "cloudClients": cloud_clients,
             "usageRows": usage_rows,
             "cloud": {
                 "available": round(available, 2),
@@ -897,6 +980,7 @@ class AccountService:
         with self.lock:
             self.state.update({"status": "disconnected", "user": None, "cloud": None,
                                "packages": [], "daily": [], "cloudWeek": None, "cloudModels": [],
+                               "cloudClients": {},
                                # usageRows 也要清：否则退出登录后流水页还挂着上一个账号的逐笔记录，
                                # 连导出 CSV 都能把它带出去
                                "usageRows": [],

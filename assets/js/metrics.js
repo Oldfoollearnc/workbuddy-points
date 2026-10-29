@@ -134,6 +134,101 @@
 
   const rowTime = r => new Date(String((r && r.t) || '').replace(' ', 'T'));
 
+  /* ---------------- 来源（客户端） ----------------
+     同一个账号既跑 WorkBuddy 也跑 CodeBuddy，共用一份积分。
+     云端逐笔带 client 字段时才能拆；字段缺失时下面这些函数一律返回 null，
+     界面据此隐藏来源切换，绝不编造拆分数字。 */
+
+  /** 已知标识 → 展示名。实测值（2026-10-30）：WorkBuddy / CodeBuddyIDE / app_cloud。 */
+  const CLIENT_LABEL = {
+    workbuddy: 'WorkBuddy',
+    codebuddy: 'CodeBuddy',
+    codebuddyide: 'CodeBuddy',
+    // 服务端第三个来源：只在 10-19、10-21 出现过，模型是 hy4-preview / step-5-preview，
+    // 看不出属于哪个产品，就按"App / 云端"单列一类，不并入 WB 也不并入 CB。
+    app_cloud: 'App / 云端'
+  };
+
+  function clientName(id) {
+    const k = String(id || '');
+    if (!k) return '历史（未标注）';
+    const hit = CLIENT_LABEL[k.toLowerCase()];
+    if (hit) return hit;
+    // 服务端换后缀（CodeBuddyIDE / CodeBuddyCN / CodeBuddy-Web）也归到同一个名字，
+    // 否则同一客户端在界面上会分裂成两三行。
+    if (/codebuddy/i.test(k)) return 'CodeBuddy';
+    if (/workbuddy/i.test(k)) return 'WorkBuddy';
+    return k;
+  }
+
+  /** 本机 JSONL 记录一定是 WorkBuddy 产生的 —— 判断某来源要不要并入 localTail。 */
+  const isWorkBuddyClient = id => !id || /workbuddy/i.test(String(id));
+
+  function clientMap() {
+    const { ACCOUNT } = ctx();
+    const a = ACCOUNT || {};
+    return (a.status === 'connected' && a.cloudClients && typeof a.cloudClients === 'object')
+      ? a.cloudClients : null;
+  }
+
+  /**
+   * 可切换的来源列表（首项恒为「全部」）。
+   * 只有真的能区分时才给数组：至少 2 个有消耗的桶，且至少一个带非空 client。
+   * 字段整个缺失时云端只会有一个空 id 的桶 —— 那不算能拆。
+   */
+  function clientOptions() {
+    const cc = clientMap();
+    if (!cc) return null;
+    // 空 id = 服务端还没带 client 的历史行。它不能作为可选项：
+    // 「全部」的 id 也是空串，两者会撞成两个同时高亮的按钮。
+    // 单独把它的金额挂到返回数组上，供界面在「全部」的提示里说明。
+    const unlabeled = Number((cc[''] || {}).points) || 0;
+    const items = Object.keys(cc)
+      .filter(id => id)
+      .map(id => ({
+        id,
+        name: clientName(id),
+        points: Number((cc[id] || {}).points) || 0,
+        calls: Number((cc[id] || {}).calls) || 0
+      }))
+      .filter(x => x.points > 0)
+      .sort((a, b) => b.points - a.points);
+    if (items.length < 2) return null;
+    const out = [{ id: '', name: '全部',
+                   points: round2(items.reduce((s, x) => s + x.points, 0) + unlabeled),
+                   calls: items.reduce((s, x) => s + x.calls, 0) }].concat(items);
+    out.unlabeled = round2(unlabeled);
+    return out;
+  }
+
+  /** 某来源的按天合计（日历用）。id 为空表示全部，走原有合并口径。 */
+  function clientDays(id) {
+    const cc = clientMap();
+    const rec = id && cc ? cc[id] : null;
+    if (!rec || !Array.isArray(rec.days)) return null;
+    return rec.days.map(d => ({
+      date: d.date,
+      points: Number(d.points) || 0,
+      calls: d.calls == null ? null : d.calls
+    }));
+  }
+
+  function clientModels(id) {
+    const cc = clientMap();
+    const rec = id && cc ? cc[id] : null;
+    return (rec && Array.isArray(rec.models)) ? rec.models : null;
+  }
+
+  /** 今日各来源消耗：总览小字与构成明细用。不可区分时返回 null。零消耗的来源不列，免得占满一行。 */
+  function todayByClient() {
+    const opts = clientOptions();
+    if (!opts) return null;
+    return opts.filter(o => o.id).map(o => {
+      const st = todayStat(o.id);
+      return { id: o.id, name: o.name, points: st.consumed, calls: st.requests };
+    }).filter(x => x.points > 0);
+  }
+
   /** 上次云端同步的时刻（毫秒）；没同步过返回 0 */
   function lastSyncMs() {
     const { ACCOUNT } = ctx();
@@ -161,8 +256,9 @@
    * 今日消耗/调用/时段/模型构成：一个数据源。
    * 连上云端 = 云端逐笔 + 同步后本机逐笔；未连接才退回本机记录。
    */
-  function todayStat() {
+  function todayStat(clientId) {
     const { D } = ctx();
+    const want = String(clientId || '');
     const rows = cloudRows();
     if (rows) {
       const now = new Date();
@@ -181,6 +277,7 @@
         sum += credit; calls += 1;
       };
       rows.forEach(r => {
+        if (want && String(r.client || '') !== want) return;
         const d = rowTime(r);
         if (isNaN(d.getTime())) return;
         const credit = Number(r.credit) || 0;
@@ -189,7 +286,8 @@
         if (key !== todayKey) return;
         fold(d, credit, r.model);
       });
-      localTail().forEach(e => {
+      // 本机 tail 只有 WorkBuddy 会产生：筛到别的来源时不能并进来
+      if (isWorkBuddyClient(want)) localTail().forEach(e => {
         const d = e.time instanceof Date ? e.time : new Date(e.time);
         if (isNaN(d.getTime())) return;
         const key = dayKeyOf(d);
@@ -204,6 +302,7 @@
       const peak = hours.reduce((a, b) => (b.points > a.points ? b : a), hours[0]);
       return {
         cloud: true,
+        client: want,
         consumed: round2(sum),
         requests: calls,
         tokens: (D.today && D.today.tokens) || 0,   // 云端逐笔不含 Token
@@ -222,6 +321,7 @@
     });
     return {
       cloud: false,
+      client: '',
       consumed: t.consumed || 0,
       requests: t.requests || 0,
       tokens: t.tokens || 0,
@@ -352,6 +452,7 @@
     startOfDay, addDays, diffDays, parseDate, dayKeyOf, round2, monthDayToDate,
     isWorkday, countWorkdays, allowance, leftDaysText,
     cloudRows, rowTime, lastSyncMs, localTail,
+    clientName, isWorkBuddyClient, clientOptions, clientDays, clientModels, todayByClient,
     todayStat, dailySeries, pendingSinceSync, effAccount, quotaWindow
   };
   return api;

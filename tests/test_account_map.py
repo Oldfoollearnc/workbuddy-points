@@ -40,9 +40,9 @@ def _bill(rows, used=10.0):
     }
 
 
-def _row(t, rid, credit=1.0, model="m", purpose="agent"):
+def _row(t, rid, credit=1.0, model="m", purpose="agent", client=""):
     return {"requestTime": t, "requestId": rid, "credit": credit,
-            "model": model, "agentPurpose": purpose}
+            "model": model, "agentPurpose": purpose, "client": client}
 
 
 class MapTest(unittest.TestCase):
@@ -133,6 +133,75 @@ class MapTest(unittest.TestCase):
         minute_rows = [_row(self.today + " 21:03:00", "r1"),
                        _row(self.today + " 20:47:00", "r2")]
         self.assertEqual(self.svc._map(_bill(minute_rows))["cloud"]["countKind"], "request")
+
+    def test_client_kept_on_rows(self):
+        """逐笔的客户端来源必须留住：丢了就永远分不清 WorkBuddy 与 CodeBuddy。"""
+        rows = [_row(self.today + " 10:00:00", "r1", 1.0, client="workbuddy"),
+                _row(self.today + " 10:05:00", "r2", 2.0, client="codebuddy")]
+        out = self.svc._map(_bill(rows, used=3.0))
+        got = sorted(r["client"] for r in out["usageRows"])
+        self.assertEqual(got, ["codebuddy", "workbuddy"])
+
+    def test_cloud_clients_split(self):
+        """按来源聚合：积分/笔数/按天/按模型各算各的，合计仍等于总量。"""
+        rows = [
+            _row(self.today + " 10:00:00", "r1", 1.0, model="a", client="workbuddy"),
+            _row(self.today + " 10:05:00", "r2", 2.0, model="a", client="workbuddy"),
+            _row(self.today + " 10:10:00", "r3", 4.0, model="b", client="codebuddy"),
+        ]
+        out = self.svc._map(_bill(rows, used=7.0))
+        cc = out["cloudClients"]
+        self.assertEqual(sorted(cc), ["codebuddy", "workbuddy"])
+        self.assertAlmostEqual(cc["workbuddy"]["points"], 3.0, places=2)
+        self.assertEqual(cc["workbuddy"]["calls"], 2)
+        self.assertAlmostEqual(cc["codebuddy"]["points"], 4.0, places=2)
+        self.assertEqual(cc["workbuddy"]["days"][0]["date"], self.today)
+        self.assertAlmostEqual(cc["codebuddy"]["models"][0]["points"], 4.0, places=2)
+        self.assertAlmostEqual(sum(v["points"] for v in cc.values()),
+                               out["cloud"]["rowsSum"], places=2)
+
+    def test_rows_without_client_keep_amount(self):
+        """旧缓存里的行没有 client：归到未标注，金额一条都不能少（否则历史合计变小）。"""
+        old_t = (dt.date.today() - dt.timedelta(days=5)).strftime("%Y-%m-%d") + " 09:00:00"
+        prev = [{"id": "old1", "t": old_t, "credit": 3.0, "model": "m", "purpose": "agent"}]
+        out = self.svc._map(_bill([_row(self.today + " 10:00:00", "r1", 5.0, client="codebuddy")],
+                                  used=8.0), prev_rows=prev)
+        self.assertAlmostEqual(out["cloud"]["rowsSum"], 8.0, places=2)
+        self.assertAlmostEqual(out["cloudClients"][""]["points"], 3.0, places=2)
+        self.assertAlmostEqual(out["cloudClients"]["codebuddy"]["points"], 5.0, places=2)
+
+    def test_old_rows_get_client_from_new_pull(self):
+        """旧缓存行没有来源：同一条记录重新拉回来时必须把 client 补上，而不是被去重丢掉。"""
+        t = self.today + " 10:00:00"
+        prev = [{"id": "old", "t": t, "credit": 3.0, "model": "m", "purpose": "agent"}]
+        out = self.svc._map(_bill([_row(t, "old", 3.0, client="CodeBuddyIDE")], used=3.0),
+                            prev_rows=prev)
+        self.assertEqual(len(out["usageRows"]), 1, "同一条记录不该变成两条")
+        self.assertEqual(out["usageRows"][0]["client"], "CodeBuddyIDE")
+        self.assertAlmostEqual(out["cloud"]["rowsSum"], 3.0, places=2)
+
+    def test_usage_since_full_window_when_client_missing(self):
+        """缓存里还有没标来源的行 → 下次同步补拉完整窗口，否则历史永远补不上 client。"""
+        import datetime as _dt
+        full = (_dt.date.today() - _dt.timedelta(days=29)).isoformat()
+        recent = _dt.date.today().isoformat()
+        self.svc.state["daily"] = [{"date": recent, "points": 1, "calls": 1}]
+        self.svc.state["usageRows"] = [{"id": "x", "t": recent + " 10:00:00",
+                                        "credit": 1.0, "model": "m", "purpose": "agent"}]
+        self.assertEqual(self.svc._usage_since(), full)
+
+        self.svc.state["usageRows"][0]["client"] = "WorkBuddy"
+        self.assertTrue(self.svc._usage_since() > full, "全都标了来源就回到增量窗口")
+
+    def test_probe_logs_client_values(self):
+        """探针只写结构（字段名与条数），不写单笔金额。"""
+        rows = [_row(self.today + " 10:00:00", "r1", 9.99, client="codebuddy")]
+        with mock.patch.object(A, "_log") as lg:
+            A._probe_sources(_bill(rows))
+        text = "\n".join(str(c.args[0]) for c in lg.call_args_list)
+        self.assertIn("codebuddy", text)
+        self.assertIn("requestTime", text)
+        self.assertNotIn("9.99", text)
 
     def test_logout_really_disconnects(self):
         """退出登录必须删掉会话存档并记住"不要自动回填"。"""

@@ -50,7 +50,8 @@
     projRange: '7',        // 项目排行：7 / 30 / month
     ledgerType: 'all',
     ledgerQuery: '',
-    ledgerFilter: '',      // 'model:xxx' / 'project:xxx'
+    ledgerFilter: '',      // 'model:xxx' / 'project:xxx' / 'client:xxx'
+    client: '',            // 用量分析页的来源筛选：'' = 全部
     ledgerLimit: 24,
     heatRange: '7',       // 热力图范围：7 / 30 / month
     popQuery: ''
@@ -142,8 +143,14 @@
     startOfDay, addDays, diffDays, parseDate, dayKeyOf, round2, monthDayToDate,
     isWorkday, countWorkdays, allowance, leftDaysText,
     cloudRows, rowTime, lastSyncMs, localTail,
+    clientName, isWorkBuddyClient, clientOptions, clientDays, clientModels, todayByClient,
     todayStat, dailySeries, pendingSinceSync, effAccount, quotaWindow
   } = Metrics;
+
+  /** 来源简称：KPI 脚注只有一行宽，写成 WorkBuddy 会挤掉"较昨日"。 */
+  function clientShort(name) {
+    return ({ 'WorkBuddy': 'WB', 'CodeBuddy': 'CB', 'App / 云端': '云' })[name] || name;
+  }
 
   function normalize(raw) {
     const d = raw || {};
@@ -1174,6 +1181,13 @@
       F.fmt(Number(p.calls) || 0),
       (Number(p.calls) || 0) ? F.credit((Number(p.points) || 0) / Number(p.calls)) + ' 分' : '—']);
 
+    // 按来源（WorkBuddy / CodeBuddy）：同一个积分池，只有云端能区分时才有这一节
+    const byClient = todayByClient() || [];
+    const clientTotal = byClient.reduce((s, c) => s + (Number(c.points) || 0), 0) || 1;
+    const clientRows = byClient.map(c => [esc(c.name), F.credit(Number(c.points) || 0),
+      F.fmt(Number(c.calls) || 0), detailBar((Number(c.points) || 0) / clientTotal * 100),
+      ((Number(c.points) || 0) / clientTotal * 100).toFixed(1) + '%']);
+
     return {
       title: '今日消耗构成',
       sub: '界面只给了按模型的一层；这里按模型 / 项目 / 用途拆开，并标出免费调用',
@@ -1188,6 +1202,11 @@
         + '<h3 class="detail-sub">按模型</h3>'
         + detailTable([{ label: '模型' }, { label: '积分', num: true }, { label: '调用', num: true },
           { label: '占比' }, { label: '', num: true }], modelRows)
+        + (clientRows.length
+          ? '<h3 class="detail-sub">按来源</h3>'
+            + detailTable([{ label: '来源' }, { label: '积分', num: true }, { label: '笔数', num: true },
+              { label: '占比' }, { label: '', num: true }], clientRows)
+          : '')
         + '<h3 class="detail-sub">按项目</h3>'
         + detailTable([{ label: '项目' }, { label: '积分', num: true }, { label: '调用', num: true },
           { label: 'Token', num: true }, { label: '相对最大' }], projRows)
@@ -2050,6 +2069,18 @@
       delta.className = 'delta' + (up ? '' : ' is-good');
       delta.innerHTML = `<svg class="i"><use href="#${up ? 'i-up' : 'i-down'}"/></svg>${Math.abs(stat.deltaPct || 0).toFixed(1)}%`;
     }
+    // 能区分客户端时，把今天的消耗按来源并列出来；分不出来就保持"较昨日"
+    const byClient = todayByClient();
+    const todayNote = $('#kpiTodayNote');
+    if (todayNote) {
+      if (byClient && byClient.length) {
+        todayNote.textContent = byClient.map(c => `${clientShort(c.name)} ${F.credit(c.points)}`).join(' · ');
+        todayNote.title = byClient.map(c => `${c.name}：${F.credit(c.points)} 分 / ${F.fmt(c.calls)} 笔`).join('\n');
+      } else {
+        todayNote.textContent = '较昨日';
+        todayNote.title = '';
+      }
+    }
 
     countUp($('[data-count="todayReq"]'), stat.requests);
     // 云端返回的是"计费记录"（近期按 5 分钟 × 模型聚合），不是单次调用：
@@ -2303,9 +2334,10 @@
     });
   }
 
-  function calendarDays() {
+  function calendarDays(clientId) {
     const connected = !!(ACCOUNT && ACCOUNT.status === 'connected');
     const cloudDaily = (connected && Array.isArray(ACCOUNT.daily)) ? ACCOUNT.daily : [];
+    const want = String(clientId || '');
     const year = new Date().getFullYear();
     const localDaily = (D.daily || []).map(d => ({
       date: d.date && d.date.length === 5 ? `${year}-${d.date}` : d.date,
@@ -2315,6 +2347,25 @@
     }));
     const localMap = {};
     localDaily.forEach(d => { if (d.date) localMap[d.date] = d; });
+
+    // 指定来源：只认该来源的云端按天聚合，本机记录补不了别的客户端。
+    // Token 仍是本机口径（云端不返回），所以只有 WorkBuddy 那一侧会给值。
+    const srcDays = want ? clientDays(want) : null;
+    if (srcDays) {
+      const byDate = {};
+      srcDays.forEach(d => {
+        if (!d || !d.date) return;
+        const loc = localMap[d.date];
+        byDate[d.date] = {
+          date: d.date,
+          points: d.points || 0,
+          calls: d.calls == null ? null : d.calls,
+          tokens: (isWorkBuddyClient(want) && loc) ? loc.tokens : null,
+          src: 'cloud'
+        };
+      });
+      return { days: Object.values(byDate), cloudCount: srcDays.length, localCount: 0 };
+    }
 
     const map = {};
     localDaily.forEach(d => {
@@ -2395,6 +2446,29 @@
     return hit ? total : null;
   }
 
+  /** 某来源在指定周期的消耗：读云端按天聚合，不受 usageRows 1500 条上限影响。 */
+  function clientPeriodSum(id, range) {
+    const days = clientDays(id);
+    if (!days || !days.length) return null;
+    let cut;
+    if (range === 'all') {
+      const first = (D.meta && D.meta.firstDayAll) || '';
+      const from = first ? new Date(first + 'T00:00:00').getTime() : NaN;
+      cut = Number.isFinite(from) ? from : -Infinity;
+    } else if (range === 'month') {
+      const now = new Date();
+      cut = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    } else {
+      cut = Date.now() - Number(range) * 86400000;
+    }
+    let total = 0;
+    days.forEach(d => {
+      const t = new Date(d.date + 'T00:00:00').getTime();
+      if (!isNaN(t) && t >= cut) total += Number(d.points) || 0;
+    });
+    return total > 0 ? total : null;
+  }
+
   function renderLocalCard() {
     if (!$('#lcValue')) return;
     const range = state.localRange || '30';
@@ -2407,12 +2481,30 @@
     if (cloud && cloud > 0) {
       setText('#lcCloud', F.credit(cloud) + ' 分');
       setText('#lcShare', Math.round(Math.min(1, local / cloud) * 100) + '%');
-      const other = cloud - local;
-      setText('#lcOther', other > 0.5 ? F.credit(other) + ' 分' : '—');
     } else {
       setText('#lcCloud', '—');
       setText('#lcShare', '—');
-      setText('#lcOther', '—');
+    }
+
+    // 「其他设备」这一行：能区分来源时直接指名道姓（这个数就是该客户端自己的计费值），
+    // 区分不出来才退回"账号同期 − 本机"的糊涂账。
+    const clients = clientOptions();
+    const others = clients ? clients.filter(o => o.id && !isWorkBuddyClient(o.id)) : [];
+    const otherLabel = $('#lcOtherLabel');
+    if (others.length === 1) {
+      const sum = clientPeriodSum(others[0].id, range);
+      if (otherLabel) {
+        otherLabel.textContent = others[0].name;
+        otherLabel.title = `${others[0].name} 的云端计费值`;
+      }
+      setText('#lcOther', sum != null ? F.credit(sum) + ' 分' : '—');
+    } else {
+      if (otherLabel) {
+        otherLabel.textContent = '其他设备';
+        otherLabel.title = '账号同期消耗 − 本机 WorkBuddy = 其他客户端（含 CodeBuddy）；云端逐笔带来源后才能拆开';
+      }
+      const rest = (cloud || 0) - local;
+      setText('#lcOther', cloud && rest > 0.5 ? F.credit(rest) + ' 分' : '—');
     }
 
     const dailyArr = Array.isArray(D.daily) ? D.daily : [];
@@ -2429,14 +2521,46 @@
     $$('#lcSeg button').forEach(b => b.classList.toggle('is-active', b.dataset.lc === range));
   }
 
+  /** 来源分段按钮：只有云端真的能区分客户端时才出现，字段缺失就整块隐藏。 */
+  function renderClientSeg() {
+    const seg = $('#clientSeg');
+    if (!seg) return null;
+    const opts = clientOptions();
+    if (!opts) {
+      seg.hidden = true;
+      seg.innerHTML = '';
+      seg.dataset.sig = '';
+      state.client = '';
+      return null;
+    }
+    if (!opts.some(o => o.id === state.client)) state.client = '';
+    const sig = opts.map(o => `${o.id}:${o.name}`).join('|') + '#' + state.client;
+    if (seg.dataset.sig !== sig) {
+      seg.innerHTML = opts.map(o => {
+        let tip = `${o.name} · 近 29 天 ${F.credit(o.points)} 分 / ${F.fmt(o.calls)} 笔`;
+        if (o.id && o.name !== o.id) tip += `（接口返回 ${o.id}）`;
+        // 「全部」里含旧记录（服务端还没带 client 的那批），得说清差额来自哪里
+        if (!o.id && opts.unlabeled > 0) {
+          tip += `；其中 ${F.credit(opts.unlabeled)} 分是历史未标注来源`;
+        }
+        return `<button data-client="${esc(o.id)}" class="${o.id === state.client ? 'is-active' : ''}" title="${esc(tip)}">${esc(o.name)}</button>`;
+      }).join('');
+      seg.dataset.sig = sig;
+    }
+    seg.hidden = false;
+    return opts;
+  }
+
   function renderAnalytics() {
     renderLocalCard();
+    renderClientSeg();
+    const srcName = state.client ? clientName(state.client) : '';
     const cloudMode = !!cloudRows();
     setText('#modelSub', cloudMode
-      ? '近 30 天按模型统计积分与计费笔数'
+      ? (state.client ? `${srcName} · 近 30 天按模型统计积分与计费笔数` : '近 30 天按模型统计积分与计费笔数')
       : '近 30 天按模型统计积分与调用次数');
     /* ---------- 消耗日历：云端逐笔优先，本机记录补盲区 ---------- */
-    const cal = calendarDays();
+    const cal = calendarDays(state.client);
     const calDays = cal.days;
     const calTotal = calDays.reduce((a, b) => a + b.points, 0);
     const activeDays = calDays.filter(d => d.points > 0).length;
@@ -2447,18 +2571,23 @@
     if (srcChip) {
       const useCloud = cal.cloudCount > 0;
       const both = useCloud && cal.localCount > 0;
-      srcChip.textContent = useCloud ? (both ? '云端 + 本机' : '云端逐笔') : (cal.localCount ? '本地记录' : '暂无数据');
-      srcChip.className = 'chip ' + (useCloud ? 'chip-good' : (cal.localCount ? 'is-warn' : ''));
-      srcChip.title = useCloud
-        ? `积分与调用次数取自云端 billing 逐笔（${cal.cloudCount} 天）；云端不返回 Token，Token 取本机同日记录，缺失显示「—」`
-        : '云端未连接：按本机会话记录统计，可能不完整';
-      srcChip.dataset.state = useCloud ? 'cloud' : 'local';
+      srcChip.textContent = state.client
+        ? `${srcName} · 云端逐笔`
+        : (useCloud ? (both ? '云端 + 本机' : '云端逐笔') : (cal.localCount ? '本地记录' : '暂无数据'));
+      srcChip.className = 'chip ' + ((useCloud || state.client) ? 'chip-good' : (cal.localCount ? 'is-warn' : ''));
+      srcChip.title = state.client
+        ? `只统计 ${srcName} 的云端计费记录（${cal.cloudCount} 天）；云端不返回 Token 与项目，缺失处显示「—」`
+        : (useCloud
+          ? `积分与调用次数取自云端 billing 逐笔（${cal.cloudCount} 天）；云端不返回 Token，Token 取本机同日记录，缺失显示「—」`
+          : '云端未连接：按本机会话记录统计，可能不完整');
+      srcChip.dataset.state = (useCloud || state.client) ? 'cloud' : 'local';
     }
     const calBox = $('[data-chart="calendar"]');
     // 日历重绘很贵（210+ 个格子），而本地刷新每 30 秒就会走一次 renderActive。
     // 这里用「主题 + 宽度 + 偏好 + 数据」做签名：没变就不重绘，悬停光圈也不会被定时刷新打断。
     const calSig = [
       document.documentElement.getAttribute('data-theme'),
+      state.client,                       // 切换来源必须重绘，日历数据整体变了
       calBox ? calBox.clientWidth : 0,
       prefs.calGlow !== false ? 1 : 0,
       prefs.calIntro !== false ? 1 : 0,
@@ -2480,7 +2609,10 @@
     /* ---------- 模型使用量：云端 30 天逐笔优先 ---------- */
     const connected = !!(ACCOUNT && ACCOUNT.status === 'connected');
     let modelItems = [];
-    if (connected && Array.isArray(ACCOUNT.cloudModels) && ACCOUNT.cloudModels.length) {
+    const srcModels = state.client ? clientModels(state.client) : null;
+    if (state.client) {
+      modelItems = (srcModels || []).map(m => ({ name: m.name, points: m.points, calls: m.calls }));
+    } else if (connected && Array.isArray(ACCOUNT.cloudModels) && ACCOUNT.cloudModels.length) {
       modelItems = ACCOUNT.cloudModels.map(m => ({ name: m.name, points: m.points, calls: m.calls }));
     } else if (Array.isArray(D.models30) && D.models30.length) {
       modelItems = D.models30.map(m => ({ name: m.name, points: m.points, calls: m.calls, tokens: m.tokens }));
@@ -2536,17 +2668,24 @@
 
     /* ---------- 项目消耗排行：本机记录（云端不返回项目），周期可切 ---------- */
     const pr = state.projRange || '7';
+    // 项目维度只存在于本机 WorkBuddy 会话记录里：筛到别的来源时给空态，
+    // 不能沿用本机数据（那会显示成"CodeBuddy 也在这些项目里花过钱"）。
+    const projBlocked = !!state.client && !isWorkBuddyClient(state.client);
     const projSrc = pr === '30' ? (D.projects30 || D.projects7)
       : pr === 'month' ? (D.projectsMonth || D.projects7) : D.projects7;
-    const projItems = (projSrc || []).map(p => ({ name: p.name, points: p.points }));
+    const projItems = projBlocked ? [] : (projSrc || []).map(p => ({ name: p.name, points: p.points }));
     const pTotal = projItems.reduce((a, b) => a + b.points, 0);
     setText('#projTotal', projItems.length
       ? `${LOCAL_LABEL[pr]} ${cloudMode ? '本机 ' : ''}${F.credit(pTotal)} 分`
       : '暂无数据');
-    setText('#projSub', `${LOCAL_LABEL[pr]} Top 6 项目，条形长度按消耗占比（仅本机记录，不含其他设备）`);
+    setText('#projSub', projBlocked
+      ? `${srcName} 的调用不返回项目（cwd）维度，项目排行只覆盖本机 WorkBuddy 会话`
+      : `${LOCAL_LABEL[pr]} Top 6 项目，条形长度按消耗占比（仅本机记录，不含其他设备）`);
     renderRows($('#projectRank'), projItems, {
       limit: 6,
-      empty: `${LOCAL_LABEL[pr]}暂无项目消耗（项目只来自本机会话记录）`
+      empty: projBlocked
+        ? `${srcName} 不返回项目维度，这里无法统计`
+        : `${LOCAL_LABEL[pr]}暂无项目消耗（项目只来自本机会话记录）`
     });
     $$('#projSeg button').forEach(b => b.classList.toggle('is-active', b.dataset.proj === pr));
 
@@ -2597,6 +2736,7 @@
       tokens: null,
       requests: 1,
       tone: 'c1',
+      client: String(r.client || ''),
       src: 'cloud'
     }));
   }
@@ -2622,6 +2762,8 @@
       // 后者用来翻某次调用的上下文，两种需求不该挤在一个输入框里。
       if (fKind === 'model' && (e.model || '') !== fVal) return false;
       if (fKind === 'project' && (e.project || '') !== fVal) return false;
+      // 来源筛选：本机补足的记录一定是 WorkBuddy，跟云端行一起参与比较
+      if (fKind === 'client' && String(e.client || (e.src === 'cloud' ? '' : 'workbuddy')) !== fVal) return false;
       if (!q) return true;
       return [e.model, e.task, e.project].join(' ').toLowerCase().includes(q);
     });
@@ -2646,6 +2788,18 @@
     const models = uniq('model');
     const projects = uniq('project');
     const html = ['<option value="">全部模型 / 项目</option>'];
+    // 云端能区分客户端时才给"按来源"：optgroup 里放的是 client:<id>，
+    // 空 id（历史未标注）单独一项，免得旧记录看起来凭空消失。
+    const clients = clientOptions();
+    if (clients) {
+      html.push('<optgroup label="按来源">');
+      clients.filter(o => o.id).forEach(o => html.push(
+        `<option value="client:${esc(o.id)}">${esc(o.name)}</option>`));
+      if (all.some(e => e.src === 'cloud' && !e.client)) {
+        html.push('<option value="client:">历史（未标注来源）</option>');
+      }
+      html.push('</optgroup>');
+    }
     if (models.length) {
       html.push('<optgroup label="按模型">');
       models.forEach(m => html.push(`<option value="model:${esc(m)}">${esc(m)}</option>`));
@@ -2767,8 +2921,11 @@
         // 首行展示的是该分钟合计，占比必须用合计算，否则会出现"-0.52 / 0.54%"这种对不上的组合
         const shownPts = (isFirst && grouped) ? group.sum : e.points;
         const share = shownPts / dayTotal;
-        // 合并后同一张表里既有云端逐笔也有本机补足的记录，标一下来源，避免误读
-        const srcText = hasCloud ? (e.src === 'cloud' ? '云端' : '本机') : '';
+        // 合并后同一张表里既有云端逐笔也有本机补足的记录，标一下来源，避免误读。
+        // 云端行再带上客户端（WorkBuddy / CodeBuddy），同一个池里也能一眼分清。
+        const srcText = hasCloud
+          ? (e.src === 'cloud' ? (e.client ? '云端 · ' + clientName(e.client) : '云端') : '本机')
+          : '';
         const timeCell = isFirst
           ? `<span class="t">${F.dateKey(t)} ${F.clock(t)}${grouped ? `<i class="minute-badge">×${group.list.length}</i>` : ''}<small>周${wd}${srcText ? ' · ' + srcText : ''}</small></span>`
           : `<span class="t t--cont"><i class="rail"></i></span>`;
@@ -3967,6 +4124,14 @@
       if (!b) return;
       state.projRange = b.dataset.proj;
       if (state.view === 'analytics') renderAnalytics();
+    });
+    const clientSeg = $('#clientSeg');
+    if (clientSeg) clientSeg.addEventListener('click', e => {
+      const b = e.target.closest('button[data-client]');
+      if (!b) return;
+      state.client = b.dataset.client || '';
+      // 切换来源要连同日历 / 模型榜 / 项目榜一起重画（签名里含来源，日历会真的重绘）
+      renderAnalytics();
     });
 
     /* 点小窗外部收起：由 Python 端监听鼠标左键松开 + 光标是否落在小窗内，
