@@ -421,6 +421,12 @@ class CheckinService:
         if self._page_ready() and not force:
             return True
 
+        # 用户正在扫码：这里绝不能导航（下面的子线程是直接 win.load_url，绕过了 account._nav 的守卫）。
+        # 页面正好停在 /login 时按"没准备好"返回，让调用方如实报错，而不是把二维码刷掉。
+        if getattr(self.account, "_login_active", False):
+            _log("checkin ensure_page skipped: 用户正在扫码登录，不打断登录页")
+            return self._page_ready() and ("/login" not in (self.account._href() or ""))
+
         done = threading.Event()
 
         def _nav():
@@ -769,6 +775,13 @@ class CheckinService:
         if self.account.state.get("status") == "disconnected":
             res["error"] = "还没连接账号。点右上角头像 →「连接账号」，扫一次码就能自动签到"
             res["reason"] = "no_account"
+            return res
+
+        # 正在扫码：后台轮询（_watch_loop 会定时调 run）绝对不能插进来，
+        # 它一旦走到 401 自愈就会整页 load_url，把二维码刷掉。文案与 probe() 保持一致。
+        if getattr(self.account, "_login_active", False):
+            res["error"] = "正在扫码登录，先完成登录再签到"
+            res["reason"] = "login_active"
             return res
 
         # 与定时同步共用一把锁：同步过程中页面正在跳转，此时注入 fetch 会拿到空响应。

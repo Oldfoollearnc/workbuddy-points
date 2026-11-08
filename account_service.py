@@ -44,6 +44,9 @@ LOG_DIR = os.path.join(BASE, "logs")
 PROBE_LOG = os.path.join(LOG_DIR, "api-probe.log")
 CACHE = os.path.join(BASE, "account.json")
 COOKIE_FILE = os.path.join(BASE, "session.bin")
+# WebView2 自己的 Cookie 库（desktop.py 里 private_mode=False + storage_path=数据目录/.webview-profile）。
+# 只用于会话过期时的只读诊断：能分清"服务端不认了"还是"本地 Cookie 早没了"。
+COOKIE_DB = os.path.join(BASE, ".webview-profile", "EBWebView", "Default", "Network", "Cookies")
 CDP_PORT = 9333
 COOKIE_DOMAINS = ("workbuddy.cn", "codebuddy.cn", "qq.com", "tencent.com")
 
@@ -124,6 +127,54 @@ def _log(msg):
     logutil.log(PROBE_LOG, msg, "api")
 
 
+_EPOCH_1601 = 11644473600.0     # 1601-01-01 → 1970-01-01 的秒数；Chromium 的 expires_utc 以 1601 起算
+
+
+def _left_text(expire_utc):
+    """Chromium 的 expires_utc（1601 年起的微秒数）→ 人话。"""
+    try:
+        left = int(expire_utc or 0) / 1e6 - _EPOCH_1601 - time.time()
+    except Exception:
+        return "?"
+    if left <= 0:
+        return "已过期"
+    if left > 86400:
+        return "%d天" % int(left // 86400)
+    return "%d小时" % max(1, int(left // 3600))
+
+
+def _cookie_diag():
+    """同步判定过期时打一条：本地 Cookie 到底还在不在、什么时候到期。
+
+    光看"401"分不清两种完全不同的故障：Cookie 还在且没过期 → 服务端不认了（被踢 /
+    风控），只能重扫；Cookie 没了或已过期 → profile 没落盘（storage_path 不对 / 被清理），
+    重扫也会反复。只取 name / expires_utc —— value 是凭证，一个字都不能进日志。
+
+    库被浏览器独占、路径不存在、字段改名，在 Windows 上都是常态，任何异常一律折成
+    "?"：诊断不能把 sync 的失败路径再抛一次，否则"同步失败"会变成"程序崩了"。
+    immutable=1 让 SQLite 不理会 WebView2 持有的排他锁，代价是可能读到稍旧的一版。
+    """
+    try:
+        import sqlite3
+        import urllib.parse
+        uri = "file:%s?mode=ro&immutable=1" % urllib.parse.quote(
+            COOKIE_DB.replace("\\", "/"), safe="/:")
+        con = sqlite3.connect(uri, uri=True, timeout=1.0)
+        try:
+            rows = con.execute(
+                "select name, max(expires_utc) from cookies where host_key='www.workbuddy.cn' "
+                "and name in ('session','KEYCLOAK_SESSION') group by name").fetchall()
+        finally:
+            con.close()
+    except Exception as e:
+        return "cookies=? (%s)" % str(e)[:40]
+    got = {n: exp for n, exp in rows}
+    out = []
+    for name in ("session", "KEYCLOAK_SESSION"):
+        out.append("%s=%s" % (name, _left_text(got[name]) if name in got else "缺失"))
+    return "cookies " + " ".join(out)
+
+
 def _num(v):
     try:
         return float(v)
@@ -189,6 +240,10 @@ class AccountService:
         # 否则会把刚渲染好的二维码整页刷掉 —— 用户看到的就是"二维码刚出来又刷新"。
         self._login_active = False
         self._login_at = 0.0
+        # 登录会话代数：每开一次登录窗 +1，watcher 只认自己那一代。
+        # 以前每点一次「连接账号」就多起一个 _watch_login，几个线程同时探活、
+        # 互相抢窗口、叠加请求，而且旧线程退出时会把新一轮的 _login_active 抹掉。
+        self._login_gen = 0
         # 会话过期时通知桌面端自动弹登录窗。没有这个回调就退回"顶部提示 + 用户自己点"。
         # _expired_notified 保证一次过期只弹一次，同步成功后复位。
         self.on_expired = None
@@ -251,22 +306,30 @@ class AccountService:
         if not self.win:
             return {"ok": False, "error": "登录窗口不可用"}
         try:
-            # 已经在登录页、且刚打开不久：直接亮窗口，不再 load_url。
+            # 已经在登录页、这次登录会话还活着、且刚打开不久：直接亮窗口，不再 load_url。
             # 以前每次点「连接账号」都整页重载一次，二维码渲染完就被下一次加载顶掉。
+            # 900 秒而不是 120 秒：用户常常扫码中途切走再点回来，120 秒一到就重载，
+            # 等于把他的二维码撕了重发；二维码真失效时页面内自带刷新按钮。
+            # _login_active 读的是上一次的值：只有"同一个登录会话"才复用，取消/超时后必须重开。
             href = self._href()
-            reuse = ("/login" in href) and (time.time() - self._login_at < 120)
+            reuse = (self._login_active and ("/login" in href)
+                     and (time.time() - self._login_at < 900))
+            # 代数 +1：老 watcher 下一轮就发现"我已经不是当前这一代"，自己退出。
+            self._login_gen += 1
+            gen = self._login_gen
             self._login_active = True
             self._login_at = time.time()
             self.win.show()
             if reuse:
                 _log("open_login: 复用已打开的登录页，不重新加载")
             else:
-                self._nav(LOGIN_URL, wait=2.0)
+                # force=True：上面刚把 _login_active 置 True，不强制的话这一步会被自己的守卫挡掉
+                self._nav(LOGIN_URL, wait=2.0, force=True)
             threading.Timer(1.0, self._install_hook).start()
             with self.lock:
                 self.state["status"] = "logining"
                 self.state["autoLogin"] = True     # 用户主动登录 → 恢复开机自动回填
-            threading.Thread(target=self._watch_login, daemon=True).start()
+            threading.Thread(target=self._watch_login, args=(gen,), daemon=True).start()
             return {"ok": True}
         except Exception as e:
             self._login_active = False
@@ -274,6 +337,7 @@ class AccountService:
 
     def cancel_login(self):
         """登录窗被用户关掉：停止登录态跟踪，别让后台还占着窗口导航。"""
+        self._login_gen += 1        # 让正在跑的那个 watcher 下一轮自行退出，别再对着隐藏窗口探活
         self._login_active = False
         _log("login cancelled by user")
 
@@ -297,12 +361,21 @@ class AccountService:
         except Exception:
             pass
 
-    def _watch_login(self, timeout=900):
+    def _watch_login(self, gen=None, timeout=900):
         """不打断用户当前页面：只检测当前页所在域的登录状态；
-        同步阶段再自动切到有会话的那个域。"""
+        同步阶段再自动切到有会话的那个域。
+
+        gen：本线程属于哪一代登录会话。每轮开头先核对自己是否已被新会话取代，
+        过期立刻退出 —— 否则同一时间会有多个 watcher 一起探活、一起抢窗口。
+        """
+        if gen is None:
+            gen = self._login_gen
         deadline = time.time() + timeout
         try:
             while time.time() < deadline and not self._stop:
+                if gen != self._login_gen:
+                    _log("watch login: 已有新的登录会话，本线程退出")
+                    return
                 time.sleep(5)
                 self._install_hook()
                 st = self._console_status()
@@ -324,10 +397,12 @@ class AccountService:
                     # 用户看到的只是"扫了码没反应"，只能大退重来。
                     res = None
                     for _ in range(8):
-                        res = self.sync()
+                        # force_nav=True：这一刻页面还停在 /login，必须允许导航到 /profile，
+                        # 否则 billing 接口不认这个会话（扫码成功后唯一需要强制导航的地方）。
+                        res = self.sync(force_nav=True)
                         if res.get("ok"):
                             return
-                        if not self._login_active:
+                        if gen != self._login_gen or not self._login_active:
                             _log("login cancelled during sync retry")
                             return
                         if not res.get("busy"):
@@ -344,7 +419,10 @@ class AccountService:
                         self.state["status"] = "logining"
             _log("watch timeout")
         finally:
-            self._login_active = False
+            # 只有当前这一代才有权复位：老线程退出时若把 _login_active 抹成 False，
+            # 新一轮登录刚打开就会被后台同步导航走，二维码又被刷掉。
+            if gen == self._login_gen:
+                self._login_active = False
 
     def _href(self):
         try:
@@ -352,8 +430,17 @@ class AccountService:
         except Exception:
             return ""
 
-    def _nav(self, url, wait=4.0):
-        """优先用 pywebview 原生导航（稳定），失败再退回页面内跳转。"""
+    def _nav(self, url, wait=4.0, force=False):
+        """优先用 pywebview 原生导航（稳定），失败再退回页面内跳转。
+
+        force=True 只给两个地方用：用户主动打开登录页（open_login），
+        以及扫码成功后那一次必须的同步（_watch_login → sync(force_nav=True)）。
+        其余所有后台导航在扫码期间一律让路 —— 登录页被整页重载，二维码就重画，
+        用户看到的就是"二维码刚出来又刷新"。
+        """
+        if self._login_active and not force:
+            _log("nav skipped: 正在扫码登录，不打断当前页面 (%s)" % str(url)[:70])
+            return False
         try:
             self.win.load_url(url)
             time.sleep(wait)
@@ -533,13 +620,21 @@ class AccountService:
         if not self.state.get("autoLogin", True):
             _log("try_restore skipped: 用户已退出登录")
             return False
-        time.sleep(2.0)
+        # 先判再睡：以前是 sleep(2.0) 之后才判，这 2 秒里用户点了登录窗，
+        # 醒来照样往下走，第一次导航已经发出去了 —— 拦不住，等于没拦。
         if self._login_active:
             _log("try_restore skipped: 用户正在扫码登录，别去动他的窗口")
             return False
+        time.sleep(2.0)
+        # 睡的这 2 秒里用户也可能刚点开登录窗：再确认一次，省得白等 4.5 秒导航
+        if self._login_active:
+            _log("try_restore skipped: 用户刚打开登录窗")
+            return False
         # 冷却期内一次网络请求都不打 —— 那就连页面都不用导。
         # 以前是先 sleep 2s + 导航 /app 等 3.5s，才来判断冷却，启动白等 5.5 秒。
-        if self._sync_cooling():
+        # 但"上次判定已过期"必须例外：轮询已经跳过 expired 不再重试，这里再按冷却跳过，
+        # 就再没有任何人去探一次了 —— 界面会一直卡在"登录已失效"，只能手动点。
+        if self._sync_cooling() and self.state.get("status") != "expired":
             # 开发态（CDP）还有一份 Cookie 在 session.bin 里：不回填的话，
             # 紧随其后的自动签到会 401。生产态 profile 自带持久 Cookie，不必多导一次页面。
             if cdp_enabled() and os.path.exists(COOKIE_FILE):
@@ -563,9 +658,16 @@ class AccountService:
 
     # ---------------- 同步 ----------------
 
-    def sync(self):
+    def sync(self, force_nav=False):
         if not self.win:
             return {"ok": False, "error": "no window"}
+        # 扫码期间后台同步一律让路：页面停在 /login，任何导航都会把二维码刷掉，
+        # 而 fetch 也只会拿到 401 —— 白打一轮、写一条 auth 日志、还会把状态错标成"过期"，
+        # 进而触发 on_expired 再弹一次登录窗（又是导航，二维码又重画）。
+        # force_nav=True 只由 _watch_login 在探到 200 之后传入。
+        if self._login_active and not force_nav:
+            return {"ok": False, "error": "正在扫码登录，完成后会自动同步",
+                    "state": self.snapshot(), "login": True}
         if not self._sync_lock.acquire(blocking=False):
             return {"ok": False, "state": self.snapshot(), "busy": True}
         self._syncing = True
@@ -580,10 +682,17 @@ class AccountService:
                     # 兜底：第一次拿不到数据时，重试会强制导航一次再试。
                     # 扫码成功那一瞬间页面还停在 /login，此时直接 fetch 会 401：
                     # billing 接口要求页面刚加载过 /profile/plans-usage 才认这个会话。
+                    # 进入 sync 之后用户才点开登录窗（TOCTOU）：立刻收工，别在登录页上打接口。
+                    # 这一句是"二维码被刷掉"最常见的真实时序 —— 用户点开登录窗的同时，
+                    # 30 秒轮询正好醒来，need_nav 因为 "/login in href" 成立而导航。
+                    if self._login_active and not force_nav:
+                        _log("sync aborted: 用户开始扫码登录")
+                        return {"ok": False, "error": "正在扫码登录，完成后会自动同步",
+                                "state": self.snapshot(), "login": True}
                     need_nav = ((attempt > 0) or (not self._on_origin(origin))
                                 or ("/login" in self._href()))
                     if need_nav:
-                        self._nav(origin + PROFILE_PATH, wait=4.5)
+                        self._nav(origin + PROFILE_PATH, wait=4.5, force=force_nav)
                     else:
                         time.sleep(1.2)
 
@@ -691,6 +800,12 @@ class AccountService:
                     self.state["suspect"] = streak >= 3
             self._save_cache()
             _log(f"sync failed ({'auth' if auth_like else 'transient'}): {e}")
+            if auth_like:
+                # 光看"401"分不清两种完全不同的故障：
+                #   Cookie 还在且没过期 → 服务端不认了（被踢 / 风控），只能重扫；
+                #   Cookie 没了或已过期 → profile 没落盘（storage_path 不对 / 被清理），重扫也可能反复。
+                # 这行日志就是给下一次排障用的，所以必须无条件打印，且绝不能抛异常。
+                _log("sync auth diag: " + _cookie_diag())
             # 过期就主动弹登录窗：一次过期只弹一次，同步成功后在上面复位。
             # 注意必须放在 self.lock 之外 —— open_login 自己也要拿这把锁。
             if auth_like and not self._expired_notified and self.on_expired:
@@ -979,6 +1094,15 @@ class AccountService:
         def loop():
             while not self._stop:
                 time.sleep(30)
+                # 会话已过期 / 用户正在扫码：一律不碰窗口，等用户动作。
+                # 以前过期后每 30 秒还 sync 一次，永远 401；而 sync 里 "/login in href"
+                # 会反复把登录页导到 /profile，站点 302 回来，二维码就这么被刷掉了。
+                # 恢复是自动的：_watch_login 扫码成功后会写 status=connected + lastSync，
+                # 下一个 30 秒 tick 这两个条件都不成立，轮询自然接上。
+                # 注意只跳过 expired，不能把 logining 也加进来 —— cancel_login() 不改 status，
+                # logining 没有任何出口，跳了就会永久停摆。
+                if self.state.get("status") == "expired" or self._login_active:
+                    continue
                 # 门槛用"有没有云端数据"而不是"状态是不是 connected"：
                 # 一次网络失败会把状态改成 error，用状态判断就再也不重试了。
                 if self.state.get("cloud") is None:

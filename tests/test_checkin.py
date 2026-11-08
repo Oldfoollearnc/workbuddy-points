@@ -153,6 +153,14 @@ class TodayCacheTest(unittest.TestCase):
         self.assertNotEqual(out.get("reason"), "local_done")
         self.assertEqual(out.get("reason"), "no_window")
 
+    def test_login_active_skips_checkin(self):
+        """用户正在扫码：后台签到不能插进来（401 自愈会整页重载，把二维码刷掉）。"""
+        acct = FakeAccount()
+        acct.win = object()          # 有窗口才会走到登录守卫
+        acct._login_active = True
+        out = cs.CheckinService(acct)._run_inner(travel_auto=True)
+        self.assertEqual(out.get("reason"), "login_active")
+
     def test_bad_types_do_not_break_snapshot(self):
         """缓存里的数字被写成时间串也要能出快照，不能让接口整体抛错。"""
         self.write_cache({}, cache_today={

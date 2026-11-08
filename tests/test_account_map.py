@@ -11,7 +11,9 @@ import datetime as dt
 import json
 import os
 import shutil
+import sqlite3
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -226,6 +228,93 @@ class MapTest(unittest.TestCase):
             saved = json.load(f)
         self.assertTrue(saved.get("autoLogin") is False, "应持久化 autoLogin=False")
         self.assertFalse(self.svc.try_restore(), "已退出登录时不应自动回填")
+
+    # ---------- 扫码期间冻结登录窗 ----------
+
+    def _fake_win(self):
+        class FakeWin:
+            def __init__(self):
+                self.loads = []
+                self.js = 0
+
+            def load_url(self, url):
+                self.loads.append(url)
+
+            def evaluate_js(self, script):
+                self.js += 1
+                return ""
+
+        return FakeWin()
+
+    def test_sync_does_not_touch_window_while_login_active(self):
+        """扫码期间后台同步必须立刻收工：任何导航都会把二维码刷掉。"""
+        win = self._fake_win()
+        self.svc.win = win
+        self.svc._login_active = True
+
+        res = self.svc.sync()
+
+        self.assertFalse(res.get("ok"))
+        self.assertTrue(res.get("login"), "应明确告诉调用方是登录期让路，不是同步失败")
+        self.assertEqual(win.loads, [], "登录期一次 load_url 都不许发")
+        self.assertEqual(win.js, 0, "登录期也不许在登录页上注入 fetch")
+
+    def test_nav_refuses_while_login_active(self):
+        """_nav 是最后一道闸：try_restore 那条直连路径也会走到这里。"""
+        win = self._fake_win()
+        self.svc.win = win
+        self.svc._login_active = True
+
+        self.assertFalse(self.svc._nav("https://www.workbuddy.cn/profile/plans-usage", wait=0))
+        self.assertEqual(win.loads, [])
+
+        # force=True 只给 open_login 和扫码成功那一次同步用
+        self.assertTrue(self.svc._nav("https://www.workbuddy.cn/login", wait=0, force=True))
+        self.assertEqual(len(win.loads), 1)
+
+    def test_cookie_diag_reports_missing_and_expired(self):
+        """掉登录时要能分清"服务端踢了"和"本地 Cookie 早没了"。"""
+        db = os.path.join(self.tmp, "Cookies")
+        con = sqlite3.connect(db)
+        con.execute("create table cookies (host_key text, name text, expires_utc integer)")
+        con.execute("insert into cookies values ('www.workbuddy.cn', 'KEYCLOAK_SESSION', ?)",
+                    (int((time.time() - 3600 + A._EPOCH_1601) * 1e6),))   # 一小时前就过期
+        con.commit()
+        con.close()
+
+        with mock.patch.object(A, "COOKIE_DB", db):
+            text = A._cookie_diag()
+
+        self.assertIn("session=缺失", text)
+        self.assertIn("KEYCLOAK_SESSION=已过期", text)
+
+    def test_cookie_diag_never_raises(self):
+        """Cookie 库不存在 / 被独占都算常态，诊断不能把同步失败变成程序崩溃。"""
+        with mock.patch.object(A, "COOKIE_DB", os.path.join(self.tmp, "nope", "Cookies")):
+            text = A._cookie_diag()
+        self.assertTrue(text.startswith("cookies="), text)
+
+    def test_expired_status_bypasses_startup_cooling(self):
+        """上次判定过期 + 还在冷却窗口：启动必须真去探一次。
+
+        轮询已经跳过 expired 不再重试，这里再按冷却跳过的话，就再没有任何人去探了。
+        """
+        win = self._fake_win()
+        self.svc.win = win
+        self.svc.state["status"] = "expired"
+        self.svc.state["cloud"] = {"available": 1}
+        calls = []
+
+        def _sync(**kw):
+            calls.append(kw)
+            return {"ok": True}
+
+        with mock.patch.object(self.svc, "_sync_cooling", return_value=True), \
+                mock.patch.object(self.svc, "sync", side_effect=_sync):
+            self.assertTrue(self.svc.try_restore())
+
+        self.assertEqual(len(win.loads), 1, "过期状态下启动必须导航一次去探会话")
+        self.assertEqual(len(calls), 1)
 
 
 if __name__ == "__main__":
