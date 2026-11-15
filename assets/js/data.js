@@ -305,6 +305,32 @@ window.buildDemoData = function () {
 
   ledger.sort((a, b) => b.ts - a.ts);
 
+  // 预览用的时段热力：从 ledger 里按“日期 × 小时”聚合，
+  // 否则浏览器预览里点“热力”永远是空的。
+  const heatMap = {};
+  ledger.forEach(e => {
+    if (e.type !== 'consume') return;
+    const t = e.time instanceof Date ? e.time : new Date(e.time);
+    const k = `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
+    const hours = heatMap[k] || (heatMap[k] = new Array(24).fill(0));
+    hours[t.getHours()] += e.points;
+  });
+  const dayHeatRows = n => {
+    const out = [];
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date(NOW.getFullYear(), NOW.getMonth(), NOW.getDate() - i);
+      const k = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      out.push({
+        date: dateKey(d),
+        wd: '一二三四五六日'[(d.getDay() + 6) % 7],
+        hours: (heatMap[k] || new Array(24).fill(0)).map(v => Math.round(v * 100) / 100)
+      });
+    }
+    return out;
+  };
+  const monthDays = NOW.getDate();
+  const dayHeat = { '7': dayHeatRows(7), '30': dayHeatRows(30), month: dayHeatRows(monthDays) };
+
   const ledgerToday = ledger.filter(e => e.type === 'consume' && dateKey(e.time) === dateKey(NOW));
   const todayUsedSum = ledgerToday.reduce((s, e) => s + e.points, 0);
   const todayEarnSum = ledger.filter(e => e.type === 'earn' && dateKey(e.time) === dateKey(NOW)).reduce((s, e) => s + e.points, 0);
@@ -345,6 +371,16 @@ window.buildDemoData = function () {
       nowHour: NOW_HOUR,
       snapshotAt: `${pad(NOW_HOUR)}:${pad(NOW_MIN)}`,
       source: 'demo',
+      sourceKind: 'jsonl',
+      machine: '浏览器预览',
+      records: daily.reduce((s, d) => s + (d.calls || 0), 0),
+      days: daily.filter(d => d.consumed > 0).length,
+      recordsTotal: daily.reduce((s, d) => s + (d.calls || 0), 0),
+      daysTotal: daily.filter(d => d.consumed > 0).length,
+      coverDays: 0,
+      firstDay: daily[0].dateObj
+        ? `${daily[0].dateObj.getFullYear()}-${pad(daily[0].dateObj.getMonth() + 1)}-${pad(daily[0].dateObj.getDate())}`
+        : ''
     },
     account: {
       name: '老大',
@@ -379,6 +415,7 @@ window.buildDemoData = function () {
     week,
     heat,
     heatMax,
+    dayHeat,
     ledger,
     ledgerTodayTotal: todayUsedSum,
     avg7,

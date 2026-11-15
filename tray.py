@@ -67,9 +67,10 @@ SW_SHOW = 5
 HTCLIENT = 1
 VK_ESCAPE = 0x1B
 
-ID_OPEN_POPUP, ID_OPEN_MAIN, ID_REFRESH, ID_EXIT = 1, 2, 3, 4
-ID_SYNC, ID_AUTOSTART, ID_SETTINGS = 5, 6, 7
-ID_INFO = 8          # 只读信息行（今日消耗），点了不做任何事
+ID_EXIT = 4
+ID_AUTOSTART = 6
+ID_SETTINGS = 7
+ID_INFO = 9          # 只读信息行（保留编号，不能与 ID_UPDATE=8 相同）
 ID_UPDATE = 8
 
 # 菜单尺寸（逻辑像素；进程 DPI 无关，和界面 1:1 对应）
@@ -267,13 +268,17 @@ class Tray:
         self._cls = "PointsInsightTrayWnd"
 
         # 菜单状态
+        try:
+            self.scale = max(1.0, user32.GetDpiForSystem() / 96.0)
+        except Exception:
+            self.scale = 1.0
         self.theme = "light"
         self._menu_hwnd = None
         self._menu_proc = WNDPROC(self._menu_wndproc)
         self._menu_items = []
         self._menu_hit = []          # [(cmd, y0, y1)]
         self._menu_hover = -1
-        self._menu_w = MENU_W
+        self._menu_w = self._s(MENU_W)
         self._menu_h = 0
         self._font = None
         self._arrow = None
@@ -308,6 +313,10 @@ class Tray:
     def set_theme(self, theme):
         self.theme = "dark" if theme == "dark" else "light"
 
+    def _s(self, v):
+        """逻辑像素 → 当前 DPI 的物理像素。"""
+        return int(round(v * getattr(self, "scale", 1.0)))
+
     def _pal(self):
         return PALETTE.get(self.theme, PALETTE["light"])
 
@@ -325,11 +334,12 @@ class Tray:
         if self._font:
             return self._font
         # 进程 DPI 无关：-17 ≈ 12.7px，和界面 12.5px 字号对齐
+        h = -self._s(14)
         self._font = gdi32.CreateFontW(
-            -14, 0, 0, 0, 400, 0, 0, 0, 1, 4, 0, 5, 0, "Microsoft YaHei UI")
+            h, 0, 0, 0, 400, 0, 0, 0, 1, 4, 0, 5, 0, "Microsoft YaHei UI")
         if not self._font:
             self._font = gdi32.CreateFontW(
-                -14, 0, 0, 0, 400, 0, 0, 0, 1, 4, 0, 5, 0, "Segoe UI")
+                h, 0, 0, 0, 400, 0, 0, 0, 1, 4, 0, 5, 0, "Segoe UI")
         return self._font
 
     # ---------- 生命周期 ----------
@@ -469,15 +479,16 @@ class Tray:
     def _menu_layout(self):
         """算出每个可见项的位置；切换/分隔线都参与布局。"""
         self._menu_hit = []
-        y = MENU_PAD
+        pad, item_h, sep_h = self._s(MENU_PAD), self._s(ITEM_H), self._s(SEP_H)
+        y = pad
         for mid, label, _accent in self._menu_items:
             if label is None:
-                self._menu_hit.append((0, y, y + SEP_H))
-                y += SEP_H
+                self._menu_hit.append((0, y, y + sep_h))
+                y += sep_h
             else:
-                self._menu_hit.append((mid, y, y + ITEM_H))
-                y += ITEM_H
-        self._menu_h = y + MENU_PAD
+                self._menu_hit.append((mid, y, y + item_h))
+                y += item_h
+        self._menu_h = y + pad
 
     def _ensure_menu_window(self):
         if self._menu_hwnd:
@@ -492,13 +503,13 @@ class Tray:
         user32.RegisterClassW(ctypes.byref(wc))       # 已注册会失败，忽略
         hwnd = user32.CreateWindowExW(
             WS_EX_TOOLWINDOW | WS_EX_TOPMOST, "PointsInsightMenuWnd", "",
-            WS_POPUP, 0, 0, MENU_W, 200, None, None, hinst, None)
+            WS_POPUP, 0, 0, self._menu_w, self._s(200), None, None, hinst, None)
         if not hwnd:
             self.log("create menu window failed: %s" % ctypes.get_last_error())
             return None
         # 圆角窗口区域：系统接管这块 HRGN，之后不能再删
         user32.SetWindowRgn(hwnd, gdi32.CreateRoundRectRgn(
-            0, 0, self._menu_w + 1, self._menu_h + 1, MENU_RADIUS, MENU_RADIUS), True)
+            0, 0, self._menu_w + 1, self._menu_h + 1, self._s(MENU_RADIUS), self._s(MENU_RADIUS)), True)
         self._menu_hwnd = hwnd
         return hwnd
 
@@ -608,10 +619,11 @@ class Tray:
             gdi32.DeleteObject(bg)
 
             # 1px 描边：窗口有圆角区域，边框跟着圆弧走
+            radius = self._s(MENU_RADIUS)
             pen = gdi32.CreatePen(0, 1, _rgb(pal["border"]))
             old_pen = gdi32.SelectObject(hdc, pen)
             old_brush = gdi32.SelectObject(hdc, gdi32.GetStockObject(NULL_BRUSH))
-            gdi32.RoundRect(hdc, 0, 0, w, hh, MENU_RADIUS, MENU_RADIUS)
+            gdi32.RoundRect(hdc, 0, 0, w, hh, radius, radius)
             gdi32.SelectObject(hdc, old_brush)
             gdi32.SelectObject(hdc, old_pen)
             gdi32.DeleteObject(pen)
@@ -628,8 +640,8 @@ class Tray:
                     sp = gdi32.CreatePen(0, 1, _rgb(pal["sep"]))
                     op = gdi32.SelectObject(hdc, sp)
                     cy = (y0 + y1) // 2
-                    gdi32.MoveToEx(hdc, 14, cy, None)
-                    gdi32.LineTo(hdc, w - 14, cy)
+                    gdi32.MoveToEx(hdc, self._s(14), cy, None)
+                    gdi32.LineTo(hdc, w - self._s(14), cy)
                     gdi32.SelectObject(hdc, op)
                     gdi32.DeleteObject(sp)
                     continue
@@ -639,7 +651,8 @@ class Tray:
                     hb = gdi32.CreateSolidBrush(_rgb(pal["hover_bg"]))
                     ob = gdi32.SelectObject(hdc, hb)
                     op = gdi32.SelectObject(hdc, null_pen)
-                    gdi32.RoundRect(hdc, 6, y0 + 2, w - 6, y1 - 2, 9, 9)
+                    gdi32.RoundRect(hdc, self._s(6), y0 + self._s(2),
+                                    w - self._s(6), y1 - self._s(2), self._s(9), self._s(9))
                     gdi32.SelectObject(hdc, ob)
                     gdi32.SelectObject(hdc, op)
                     gdi32.DeleteObject(hb)

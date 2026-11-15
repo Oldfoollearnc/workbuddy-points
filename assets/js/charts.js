@@ -620,91 +620,9 @@
      横向排行条
      ========================================================= */
 
-  function hbar(container, cfg) {
-    mount(container, () => {
-      const items = cfg.items || [];
-      const max = Math.max(...items.map(d => d.value), 1);
-      const total = items.reduce((s, d) => s + d.value, 0) || 1;
-      const list = h('div', 'rank-list', '', container);
-      items.forEach((d, i) => {
-        const row = h('div', 'rank-row', '', list);
-        row.style.animationDelay = (i * 40) + 'ms';
-        h('span', 'rank-idx', String(i + 1).padStart(2, '0'), row);
-        h('span', 'rank-name', d.name, row);
-        const track = h('div', 'rank-track', '', row);
-        const fill = h('i', 'rank-fill', '', track);
-        fill.style.background = d.tone ? `linear-gradient(90deg, ${hexToRgba(toneColor(d.tone), .55)}, ${toneColor(d.tone)})` : '';
-        const val = h('span', 'rank-val', '', row);
-        val.innerHTML = `${fmt(d.value)}<small>${pct(d.value / total)}</small>`;
-
-        const target = Math.max(3, (d.value / max) * 100);
-        fill.style.width = '0%';
-        requestAnimationFrame(() => {
-          setTimeout(() => { fill.style.width = target.toFixed(2) + '%'; }, 40 + i * 30);
-        });
-
-        row.addEventListener('mouseenter', ev => {
-          showTip(`<div class="tt-title">${esc(d.name)}</div>${tipRows([
-            { color: d.tone ? toneColor(d.tone) : token('--brand'), name: '消耗', value: fmt(d.value) + ' 分' },
-            { name: '占今日', value: pct(d.value / total) }
-          ])}`, ev.clientX, ev.clientY);
-        });
-        row.addEventListener('mousemove', ev => showTip(`<div class="tt-title">${esc(d.name)}</div>${tipRows([
-          { color: d.tone ? toneColor(d.tone) : token('--brand'), name: '消耗', value: fmt(d.value) + ' 分' },
-          { name: '占今日', value: pct(d.value / total) }
-        ])}`, ev.clientX, ev.clientY));
-        row.addEventListener('mouseleave', hideTip);
-      });
-    });
-  }
-
   /* =========================================================
      热力图（模型 × 时段）
      ========================================================= */
-
-  function heatmap(container, cfg) {
-    mount(container, () => {
-      const rows = cfg.rows || [];
-      const max = cfg.max || 1;
-      const base = token('--brand', '#2563eb');
-      const wrap = h('div', 'heat', '', container);
-
-      rows.forEach((row, ri) => {
-        const r = h('div', 'heat-row', '', wrap);
-        h('span', 'heat-label', row.name, r);
-        row.values.forEach((v, i) => {
-          const a = v <= 0 ? 0.03 : 0.045 + Math.pow(v / max, .5) * 0.92;
-          const cell = h('i', 'heat-cell', '', r);
-          cell.style.background = v <= 0 ? 'var(--surface-3)' : hexToRgba(base, a.toFixed(3));
-          cell.style.animationDelay = (ri * 46 + i * 6) + 'ms';
-          cell.addEventListener('mouseenter', ev => {
-            showTip(`<div class="tt-title">${esc(row.name)} · ${String(i).padStart(2, '0')}:00</div>${tipRows([
-              { color: base, name: '消耗', value: fmt(v) + ' 分' },
-              { name: '占今日', value: pct(v / (cfg.total || 1)) }
-            ])}`, ev.clientX, ev.clientY);
-          });
-          cell.addEventListener('mousemove', ev => showTip(`<div class="tt-title">${esc(row.name)} · ${String(i).padStart(2, '0')}:00</div>${tipRows([
-            { color: base, name: '消耗', value: fmt(v) + ' 分' },
-            { name: '占今日', value: pct(v / (cfg.total || 1)) }
-          ])}`, ev.clientX, ev.clientY));
-          cell.addEventListener('mouseleave', hideTip);
-        });
-      });
-
-      const axis = h('div', 'heat-axis', '', wrap);
-      h('span', '', '', axis);
-      for (let i = 0; i < 24; i++) h('span', '', i % 3 === 0 ? String(i).padStart(2, '0') : '', axis);
-
-      const lg = h('div', 'heat-legend', '', wrap);
-      h('span', '', '低', lg);
-      const scale = h('div', 'heat-scale', '', lg);
-      [.08, .24, .42, .62, .82].forEach(a => {
-        const i = h('i', '', '', scale);
-        i.style.background = hexToRgba(base, a);
-      });
-      h('span', '', '高', lg);
-    });
-  }
 
   /* =========================================================
      仪表盘（额度使用率）
@@ -849,7 +767,9 @@
       }
       const start = best.start;
       const weeks = Math.max(4, best.weeks);
-      const monthFirst = new Date(start.getFullYear(), start.getMonth(), 1);
+      // 起点是"某月 1 号所在周的周一"，但 1 号所在周可能落在上个月；
+      // 留白边界必须按被选中的那个月算，不能用 start 的月份。
+      const monthFirst = new Date(best.month.getFullYear(), best.month.getMonth(), 1);
 
       // 列宽：优先正方（最多宽 6%），剩余宽度整体居中，避免把方格拉成长条
       const fillW = (availW - gap * (weeks - 1)) / weeks;
@@ -953,11 +873,13 @@
       for (let col = 0; col < weeks; col++) {
         const colStart = new Date(start);
         colStart.setDate(colStart.getDate() + col * 7);
-        if (colStart.getMonth() !== prevMonth) {
-          prevMonth = colStart.getMonth();
+        // 第一列可能只剩留白（开始日在上个月）：标签用它真正展示的那个月
+        const labelDay = colStart < monthFirst ? monthFirst : colStart;
+        if (labelDay.getMonth() !== prevMonth) {
+          prevMonth = labelDay.getMonth();
           const x = left + col * (cellW + gap);
-          const sameYear = colStart.getFullYear() === today.getFullYear();
-          const label = (sameYear ? '' : String(colStart.getFullYear()).slice(2) + '年') + (colStart.getMonth() + 1) + '月';
+          const sameYear = labelDay.getFullYear() === today.getFullYear();
+          const label = (sameYear ? '' : String(labelDay.getFullYear()).slice(2) + '年') + (labelDay.getMonth() + 1) + '月';
           const t = txt(svg, x, padT - 7, label, 'ax-label');
           t.setAttribute('text-anchor', 'start');
           t.style.fontSize = '9.5px';
@@ -998,10 +920,13 @@
         });
         rect.addEventListener('mousemove', ev => showTip(`<div class="tt-title">${title}</div>${tipRows(rowsTip)}`, ev.clientX, ev.clientY));
         // 点某天 → 外层跳去流水并按这天筛好（日历只负责报坐标，不关心业务）
-        rect.style.cursor = 'pointer';
-        rect.addEventListener('click', () => {
-          if (typeof cfg.onPick === 'function') cfg.onPick(key, rec || null);
-        });
+        // 未来日期不可点：点了只会跳到一个空流水。
+        if (!future) {
+          rect.style.cursor = 'pointer';
+          rect.addEventListener('click', () => {
+            if (typeof cfg.onPick === 'function') cfg.onPick(key, rec || null);
+          });
+        }
         rect.addEventListener('mouseleave', () => { hideTip(); if (glowOn) unfocus(); });
         rect.__cell = cells[cells.length - 1];
       }
@@ -1076,7 +1001,7 @@
   const tonePat = i => 'pat-' + ((i % 6) + 1);
 
   window.Charts = {
-    bar, combo, donut, hbar, heatmap, gauge, sparkline, calendar,
+    bar, combo, donut, gauge, sparkline, calendar,
     showTip, hideTip, palette, toneColor, tonePat, fmt, shortNum, hexToRgba
   };
 })();

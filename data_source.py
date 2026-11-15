@@ -32,6 +32,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+import urllib.parse
 
 import app_paths
 import fsutil
@@ -106,7 +107,7 @@ def set_home(path):
     cfg["home"] = path
     cfg["pickedAt"] = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     write_config(cfg)
-    st = resolve(force=True)
+    st = resolve()
     return {"ok": bool(st["valid"]), "state": st}
 
 
@@ -114,10 +115,10 @@ def clear_home():
     cfg = read_config()
     cfg.pop("home", None)
     write_config(cfg)
-    return resolve(force=True)
+    return resolve()
 
 
-def resolve(force=False):
+def resolve():
     """解析当前应使用的数据目录。返回结构化的状态，供设置页与日志使用。"""
     cfg = read_config()
     manual = (cfg.get("home") or "").strip()
@@ -159,16 +160,21 @@ def _snapshot_db(db_path):
     """把 SQLite（含 WAL/SHM）复制到临时目录，避免与客户端抢锁。"""
     tmpdir = tempfile.mkdtemp(prefix="wbpts-db-")
     dst = os.path.join(tmpdir, DB_NAME)
-    copied = []
+    main_ok = False
     for suffix in ("", "-wal", "-shm"):
         src = db_path + suffix
-        if os.path.exists(src):
-            try:
-                shutil.copy2(src, dst + suffix)
-                copied.append(suffix or "main")
-            except Exception:
-                pass
-    return (dst if copied else ""), tmpdir
+        if not os.path.exists(src):
+            continue
+        try:
+            shutil.copy2(src, dst + suffix)
+            if suffix == "":
+                main_ok = True
+        except Exception:
+            # 主库没成功，或 WAL 存在但没拷过来：
+            # 不能拿一份可能缺最新事务的快照去当作准确值。
+            if suffix in ("", "-wal"):
+                return "", tmpdir
+    return (dst if main_ok else ""), tmpdir
 
 
 def db_summary(state=None, keep_tmp=False):
@@ -189,13 +195,15 @@ def db_summary(state=None, keep_tmp=False):
     snap, tmpdir = _snapshot_db(db)
     if not snap:
         out["error"] = "数据库被占用且无法复制"
+        shutil.rmtree(tmpdir, ignore_errors=True)
         return out
 
     by_day = {}
     total = 0.0
     sessions = 0
     try:
-        con = sqlite3.connect("file:%s?mode=ro" % snap.replace("\\", "/"), uri=True)
+        uri = "file:%s?mode=ro" % urllib.parse.quote(snap.replace("\\", "/"), safe="/:")
+        con = sqlite3.connect(uri, uri=True)
         try:
             rows = con.execute("SELECT session_id, credit_json, updated_at FROM session_usage").fetchall()
         finally:

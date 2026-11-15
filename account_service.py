@@ -44,6 +44,7 @@ LOG_DIR = os.path.join(BASE, "logs")
 PROBE_LOG = os.path.join(LOG_DIR, "api-probe.log")
 CACHE = os.path.join(BASE, "account.json")
 COOKIE_FILE = os.path.join(BASE, "session.bin")
+LOGOUT_MARKER = os.path.join(BASE, "logout.pending")
 # WebView2 自己的 Cookie 库（desktop.py 里 private_mode=False + storage_path=数据目录/.webview-profile）。
 # 只用于会话过期时的只读诊断：能分清"服务端不认了"还是"本地 Cookie 早没了"。
 COOKIE_DB = os.path.join(BASE, ".webview-profile", "EBWebView", "Default", "Network", "Cookies")
@@ -85,7 +86,8 @@ SYNC_JS = r"""
     // 增量扫描：起始日由 Python 根据缓存里最新一天推算（见 _usage_since）
     const from = (window.__wbSince) || ds(new Date(now.getTime() - 29 * 86400000));
     // 逐页取全（此前只取第 1 页，导致日历只剩两天数据）。
-    // 每页 500、最多 8 页：单日调用量再大也能一次拉完，总量仍很小（只读、按天窗口）。
+    // 每页 500、最多 40 页（=2 万条）：重度账号也能拉完一个完整窗口；
+    // 真正超预算时记一个 truncated，Python 侧会写日志而不是静默少算。
     let page = 1, all = [], total = 0;
     do {
       const r = await post('/billing/meter/get-user-request-usage', {
@@ -95,9 +97,10 @@ SYNC_JS = r"""
       total = dd.total || 0;
       all = all.concat(dd.data || []);
       page += 1;
-    } while (all.length < total && page <= 8);
+    } while (all.length < total && page <= 40);
     out.usage = { status: 200, json: { data: { data: all, total: total } } };
     out.usageTotal = total;
+    out.usageTruncated = total > all.length;
     try {
       const ra = await fetch('/console/accounts', { credentials: 'include', headers: { accept: 'application/json' } });
       out.identity = await ra.json();
@@ -227,6 +230,48 @@ def _probe_sources(bill):
         _log("probe sources failed: %s" % e)
 
 
+def purge_pending_cookies():
+    """下次启动时清掉 WebView2 profile 里的 httpOnly Cookie。
+
+    注销时页面脚本删不掉 httpOnly，而此时 profile 被浏览器占着；
+    先留一个标记，下次启动（窗口还没创建）时直接从 Cookie 库里删行。
+    只删登录域，不动 localStorage，用户偏好不会丢。
+    """
+    if not os.path.exists(LOGOUT_MARKER):
+        return 0
+    if not os.path.exists(COOKIE_DB):
+        _clear_logout_marker()
+        return 0
+    try:
+        import sqlite3
+        con = sqlite3.connect(COOKIE_DB, timeout=2)
+        try:
+            sql = "DELETE FROM cookies WHERE " + " OR ".join(
+                ["host_key = ? OR host_key LIKE ?"] * len(COOKIE_DOMAINS))
+            params = []
+            for d in COOKIE_DOMAINS:
+                params += [d, "%." + d]
+            cur = con.execute(sql, params)
+            n = cur.rowcount
+            con.commit()
+        finally:
+            con.close()
+        _clear_logout_marker()
+        _log("logout: purged %s httpOnly cookies on startup" % n)
+        return n
+    except Exception as e:
+        _log("logout: purge pending cookies skipped: %s" % e)
+        return 0
+
+
+def _clear_logout_marker():
+    try:
+        if os.path.exists(LOGOUT_MARKER):
+            os.remove(LOGOUT_MARKER)
+    except OSError:
+        pass
+
+
 class AccountService:
     def __init__(self):
         self.win = None
@@ -260,6 +305,7 @@ class AccountService:
             # 是否已经为旧缓存补拉过一次完整窗口（补 client）。补过就不再全量拉。
             "clientSeeded": False,
             "usageRows": [],
+            "usageBase": [],
             "lastSync": None,
             "lastError": None,
             # 接口可能被服务端改掉：非登录类失败连续多次就置位，界面提示"先看看有没有新版本"。
@@ -281,7 +327,7 @@ class AccountService:
             d = fsutil.load_json(CACHE)
             if d is None:
                 raise FileNotFoundError(CACHE)
-            for k in ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "cloudClients", "clientSeeded", "usageRows", "lastSync", "interval", "origin", "autoLogin"):
+            for k in ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "cloudClients", "clientSeeded", "usageRows", "usageBase", "lastSync", "interval", "origin", "autoLogin"):
                 if k in d:
                     self.state[k] = d[k]
             self.interval_min = 60 if d.get("interval") is None else max(0, int(d.get("interval")))
@@ -292,7 +338,7 @@ class AccountService:
         try:
             # 原子写：这个文件上百 KB，直接 open(w) 截断再写，别的线程读到半截会解析失败
             fsutil.save_json(CACHE, {k: self.state[k] for k in
-                           ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "cloudClients", "clientSeeded", "usageRows", "lastSync", "interval", "origin", "autoLogin")},
+                           ("status", "user", "cloud", "packages", "daily", "cloudWeek", "cloudModels", "cloudClients", "clientSeeded", "usageRows", "usageBase", "lastSync", "interval", "origin", "autoLogin")},
                            indent=2)
         except Exception:
             pass
@@ -305,6 +351,7 @@ class AccountService:
     def open_login(self):
         if not self.win:
             return {"ok": False, "error": "登录窗口不可用"}
+        _clear_logout_marker()      # 重新登录：不能在下次启动把新 Cookie 清掉
         try:
             # 已经在登录页、这次登录会话还活着、且刚打开不久：直接亮窗口，不再 load_url。
             # 以前每次点「连接账号」都整页重载一次，二维码渲染完就被下一次加载顶掉。
@@ -339,6 +386,11 @@ class AccountService:
         """登录窗被用户关掉：停止登录态跟踪，别让后台还占着窗口导航。"""
         self._login_gen += 1        # 让正在跑的那个 watcher 下一轮自行退出，别再对着隐藏窗口探活
         self._login_active = False
+        # 用户主动取消时不要把 UI 永远卡在“等待登录”；
+        # 已有云端数据时保持原状态，没有时回到未连接。
+        with self.lock:
+            if self.state.get("status") == "logining" and not self.state.get("cloud"):
+                self.state["status"] = "disconnected"
         _log("login cancelled by user")
 
     def _install_hook(self):
@@ -423,6 +475,9 @@ class AccountService:
             # 新一轮登录刚打开就会被后台同步导航走，二维码又被刷掉。
             if gen == self._login_gen:
                 self._login_active = False
+                with self.lock:
+                    if self.state.get("status") == "logining" and not self.state.get("cloud"):
+                        self.state["status"] = "disconnected"
 
     def _href(self):
         try:
@@ -471,7 +526,14 @@ class AccountService:
             href = self.win.evaluate_js("location.href") or ""
         except Exception:
             return False
-        return str(href).startswith(origin)
+        # 必须比较完整 origin：startswith 会把
+        # https://www.workbuddy.cn.evil.com 也当成同源。
+        try:
+            from urllib.parse import urlsplit
+            h, o = urlsplit(str(href)), urlsplit(str(origin))
+            return (h.scheme.lower(), h.netloc.lower()) == (o.scheme.lower(), o.netloc.lower())
+        except Exception:
+            return False
 
     def _current_path(self):
         try:
@@ -700,8 +762,9 @@ class AccountService:
                     self.win.evaluate_js("window.__wbBill=null; window.__wbSince=%s;" % json.dumps(since))
                     self.win.evaluate_js(SYNC_JS)
                     raw = None
-                    for _ in range(30):
-                        time.sleep(0.3)
+                    # 每页 500 条最多 40 页，慢网下 9 秒会把正常拉取误判成失败。
+                    for _ in range(90):
+                        time.sleep(0.5)
                         try:
                             raw = self.win.evaluate_js("JSON.stringify(window.__wbBill||null)")
                         except Exception:
@@ -722,7 +785,9 @@ class AccountService:
                 raise RuntimeError(last_err or "接口未返回数据")
 
             _probe_sources(bill)
-            mapped = self._map(bill, self.state.get("usageRows") or [])
+            if bill.get("usageTruncated"):
+                _log("sync: usage rows truncated at page limit 40x500 (超重账号)")
+            mapped = self._map(bill, self.state.get("usageBase") or self.state.get("usageRows") or [])
 
             # —— 降级保护 ——
             # 接口字段改名/分页失效时，最伤人的不是报错，而是"看起来同步成功、数字全变 0"。
@@ -731,16 +796,21 @@ class AccountService:
             fresh = mapped["cloud"]
             stale_note = ""
             try:
-                new_avail = fresh.get("available") or 0
                 old_avail = prev.get("available") or 0
                 new_rows = mapped.get("usageRows") or []
-                if old_avail > 0 and new_avail <= 0:
+                # 只有字段缺失才算异常。服务端明确返回 0 是"真的用完了"，
+                # 沿用旧余额会让人永远看不到余量为 0。
+                if old_avail > 0 and not fresh.get("availableKnown", True):
                     fresh["available"] = old_avail
                     fresh["total"] = prev.get("total") or fresh.get("total") or 0
                     fresh["used"] = prev.get("used") or 0
-                    stale_note = "云端余额字段异常，沿用上次数据"
-                elif prev.get("used", 0) > 0 and not new_rows:
+                    stale_note = "云端余额字段缺失，沿用上次数据"
+                elif (prev.get("used", 0) > 0 and not new_rows
+                      and fresh.get("cycleStartText") == prev.get("cycleStartText")
+                      and (fresh.get("used") or 0) >= (prev.get("used") or 0)):
+                    # 新周期开始（起点变了或已用归零）时不能沿用上个周期的明细。
                     mapped["usageRows"] = self.state.get("usageRows") or []
+                    mapped["usageBase"] = self.state.get("usageBase") or self.state.get("usageRows") or []
                     mapped["daily"] = self.state.get("daily") or []
                     stale_note = "本次没有取到逐笔明细，沿用上次数据"
             except Exception as e:
@@ -760,6 +830,8 @@ class AccountService:
                     "cloudClients": mapped.get("cloudClients") or {},
                     "clientSeeded": True,       # 本次已是完整窗口：下次回增量
                     "usageRows": mapped.get("usageRows") or [],
+                    # usageRows 只给界面看；这份不限 1500，专用于下次增量合并。
+                    "usageBase": mapped.get("usageBase") or mapped.get("usageRows") or [],
                     "user": mapped["user"],
                     "lastSync": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "lastError": None,
@@ -769,6 +841,7 @@ class AccountService:
                     "origin": used_origin,
                 })
             self._expired_notified = False      # 连上了：下次过期可以再提醒一次
+            _clear_logout_marker()
             self._save_cache()
             threading.Thread(target=self.save_session, daemon=True).start()
             _log(f"sync ok available={mapped['cloud'].get('available')} "
@@ -808,7 +881,10 @@ class AccountService:
                 _log("sync auth diag: " + _cookie_diag())
             # 过期就主动弹登录窗：一次过期只弹一次，同步成功后在上面复位。
             # 注意必须放在 self.lock 之外 —— open_login 自己也要拿这把锁。
-            if auth_like and not self._expired_notified and self.on_expired:
+            # 扫码后的 force_nav 同步失败时不要再弹登录窗：
+            # 那会把刚扫好的页面又拉回二维码，用户只能重扫。
+            if (auth_like and not self._expired_notified and self.on_expired
+                    and not self._login_active):
                 self._expired_notified = True
                 threading.Thread(target=self._fire_expired, daemon=True).start()
             return {"ok": False, "error": msg, "state": self.snapshot()}
@@ -836,8 +912,9 @@ class AccountService:
         # 补过一次完整窗口就够了，用 clientSeeded 记住。
         # 不能拿"还有没有空 client"当判据：服务端有些历史行永远不带 client（实测 13 条），
         # 那样每次同步都会退化成 30 天全量，正好撞上要避开的频率风控。
+        base_rows = self.state.get("usageBase") or self.state.get("usageRows") or []
         if not self.state.get("clientSeeded") and any(
-                not r.get("client") for r in (self.state.get("usageRows") or [])):
+                not r.get("client") for r in base_rows):
             return full
         days = [d.get("date") for d in (self.state.get("daily") or []) if d.get("date")]
         if not days:
@@ -853,7 +930,8 @@ class AccountService:
 
     def _map(self, bill, prev_rows=None):
         sm = ((bill.get("summary") or {}).get("json") or {}).get("data") or {}
-        available = _num(sm.get("TotalCredits"))
+        available_raw = sm.get("TotalCredits")
+        available = _num(available_raw)
         groups = sm.get("CreditGroups") or []
         packages = []
         for g in groups:
@@ -875,12 +953,14 @@ class AccountService:
                 remain = _num(a.get("CycleCapacityRemainPrecise")
                               or a.get("CycleCapacityRemain")
                               or a.get("CapacityRemain") or 0)
+                # 已用尽的包也要算进周期起点：它们的消耗已经
+                # 计入 used，跳过它们会让对账窗口偏晚。
+                if a.get("CycleStartTime"):
+                    starts.append(str(a["CycleStartTime"]))
                 if remain <= 0:
                     continue
                 if a.get("CycleEndTime"):
                     expiries.append(str(a["CycleEndTime"]))
-                if a.get("CycleStartTime"):
-                    starts.append(str(a["CycleStartTime"]))
         expire_at = min(expiries) if expiries else ""
         cycle_start = min(starts)[:10] if starts else ""
 
@@ -979,8 +1059,9 @@ class AccountService:
             usage_rows.append({"id": rid, "t": t, "credit": round(v["credit"], 4),
                                "model": v["model"], "purpose": v["agentPurpose"],
                                "client": v["client"]})
-        usage_rows.sort(key=lambda x: x["t"], reverse=True)
-        usage_rows = usage_rows[:1500]
+        usage_base = list(usage_rows)
+        usage_base.sort(key=lambda x: x["t"], reverse=True)
+        usage_rows = usage_base[:1500]
 
         # 账号身份（昵称/头像/手机号）
         ident = {}
@@ -1069,8 +1150,12 @@ class AccountService:
             "cloudModels": cloud_models_detail,
             "cloudClients": cloud_clients,
             "usageRows": usage_rows,
+            # 用于下一次增量合并的全量基数；不限 1500，
+            # 否则超重账号每次同步都会丢掉最早几天的明细。
+            "usageBase": usage_base,
             "cloud": {
                 "available": round(available, 2),
+                "availableKnown": available_raw is not None,
                 "total": round(total, 2),
                 "used": round(used, 2),
                 "rowsSum": rows_sum,
@@ -1101,11 +1186,14 @@ class AccountService:
                 # 下一个 30 秒 tick 这两个条件都不成立，轮询自然接上。
                 # 注意只跳过 expired，不能把 logining 也加进来 —— cancel_login() 不改 status，
                 # logining 没有任何出口，跳了就会永久停摆。
-                if self.state.get("status") == "expired" or self._login_active:
+                st = self.state.get("status")
+                if st == "expired" or self._login_active:
                     continue
                 # 门槛用"有没有云端数据"而不是"状态是不是 connected"：
                 # 一次网络失败会把状态改成 error，用状态判断就再也不重试了。
-                if self.state.get("cloud") is None:
+                # 但刚登录后第一次同步就失败时云数据还是空的，这里放行 error，
+                # 让它按间隔自动重试；没登录（disconnected/logining）仍然不动。
+                if self.state.get("cloud") is None and st != "error":
                     continue
                 if self.interval_min <= 0:        # 0 = 仅手动，不做任何自动请求
                     continue
@@ -1137,33 +1225,41 @@ class AccountService:
     def logout(self):
         """断开账号：清数据、删会话存档、关闭自动回填，并尽力清掉 profile 里的 Cookie。
 
-        以前只清了内存里的 state，session.bin 与 WebView2 profile 里的 Cookie 都还在，
-        重启后 try_restore 直接把账号又连回来了 —— 「退出登录」等于没退。
+        与正在进行的同步互斥：否则同步结束后会把账号数据又写回内存/缓存。
+        httpOnly Cookie 当前页面删不掉：留一个标记，下次启动时从 Cookie 库里清掉。
         """
-        with self.lock:
-            self.state.update({"status": "disconnected", "user": None, "cloud": None,
-                               "packages": [], "daily": [], "cloudWeek": None, "cloudModels": [],
-                               "cloudClients": {}, "clientSeeded": False,
-                               # usageRows 也要清：否则退出登录后流水页还挂着上一个账号的逐笔记录，
-                               # 连导出 CSV 都能把它带出去
-                               "usageRows": [],
-                               "lastSync": None, "lastError": None, "autoLogin": False})
-            keep = {k: self.state[k] for k in ("interval", "autoLogin")}
+        got = self._sync_lock.acquire(timeout=15)
         try:
-            if os.path.exists(COOKIE_FILE):
-                os.remove(COOKIE_FILE)
-                _log("logout: session.bin removed")
-        except Exception as e:
-            _log(f"logout: remove session failed {e}")
-        # 缓存只留设置项，账号数据不留在磁盘上。
-        # 必须原子写：这是唯一一处绕过 _save_cache 的落盘，直接 open(w) 会把文件先截断，
-        # 同一时刻在跑的后台同步或界面读取可能正好读到半截 JSON。
-        try:
-            fsutil.save_json(CACHE, keep, indent=2)
-        except Exception as e:
-            _log(f"logout: write cache failed {e}")
-        self._clear_profile_cookies()
-        return {"ok": True}
+            with self.lock:
+                self.state.update({"status": "disconnected", "user": None, "cloud": None,
+                                   "packages": [], "daily": [], "cloudWeek": None, "cloudModels": [],
+                                   "cloudClients": {}, "clientSeeded": False,
+                                   # usageRows 也要清：否则退出登录后流水页还挂着上一个账号的逐笔记录
+                                   "usageRows": [],
+                                   "usageBase": [],
+                                   "lastSync": None, "lastError": None, "autoLogin": False})
+                keep = {k: self.state[k] for k in ("interval", "autoLogin")}
+            try:
+                if os.path.exists(COOKIE_FILE):
+                    os.remove(COOKIE_FILE)
+                    _log("logout: session.bin removed")
+            except Exception as e:
+                _log(f"logout: remove session failed {e}")
+            try:
+                with open(LOGOUT_MARKER, "w", encoding="utf-8") as f:
+                    f.write("1")
+            except Exception as e:
+                _log(f"logout: write marker failed {e}")
+            # 缓存只留设置项，账号数据不留在磁盘上。
+            try:
+                fsutil.save_json(CACHE, keep, indent=2)
+            except Exception as e:
+                _log(f"logout: write cache failed {e}")
+            self._clear_profile_cookies()
+            return {"ok": True}
+        finally:
+            if got:
+                self._sync_lock.release()
 
     def _clear_profile_cookies(self):
         """尽力清掉登录窗所在域的 Cookie。
@@ -1193,7 +1289,8 @@ class AccountService:
 
     def snapshot(self):
         with self.lock:
+            # usageBase 只用于合并，不回给界面：它可能比 usageRows 大很多。
             d = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
-                 for k, v in self.state.items()}
+                 for k, v in self.state.items() if k != "usageBase"}
         d["busy"] = self._syncing
         return d

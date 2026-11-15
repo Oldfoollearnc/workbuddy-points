@@ -32,6 +32,7 @@ import app_paths
 import fsutil
 
 CACHE = app_paths.data_path("checkin.json")
+LOG_PATH = app_paths.data_path("logs", "app.log")
 
 ORIGIN = "https://www.workbuddy.cn"
 PROFILE_PATH = "/profile/plans-usage"
@@ -82,7 +83,7 @@ _FETCH_JS = r"""
 def _log(msg):
     try:
         from logutil import log as _l
-        _l(msg)
+        _l(LOG_PATH, msg, "checkin")
     except Exception:
         pass
 
@@ -405,7 +406,10 @@ class CheckinService:
 
     def _page_ready(self):
         href = self.account._href() or ""
-        return ("workbuddy.cn" in href) or ("codebuddy.cn" in href)
+        if "workbuddy.cn" not in href and "codebuddy.cn" not in href:
+            return False
+        # 登录页虽然在同一域，但 billing 接口在上面只会返回 401
+        return "/login" not in href
 
     def _reload_page(self, timeout=12.0):
         """强制重新加载页面，用于 401 后的自愈（会话多半只是页面状态坏了）。"""
@@ -454,7 +458,11 @@ class CheckinService:
         """
         resp = self._call_once(path, method, body, timeout)
         if retry > 0 and resp.get("status") in (401, 403, 500, 502, 503, 504):
-            time.sleep(1.5)
+            if resp.get("status") in (401, 403):
+                # 大多数情况下不是真过期，而是页面状态坏了：重载一次再试。
+                self._reload_page()
+            else:
+                time.sleep(1.5)
             again = self._call_once(path, method, body, timeout)
             if again.get("status") == 200:
                 return again
@@ -635,12 +643,14 @@ class CheckinService:
         while not self._watch_stop.is_set():
             travel = None
             ok = True
+            reason = None
             try:
                 if self.options.get("auto", True):
                     snap = self.run(travel_auto=bool(self.options.get("travel", True)),
                                     lock_timeout=8, quiet=True)
                     res = (snap or {}).get("result") or {}
                     ok = bool(res.get("ok"))
+                    reason = res.get("reason")
                     travel = res.get("travel")
                     if self.on_update:
                         try:
@@ -653,7 +663,10 @@ class CheckinService:
 
             # 失败时按 1 → 5 → 15 分钟退避，最多三次；成功立刻清零。
             # 不加这个，一次网络抖动就要等到下个自然节点（可能 4 小时后）。
-            if not self.options.get("auto", True):
+            if reason in ("no_account", "logged_out", "login_active"):
+                # 没连账号 / 退出登录 / 正在扫码：不是失败，别按 1→5→15 分钟退避空转。
+                wait = 3600.0
+            elif not self.options.get("auto", True):
                 # 自动签到关掉时别每 15 分钟醒一次空转；用户重新打开开关会走 _wake 叫醒
                 wait = 3600.0
             elif ok:
@@ -1113,16 +1126,33 @@ class CheckinService:
             if not self._ensure_page():
                 out["error"] = "打不开账号页面：多半是网络断了"
                 return out
+            claimed = 0
             if kind == "checkin":
                 self._act_checkin(out)
             elif kind == "claim":
                 self._act_claim(out)
+                claimed = self._int0(out.get("claimed"))
             else:
                 self._act_travel(out)
             # 无论成败都回读一次：界面显示的必须是服务端的事实
             truth = {"ok": True, "checkin": None, "travel": None}
             self._read_truth(truth)
             self._reconcile(truth)
+            # 手动领取成功（服务端已变 idle）要记进今日结论：否则本地的
+            # arriveAt / pending 还在，界面会一直显示"已到家待领取"，
+            # 而云端其实早就领过了。
+            tv = truth.get("travel") or {}
+            if kind == "claim" and out.get("ok") and tv.get("state") == "idle" and claimed:
+                self._note_travel_claim({"claimed": claimed})
+                with self.lock:
+                    t = self._today()
+                    t["dispatched"] = True
+                    t["claimed"] = True
+                    t["reward"] = self._int0(self.state.get("claimedToday"))
+                    t["pending"] = 0
+                    t.pop("arriveAt", None)
+                    t.pop("arrived", None)
+                    t.pop("departAt", None)
             # 手动动作的结论也要落盘。run() 里会存，act() 少这一句，
             # 结果是"刚签完就退出程序"，下次启动又当没签过重新问一遍。
             self._save_cache()
@@ -1168,9 +1198,10 @@ class CheckinService:
         c = self._call(TRAVEL_CLAIM, "POST", {})
         code = self._code(c)
         if c.get("status") == 200 and code == CODE_OK:
-            out.update(ok=True, message=("领到 %s 分" % before) if before else "积分已领取")
+            out.update(ok=True, claimed=before,
+                       message=("领到 %s 分" % before) if before else "积分已领取")
         elif c.get("status") == 200 and code is None:
-            out.update(ok=True, message="领取请求已发出，正在确认结果")
+            out.update(ok=True, claimed=before, message="领取请求已发出，正在确认结果")
         elif c.get("status") == 200:
             out["error"] = "服务端没有确认领取（code=%s）" % code
         else:
@@ -1252,6 +1283,10 @@ class CheckinService:
                     if tv.get("limitReached"):
                         t["dispatched"] = True
                         t["limitReached"] = True
+                        # 服务端说不在路上 = 这趟已经结束（领过了）。本地若还留着
+                        # 到家时间/待领金额，界面会一直催"待领取"，必须一起清掉。
+                        for k in ("pending", "arriveAt", "arrived", "departAt"):
+                            t.pop(k, None)
                     else:
                         # 服务端说今天还没派 → 清掉本地"已派出/已领取"的旧结论。
                         # 这是"猫猫没派送却显示今日已完成"的正面纠正。
@@ -1277,13 +1312,14 @@ class CheckinService:
         界面就能一直显示，跨天自动清零。
         """
         today = dt.date.today().isoformat()
-        if self.state.get("claimedDate") != today:
-            self.state["claimedDate"] = today
-            self.state["claimedToday"] = 0
-        got = self._int0(travel.get("claimed"))
-        if got:
-            self.state["claimedToday"] = self._int0(self.state.get("claimedToday")) + got
-        travel["claimedToday"] = self._int0(self.state.get("claimedToday"))
+        with self.lock:
+            if self.state.get("claimedDate") != today:
+                self.state["claimedDate"] = today
+                self.state["claimedToday"] = 0
+            got = self._int0(travel.get("claimed"))
+            if got:
+                self.state["claimedToday"] = self._int0(self.state.get("claimedToday")) + got
+            travel["claimedToday"] = self._int0(self.state.get("claimedToday"))
 
     def _travel_locations(self):
         r = self._call(TRAVEL_CONFIG, "GET")

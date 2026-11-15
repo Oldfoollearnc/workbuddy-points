@@ -71,7 +71,7 @@
       holiday: true, signin: true, localRefresh: 60,
       calGlow: true, calIntro: true, groupMinute: true, notice: true,
       checkinAuto: true, checkinTravel: true, checkinDismissed: '',
-      sideSwipeSec: 3, popSwipeSec: 5, warnDismissed: '', warnBelow: 500,
+      sideSwipeSec: 3, warnDismissed: '', warnBelow: 500,
       dailyBudget: 0,       // 每日预算（分）；0 = 不设
       trendRange: 30 },
     readPrefs()
@@ -362,9 +362,6 @@
     renderActive(true);
     // 小窗每次重新显示都回到第一张「今日使用积分」：不记忆上次滑到哪，
     // 否则下次点开看到的是一张和"今天用了多少"无关的卡，得先滑回来。
-    if (state.mode === 'popup') {
-      if (popSwipe) popSwipe.reset();
-    }
     return changed;
   }
 
@@ -1195,8 +1192,8 @@
     // 云端口径优先：本机没有 WorkBuddy 会话时（比如整天只用 CodeBuddy），
     // D.modelsToday 是空的，但 todayStat() 里还有云端逐笔，不能报"今天还没有消耗"。
     const stat = todayStat();
-    const models = (D.modelsToday && D.modelsToday.length ? D.modelsToday
-      : (stat.models && stat.models.length ? stat.models : (D.models || []))).slice();
+    const models = (stat.cloud && stat.models && stat.models.length ? stat.models
+      : (D.modelsToday && D.modelsToday.length ? D.modelsToday : (D.models || []))).slice();
     const projs = (D.projectsToday || []).slice();
     const purposes = (D.purposesToday || []).slice();
     if (!models.length && !projs.length) return { title: '今日消耗构成', sub: '今天还没有消耗', html: detailEmpty() };
@@ -1583,7 +1580,6 @@
   /* ---------------- 滑动卡片（左下角 / 小窗共用） ---------------- */
 
   let sideSwipe = null;
-  let popSwipe = null;
 
   /** 左下角四张卡：额度（静态）+ 签到 / 猫猫 / 任务。 */
   /** 把一份签到/旅行/任务状态渲染到任意一组元素上（左下角和小窗共用）。 */
@@ -1814,15 +1810,19 @@
 
     window.addEventListener('mousemove', e => {
       if (!st) return;
-      const dx = e.screenX - st.sx;
-      const dy = e.screenY - st.sy;
+      // screenX 是 CSS 像素，GetWindowRect 是物理像素：高 DPI 下必须乘缩放比，
+      // 否则拖边框时窗口边缘会比鼠标慢（看着就是“拖不动”）。
+      const dpr = window.devicePixelRatio || 1;
+      const dx = (e.screenX - st.sx) * dpr;
+      const dy = (e.screenY - st.sy) * dpr;
       let { x, y, w, h } = st;
       if (st.dir.includes('e')) w += dx;
       if (st.dir.includes('s')) h += dy;
       if (st.dir.includes('w')) { x += dx; w -= dx; }
       if (st.dir.includes('n')) { y += dy; h -= dy; }
-      if (w < 1024) { if (st.dir.includes('w')) x = st.x + st.w - 1024; w = 1024; }
-      if (h < 680) { if (st.dir.includes('n')) y = st.y + st.h - 680; h = 680; }
+      const minW = Math.round(940 * dpr), minH = Math.round(600 * dpr);
+      if (w < minW) { if (st.dir.includes('w')) x = st.x + st.w - minW; w = minW; }
+      if (h < minH) { if (st.dir.includes('n')) y = st.y + st.h - minH; h = minH; }
       queue(x, y, w, h);
     });
 
@@ -1981,14 +1981,21 @@
     const root = $('#miniShell');
     if (!root || root.dataset.bound) return;
     root.dataset.bound = '1';
-    let clickTimer = 0;
+    let clickTimer = 0, pressX = 0, pressY = 0, dragged = false;
     root.addEventListener('mousedown', e => {
-      if (e.button !== 0 || !bridge.has()) return;
-      if (e.target.closest('button')) return;
+      if (e.button !== 0) return;
+      pressX = e.screenX; pressY = e.screenY; dragged = false;
+      if (!bridge.has() || e.target.closest('button')) return;
       e.preventDefault();
       if (bridge.can('mini_drag_start')) bridge.call('mini_drag_start');
     });
+    window.addEventListener('mouseup', e => {
+      // 拖动会把窗口跟着光标一起移走，但浏览器仍会补一个 click；
+      // 用屏幕坐标位移区分"拖了一下"和"点了一下"。
+      if (Math.abs(e.screenX - pressX) > 3 || Math.abs(e.screenY - pressY) > 3) dragged = true;
+    });
     root.addEventListener('click', e => {
+      if (dragged) { dragged = false; return; }
       if (e.target.closest('button')) return;
       clearTimeout(clickTimer);
       clickTimer = setTimeout(() => {
@@ -2118,7 +2125,15 @@
         msgs.push(`可用积分只剩 ${F.credit(al.available)} 分`);
       }
       const stat = todayStat();
-      const prev = (D.daily || []).slice(-8, -1).map(d => d.points || 0);
+      let prev;
+      if (stat.cloud && ACCOUNT && Array.isArray(ACCOUNT.daily)) {
+        const byDay = {};
+        ACCOUNT.daily.forEach(d => { if (d && d.date) byDay[String(d.date).slice(0, 10)] = Number(d.points) || 0; });
+        prev = [];
+        for (let i = 7; i >= 1; i--) prev.push(byDay[dayKeyOf(addDays(new Date(), -i))] || 0);
+      } else {
+        prev = (D.daily || []).slice(-8, -1).map(d => Number(d.consumed) || 0);
+      }
       const avg = prev.length ? prev.reduce((a, b) => a + b, 0) / prev.length : 0;
       if (avg > 1 && stat.consumed > avg * 3 && stat.consumed > 10) {
         msgs.push(`今日消耗 ${F.credit(stat.consumed)} 分，是近 7 天均值的 ${(stat.consumed / avg).toFixed(1)} 倍`);
@@ -2363,14 +2378,6 @@
     }
   }
 
-  function cycleDaysLeft() {
-    const end = D.account.cycleEnd;
-    if (!end) return '—';
-    const e = end instanceof Date ? end : new Date(end);
-    const diff = Math.ceil((e - new Date()) / 86400000);
-    return isNaN(diff) ? '—' : Math.max(0, diff);
-  }
-
   function renderTrend() {
     // 'month' = 本月 1 号到今天；固定天数则是滚动窗口。
     // 跨月时"30 天"会把两个月混在一起，看月度趋势需要这个口径。
@@ -2447,13 +2454,15 @@
     const connected = !!(ACCOUNT && ACCOUNT.status === 'connected');
     const cloudDaily = (connected && Array.isArray(ACCOUNT.daily)) ? ACCOUNT.daily : [];
     const want = String(clientId || '');
-    const year = new Date().getFullYear();
-    const localDaily = (D.daily || []).map(d => ({
-      date: d.date && d.date.length === 5 ? `${year}-${d.date}` : d.date,
-      points: d.consumed || 0,
-      calls: d.calls == null ? null : d.calls,
-      tokens: d.tokens == null ? null : d.tokens
-    }));
+    const localDaily = (D.daily || []).map(d => {
+      const dt = d.date && d.date.length === 5 ? monthDayToDate(d.date) : null;
+      return {
+        date: dt ? dayKeyOf(dt) : d.date,
+        points: d.consumed || 0,
+        calls: d.calls == null ? null : d.calls,
+        tokens: d.tokens == null ? null : d.tokens
+      };
+    });
     const localMap = {};
     localDaily.forEach(d => { if (d.date) localMap[d.date] = d; });
 
@@ -2712,18 +2721,47 @@
   };
 
   /** 云端账号级消耗（含其他设备）。没有云端逐笔时返回 null。 */
-  function cloudPeriodSum(range) {
+  function cloudFirstDay() {
+    const daily = (ACCOUNT && Array.isArray(ACCOUNT.daily)) ? ACCOUNT.daily : [];
+    if (daily.length) {
+      let first = '';
+      daily.forEach(d => {
+        if (!d || !d.date) return;
+        const k = String(d.date).slice(0, 10);
+        if (!first || k < first) first = k;
+      });
+      if (first) return first;
+    }
+    const rows = cloudRows();
+    if (!rows || !rows.length) return '';
+    let first = '';
+    rows.forEach(r => {
+      const t = rowTime(r);
+      if (!isNaN(t.getTime())) {
+        const k = dayKeyOf(t);
+        if (!first || k < first) first = k;
+      }
+    });
+    return first;
+  }
+
+  /** 云端账号级消耗（含其他设备）。没有云端逐笔时返回 null。 */
+  function cloudPeriodSum(range, sel) {
     const rows = cloudRows();
     if (!rows || !rows.length) return null;
-    let cut;
-    if (range === 'all') {
-      // 「全部」要对齐本机记录的起点，否则本机 60 天、云端 30 天，
-      // 两边时间窗不一样，算出来的"其他设备"是假的。
-      // 后端给的是 meta.firstDay，早期前端写的是 firstDayAll，两个都认。
-      const first = (D.meta && (D.meta.firstDayAll || D.meta.firstDay)) || '';
-      const from = first ? new Date(first + 'T00:00:00').getTime() : NaN;
-      if (!Number.isFinite(from)) return rows.reduce((s, r) => s + rowCredit(r), 0);
-      cut = from;
+    const firstLocal = (D.meta && (D.meta.firstDayAll || D.meta.firstDay)) || '';
+    let cut, endCut = Infinity;
+    if (range === 'custom' && sel && sel.start && sel.end) {
+      const a = sel.start <= sel.end ? sel.start : sel.end;
+      const b = sel.start <= sel.end ? sel.end : sel.start;
+      cut = new Date(a + 'T00:00:00').getTime();
+      endCut = new Date(b + 'T23:59:59').getTime();
+    } else if (range === 'all') {
+      // 云端只保留最近 29 天：本机起点更早时，两边时间窗对不上，不给对比值
+      const firstCloud = cloudFirstDay();
+      if (firstLocal && firstCloud && firstCloud > firstLocal) return null;
+      const from = firstLocal ? new Date(firstLocal + 'T00:00:00').getTime() : NaN;
+      cut = Number.isFinite(from) ? from : -Infinity;
     } else if (range === 'month') {
       const now = new Date();
       cut = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
@@ -2731,20 +2769,42 @@
       cut = Date.now() - Number(range) * 86400000;
     }
     let total = 0, hit = 0;
-    rows.forEach(r => {
-      const t = rowTime(r);
-      if (t && t.getTime() >= cut) { total += rowCredit(r); hit += 1; }
-    });
-    return hit ? total : null;
+    const daily = Array.isArray(ACCOUNT.daily) ? ACCOUNT.daily : [];
+    if (daily.length) {
+      // 按天聚合是完整的，不受 usageRows 1500 条限制
+      daily.forEach(d => {
+        if (!d || !d.date) return;
+        const t = new Date(String(d.date).slice(0, 10) + 'T00:00:00').getTime();
+        if (!isNaN(t) && t >= cut && t <= endCut) { total += Number(d.points) || 0; hit += 1; }
+      });
+      localTail().forEach(e => {
+        const t = e.time instanceof Date ? e.time : new Date(e.time);
+        if (!isNaN(t.getTime()) && t.getTime() >= cut && t.getTime() <= endCut) {
+          total += Number(e.points) || 0; hit += 1;
+        }
+      });
+    } else {
+      rows.forEach(r => {
+        const t = rowTime(r);
+        if (t && t.getTime() >= cut && t.getTime() <= endCut) { total += rowCredit(r); hit += 1; }
+      });
+    }
+    return hit || total ? total : null;
   }
 
-  /** 某来源在指定周期的消耗：读云端按天聚合，不受 usageRows 1500 条上限影响。 */
-  function clientPeriodSum(id, range) {
+  function clientPeriodSum(id, range, sel) {
     const days = clientDays(id);
     if (!days || !days.length) return null;
-    let cut;
-    if (range === 'all') {
+    let cut, endCut = Infinity;
+    if (range === 'custom' && sel && sel.start && sel.end) {
+      const a = sel.start <= sel.end ? sel.start : sel.end;
+      const b = sel.start <= sel.end ? sel.end : sel.start;
+      cut = new Date(a + 'T00:00:00').getTime();
+      endCut = new Date(b + 'T23:59:59').getTime();
+    } else if (range === 'all') {
       const first = (D.meta && (D.meta.firstDayAll || D.meta.firstDay)) || '';
+      const firstCloud = days.reduce((m, d) => (!m || (d.date && d.date < m) ? d.date : m), '');
+      if (first && firstCloud && firstCloud > first) return null;
       const from = first ? new Date(first + 'T00:00:00').getTime() : NaN;
       cut = Number.isFinite(from) ? from : -Infinity;
     } else if (range === 'month') {
@@ -2756,7 +2816,7 @@
     let total = 0;
     days.forEach(d => {
       const t = new Date(d.date + 'T00:00:00').getTime();
-      if (!isNaN(t) && t >= cut) total += Number(d.points) || 0;
+      if (!isNaN(t) && t >= cut && t <= endCut) total += Number(d.points) || 0;
     });
     return total > 0 ? total : null;
   }
@@ -2768,7 +2828,7 @@
     setText('#lcValue', F.credit(local));
     setText('#lcMachine', (D.meta && D.meta.machine) ? D.meta.machine : '本机');
 
-    const cloud = cloudPeriodSum(range);
+    const cloud = cloudPeriodSum(range, state.localSel);
     const connected = !!(ACCOUNT && ACCOUNT.status === 'connected');
     if (cloud && cloud > 0) {
       setText('#lcCloud', F.credit(cloud) + ' 分');
@@ -2784,7 +2844,7 @@
     const others = clients ? clients.filter(o => o.id && !isWorkBuddyClient(o.id)) : [];
     const otherLabel = $('#lcOtherLabel');
     if (others.length === 1) {
-      const sum = clientPeriodSum(others[0].id, range);
+      const sum = clientPeriodSum(others[0].id, range, state.localSel);
       if (otherLabel) {
         otherLabel.textContent = others[0].name;
         otherLabel.title = `${others[0].name} 的云端计费值`;
@@ -2818,7 +2878,11 @@
       pickBtn.textContent = range === 'custom' ? '换日期' : '按日期';
     }
     if (!(cloud && cloud > 0)) {
-      note += connected ? ' · 云端同期没有逐笔数据' : ' · 连上账号后可对比占比';
+      note += connected
+        ? (range === 'all'
+            ? ' · 云端仅保留最近 29 天，无法与本机全部历史对比'
+            : ' · 云端同期没有逐笔数据')
+        : ' · 连上账号后可对比占比';
     }
     setText('#lcNote', note);
     $$('#lcSeg button').forEach(b => b.classList.toggle('is-active', b.dataset.lc === range));
@@ -2918,7 +2982,7 @@
     const calTotal = calDays.reduce((a, b) => a + b.points, 0);
     const activeDays = calDays.filter(d => d.points > 0).length;
     setText('#weekSum', `区间合计 ${F.credit(calTotal)} 分`);
-    setText('#calSub', `每格一天，从当月起按整月对齐 · 颜色越深消耗越多 · 悬停查看积分 / 次数 / Token`);
+    setText('#calSub', `每格一天，按整月对齐 · 颜色越深消耗越多 · 悬停查看积分 / 次数 / Token`);
 
     const srcChip = $('#calSource');
     if (srcChip) {
@@ -3190,6 +3254,8 @@
 
   function renderLedger(reset) {
     if (reset) state.ledgerLimit = 24;
+    // 日历 / 排行行会把类型改成 all，这里统一把按钮高亮对齐真实状态
+    $$('#ledgerType button').forEach(b => b.classList.toggle('is-active', b.dataset.type === state.ledgerType));
     const full = ledgerAll();
     syncLedgerFilter(full);
     const dayChip = $('#ledgerDayChip');
@@ -3210,6 +3276,8 @@
     // 且不受"类型筛选 / 搜索框"影响（以前用筛选后的 all 求和，一搜索数字就变了）
     const stat = todayStat();
     const dayTotal = stat.consumed || 1;
+    const nowD = new Date();
+    const todayK = `${nowD.getFullYear()}-${F.pad(nowD.getMonth() + 1)}-${F.pad(nowD.getDate())}`;
 
     const hasCloud = ledgerSource !== 'local';
     setHTML('#ledgerSub', hasCloud
@@ -3274,6 +3342,20 @@
         const k = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())}`;
         daySum[k] = (daySum[k] || 0) + e.points;
       });
+      // 当天完整合计：云端按天聚合 + 本机 daily，取较大值。
+      // daySum 只是当前已加载的 24 行，不能代表全天。
+      const fullDay = {};
+      (ACCOUNT && Array.isArray(ACCOUNT.daily) ? ACCOUNT.daily : []).forEach(d => {
+        if (d && d.date) fullDay[String(d.date).slice(0, 10)] = Number(d.points) || 0;
+      });
+      (D.daily || []).forEach(d => {
+        const dt = d.date && d.date.length === 5 ? monthDayToDate(d.date) : null;
+        const k = dt ? dayKeyOf(dt) : d.date;
+        if (k) fullDay[k] = Math.max(fullDay[k] || 0, Number(d.consumed) || 0);
+      });
+      const dayDenom = k => k === todayK
+        ? dayTotal
+        : Math.max(daySum[k] || 0, fullDay[k] || 0, 1);
       const out = [];
       let lastDay = '';
       rows.forEach((e, i) => {
@@ -3282,7 +3364,7 @@
         const dk = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())}`;
         if (dk !== lastDay) {
           lastDay = dk;
-          out.push(`<div class="day-sep"><span>${F.dateKey(t)} 周${wd}</span><b>${F.credit(daySum[dk] || 0)} 分</b></div>`);
+          out.push(`<div class="day-sep"><span>${F.dateKey(t)} 周${wd}</span><b>${F.credit(dayDenom(dk))} 分</b></div>`);
         }
         const key = gkeyOf(t, i);
         const group = groups[key] || { list: [], sum: 0 };
@@ -3291,14 +3373,16 @@
         const grouped = group.list.length > 1;
         // 首行展示的是该分钟合计，占比必须用合计算，否则会出现"-0.52 / 0.54%"这种对不上的组合
         const shownPts = (isFirst && grouped) ? group.sum : e.points;
-        const share = shownPts / dayTotal;
+        // 今天用完整的今日合计；翻到其他日期时按那一天的合计算。
+        // 以前一律除以今日合计，今天没消耗时所有历史行会显示成几百上千 %。
+        const share = shownPts / dayDenom(dk);
         // 合并后同一张表里既有云端逐笔也有本机补足的记录，标一下来源，避免误读。
         // 云端行再带上客户端（WorkBuddy / CodeBuddy），同一个池里也能一眼分清。
         const srcText = hasCloud
           ? (e.src === 'cloud' ? (e.client ? '云端 · ' + clientName(e.client) : '云端') : '本机')
           : '';
         const timeCell = isFirst
-          ? `<span class="t">${F.dateKey(t)} ${F.clock(t)}${grouped ? `<i class="minute-badge">×${group.list.length}</i>` : ''}<small>周${wd}${srcText ? ' · ' + srcText : ''}</small></span>`
+          ? `<span class="t">${F.dateKey(t)} ${F.clock(t)}${grouped ? `<i class="minute-badge">×${group.list.length}</i>` : ''}<small>周${wd}${srcText ? ' · ' + esc(srcText) : ''}</small></span>`
           : `<span class="t t--cont"><i class="rail"></i></span>`;
         // 同一分钟的积分合计放到「积分」列；时间徽标只留 ×N
         // 赠送 / 退回类记录（type=earn）不参与消耗占比，正号显示，避免出现 "-1,000 / 657%" 这种怪组合
@@ -3516,7 +3600,8 @@
         const st = (r && r.state) || null;
         if (!st) return;
         setText('#srcPath', st.home || '—');
-        setText('#srcKind', `${kindText[st.sourceKind || (st.valid ? 'jsonl' : 'none')] || '—'}${st.source === 'manual' ? ' · 手动指定' : st.source === 'auto' ? ' · 自动探测' : ''}`);
+        const kindKey = (D.meta && D.meta.sourceKind) || (st.valid ? 'jsonl' : 'none');
+        setText('#srcKind', `${kindText[kindKey] || '—'}${st.source === 'manual' ? ' · 手动指定' : st.source === 'auto' ? ' · 自动探测' : ''}`);
         const note = $('#dbNote');
         if (note) {
           note.textContent = st.valid
@@ -3544,8 +3629,6 @@
     if ($('#optSignin')) $('#optSignin').checked = prefs.signin !== false;
     if ($('#optCheckinAuto')) $('#optCheckinAuto').checked = prefs.checkinAuto !== false;
     if ($('#optCheckinTravel')) $('#optCheckinTravel').checked = prefs.checkinTravel !== false;
-    const psSel = $('#optPopSwipe');
-    if (psSel && document.activeElement !== psSel) psSel.value = String(prefs.popSwipeSec ?? 5);
     const lrSel = $('#optLocalRefresh');
     if (lrSel && document.activeElement !== lrSel) lrSel.value = String(prefs.localRefresh ?? 60);
     // 覆盖天数以服务端配置为准（meta 里带回），避免本地偏好与服务端配置打架
@@ -3690,7 +3773,6 @@
       if (popCard) popCard.classList.remove('is-refreshing');
       renderActive(true);
       const t = new Date();
-      setText('#syncTime', `${F.pad(t.getHours())}:${F.pad(t.getMinutes())}`);
       toast(bridge.has() ? '已重新读取本机用量' : '浏览器预览无法读取本机数据', bridge.has() ? 'i-check' : 'i-info');
     }, motionOff() ? 60 : (popCard ? 660 : 560));
   }
@@ -3891,33 +3973,25 @@
           else if (!(r && r.cancelled)) toast('导出失败：' + ((r && r.error) || '未知错误'), 'i-alert');
           return;
         }
-        if (!bridge.can('export_ledger_csv')) return;
+        if (!bridge.can('export_rows_csv')) { toast('这个版本不支持逐笔导出', 'i-info'); return; }
         // 逐笔也按页面当前筛选导出：与屏幕完全一致，并带上本机补足的实时记录。
-        // 旧实现直接读云端 usageRows，既无视筛选、也漏掉同步后的本机流水。
         const rows = ledgerRows(ledgerAll());
         if (!rows.length) { toast('当前筛选下没有记录', 'i-info'); return; }
-        if (bridge.can('export_rows_csv')) {
-          const head = ['时间', '类型', '来源', '模型', '动作', '项目', '积分', 'Token'];
-          const body = rows.map(e => {
-            const t = e.time instanceof Date ? e.time : new Date(e.time);
-            const stamp = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())} `
-              + `${F.pad(t.getHours())}:${F.pad(t.getMinutes())}:${F.pad(t.getSeconds())}`;
-            // 来源列与屏幕一致：云端行按 client，本机补足的记录一定是 WorkBuddy
-            const src = e.src === 'cloud'
-              ? (e.client ? clientName(e.client) : '未标注')
-              : 'WorkBuddy';
-            return [stamp, e.type === 'earn' ? '获得' : '消耗', src, e.model || '', e.task || '',
-              e.project || '', e.points || 0, e.tokens == null ? '' : e.tokens];
-          });
-          const rr = await bridge.call('export_rows_csv', 'WorkBuddy-流水',
-            JSON.stringify(head), JSON.stringify(body));
-          if (rr && rr.ok) toast('已导出 ' + rr.count + ' 条：' + rr.path);
-          else if (!(rr && rr.cancelled)) toast('导出失败：' + ((rr && rr.error) || '未知错误'), 'i-alert');
-          return;
-        }
-        const r = await bridge.call('export_ledger_csv');
-        if (r && r.ok) toast('已导出 ' + r.count + ' 条：' + r.path);
-        else if (!(r && r.cancelled)) toast('导出失败：' + ((r && r.error) || '未知错误'), 'i-alert');
+        const head = ['时间', '类型', '来源', '模型', '动作', '项目', '积分', 'Token'];
+        const body = rows.map(e => {
+          const t = e.time instanceof Date ? e.time : new Date(e.time);
+          const stamp = `${t.getFullYear()}-${F.pad(t.getMonth() + 1)}-${F.pad(t.getDate())} `
+            + `${F.pad(t.getHours())}:${F.pad(t.getMinutes())}:${F.pad(t.getSeconds())}`;
+          const src = e.src === 'cloud'
+            ? (e.client ? clientName(e.client) : '未标注')
+            : 'WorkBuddy';
+          return [stamp, e.type === 'earn' ? '获得' : '消耗', src, e.model || '', e.task || '',
+            e.project || '', e.points || 0, e.tokens == null ? '' : e.tokens];
+        });
+        const rr = await bridge.call('export_rows_csv', 'WorkBuddy-流水',
+          JSON.stringify(head), JSON.stringify(body));
+        if (rr && rr.ok) toast('已导出 ' + rr.count + ' 条：' + rr.path);
+        else if (!(rr && rr.cancelled)) toast('导出失败：' + ((rr && rr.error) || '未知错误'), 'i-alert');
       } catch (e) {
         toast('导出失败', 'i-alert');
       } finally {
@@ -4113,12 +4187,6 @@
       }
     });
 
-    const psOpt = $('#optPopSwipe');
-    if (psOpt) psOpt.addEventListener('change', () => {
-      prefs.popSwipeSec = +psOpt.value;
-      savePrefs();
-      if (popSwipe) popSwipe.setInterval(prefs.popSwipeSec * 1000 || 0);
-    });
     // 这两个开关直接决定"每日可用 / 每周可用"的折算结果：所有展示额度的地方必须同步刷新
     bindToggle('#optHoliday', 'holiday', renderQuotaSurfaces);
     bindToggle('#optSignin', 'signin', renderQuotaSurfaces);
@@ -4286,24 +4354,6 @@
       }
     });
 
-    const ps = $('#popSearch');
-    if (ps) {
-      ps.addEventListener('input', () => {
-        state.popQuery = ps.value;
-        const clear = $('#popSearchClear');
-        if (clear) clear.hidden = !ps.value;
-        renderPopupList();
-      });
-    }
-    const pclear = $('#popSearchClear');
-    if (pclear) pclear.addEventListener('click', () => {
-      const ps2 = $('#popSearch');
-      if (ps2) { ps2.value = ''; ps2.focus(); }
-      state.popQuery = '';
-      pclear.hidden = true;
-      renderPopupList();
-    });
-
     const cl = $('#cloudLogin');
     if (cl) cl.addEventListener('click', async () => {
       const r = await bridge.call('account_login');
@@ -4358,21 +4408,6 @@
       toast('已断开账号，界面回到本机记录');
     });
 
-    const sy = $('#syncState');
-    if (sy) sy.addEventListener('click', async () => {
-      if (!bridge.has()) { toast('浏览器预览无法同步账号', 'i-info'); return; }
-      showLoading('正在同步云端账号…');
-      toast('正在同步云端账号…');
-      let rr = null;
-      try { rr = await bridge.call('account_sync'); } finally { hideLoading(); }
-      await loadAccount();
-      renderAccountCard(); renderActive(true);
-      // 不能再用 status 判断结果：软失败（断网 / 5xx）会保留 connected，
-      // 拿状态判断就会把一次失败说成"已同步"。
-      toast(rr && rr.ok ? '云端数据已同步'
-        : (rr && rr.busy ? '正在同步中，稍等一下'
-          : '同步失败：' + ((rr && rr.error) || '请检查登录状态')));
-    });
     const rb = $('#refreshBtn'); if (rb) rb.addEventListener('click', refresh);
     const pr = $('#popRefresh'); if (pr) pr.addEventListener('click', refresh);
 
@@ -4483,7 +4518,7 @@
       if (wrap) wrap.hidden = !heat;
       setText('#calSub', heat
         ? '每行一天、每列一小时，格子越深花得越多；悬停看具体时段'
-        : '每格一天，从当月起按整月对齐 · 颜色越深消耗越多 · 悬停查看当天用量');
+        : '每格一天，按整月对齐 · 颜色越深消耗越多 · 悬停查看当天用量');
       if (heat) {
         renderHeatmap();
       } else if (chartEl && chartEl.__draw) {
@@ -4694,6 +4729,9 @@
       const row = proj || mdl;
       if (!row || !row.dataset.name) return;
       state.ledgerFilter = (proj ? 'project:' : 'model:') + row.dataset.name;
+      // 排行是跨周期的：别继承上次从日历点进来的单日筛选，否则会显示 0 条
+      state.ledgerDay = '';
+      state.ledgerType = 'all';
       state.ledgerLimit = 24;
       go('ledger');
     });
@@ -4715,7 +4753,7 @@
           rows.push(`<div class="tt-row"><span class="tt-name">每分产出</span><span class="tt-val">${F.fmtWan(Math.round(tk / pts))} Token</span></div>`);
         }
       }
-      return `<div class="tt-title">${row.dataset.name}</div>${rows.join('')}`;
+      return `<div class="tt-title">${esc(row.dataset.name)}</div>${rows.join('')}`;
     };
 
     document.addEventListener('mouseover', e => {
@@ -4823,10 +4861,6 @@
     sideSwipe = sideBox && document.body.dataset.nav !== 'b'
       ? createSwipe(sideBox, { auto: true, interval: Math.max(0, prefs.sideSwipeSec) * 1000 || 0 })
       : null;
-    // 小窗也自动播，节奏比左侧慢一档；每次打开都回到第 1 张
-    popSwipe = createSwipe($('#popSwipe'), {
-      auto: true, interval: Math.max(0, prefs.popSwipeSec) * 1000 || 0
-    });
 
     const popCopy = $('#popCopy');
     if (popCopy) popCopy.addEventListener('click', async () => {
@@ -5000,7 +5034,6 @@
     bind();
     if (state.mode === 'mini') bindMini();   // 迷你条只有三个交互：拖、点、关
     $$('#rangeSeg button').forEach(b => b.classList.toggle('is-active', String(b.dataset.range) === String(state.range)));
-    setText('#syncTime', D.meta.updated || '—');
 
     if (HASH_MODE || bridge.has()) {
       document.body.classList.add('is-loading');
@@ -5015,6 +5048,11 @@
       // 任务进度不挡首屏：它要打两个网络请求，还可能排在账号同步后面等锁，
       // 放在 boot 里 await 会让启动遮罩多停好几秒。
       setTimeout(() => { loadTasks().then(() => renderSideSwipe()); }, 400);
+      // 任务接口偶发 401：启动那次失败后，每 30 分钟再试一次（直到成功）
+      setInterval(() => {
+        if (!bridge.has() || (TASKS && TASKS.ok)) return;
+        loadTasks().then(() => renderSideSwipe());
+      }, 30 * 60 * 1000);
     }
 
     // 只有浏览器预览（没有桌面桥）才生成演示数据：
@@ -5045,7 +5083,7 @@
   }
 
   window.App = {
-    go, setMode, renderActive, refresh,
+    setMode, renderActive, refresh,
     refreshLayout: () => renderActive(),
     /** 由 Python 在窗口显示后调用：补一次入场过渡 */
     playEnter: mode => playEnter(mode),
@@ -5088,7 +5126,8 @@
     __applyTheme: t => {
       const next = t === 'dark' ? 'dark' : 'light';
       if (document.documentElement.getAttribute('data-theme') === next) return;
-      prefs.theme = next;
+      // 只同步视觉效果，不改本窗口的 prefs.theme：
+      // 否则“跟随系统”会被对方的 light/dark 覆盖，之后任何 pushPrefs 都会把主窗也带偏。
       paintTheme(next, false, true);
     },
     __setMode: m => setMode(m)

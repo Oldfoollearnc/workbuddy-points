@@ -66,7 +66,7 @@ from win32_utils import (      # noqa: E402  Win32 底层工具（拆分自本�
 )
 import update_check
 import usage_source
-from account_service import AccountService, CDP_PORT, cdp_enabled
+from account_service import AccountService, CDP_PORT, cdp_enabled, purge_pending_cookies
 from checkin_service import CheckinService
 from tray import Tray
 
@@ -258,6 +258,19 @@ user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
 user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
 user32.MonitorFromPoint.restype = wintypes.HANDLE
 user32.GetMonitorInfoW.argtypes = [wintypes.HANDLE, ctypes.POINTER(MONITORINFO)]
+user32.MonitorFromWindow.argtypes = [wintypes.HWND, wintypes.DWORD]
+user32.MonitorFromWindow.restype = wintypes.HANDLE
+user32.GetDpiForWindow.argtypes = [wintypes.HWND]
+user32.GetDpiForWindow.restype = wintypes.UINT
+_ICON_CACHE = {}
+
+
+def _win_scale(hwnd):
+    """窗口所在显示器的物理/逻辑比；混合 DPI 下比全局值准。"""
+    try:
+        return max(1.0, user32.GetDpiForWindow(hwnd) / 96.0)
+    except Exception:
+        return dpi_scale()
 def set_window_icons():
     try:
         user32.LoadImageW.restype = wintypes.HANDLE
@@ -272,7 +285,11 @@ def set_window_icons():
             continue
         round_corners(hwnd)
         for kind, size in ((1, 32), (0, 16)):     # ICON_BIG / ICON_SMALL
-            hicon = user32.LoadImageW(None, ICON, IMAGE_ICON, size, size, LR_LOADFROMFILE)
+            hicon = _ICON_CACHE.get((kind, size))
+            if not hicon:
+                hicon = user32.LoadImageW(None, ICON, IMAGE_ICON, size, size, LR_LOADFROMFILE)
+                if hicon:
+                    _ICON_CACHE[(kind, size)] = hicon
             if hicon:
                 user32.SendMessageW(hwnd, WM_SETICON, kind, hicon)
 # 第二次双击图标时不再弹"程序已在运行"——那是在教用户去找托盘图标。
@@ -754,8 +771,9 @@ class Desktop:
         try:
             if not hwnd:
                 return {"ok": False}
-            w = max(MIN_W, int(w))
-            h = max(MIN_H, int(h))
+            scale = _win_scale(hwnd)
+            w = max(int(MIN_W * scale), int(w))
+            h = max(int(MIN_H * scale), int(h))
             if getattr(self, "_maxed", False):
                 self._maxed = False
             user32.SetWindowPos(hwnd, None, int(x), int(y), w, h,
@@ -860,17 +878,23 @@ class Desktop:
             return None
 
     def mini_move(self, x, y):
+        """边界 API：输入逻辑坐标，内部换算成物理像素。"""
         hwnd = find_hwnd(MINI_TITLE)
         try:
             if not hwnd:
                 return {"ok": False}
+            scale = _win_scale(hwnd)
             wa = work_area()
-            x = int(min(max(wa[0], int(x)), max(wa[0], wa[2] - MINI_W)))
-            y = int(min(max(wa[1], int(y)), max(wa[1], wa[3] - MINI_H)))
-            user32.SetWindowPos(hwnd, -1, x, y, 0, 0,
+            px = int(int(x) * scale)
+            py = int(int(y) * scale)
+            max_x = max(wa[0], wa[2] - int(MINI_W * scale))
+            max_y = max(wa[1], wa[3] - int(MINI_H * scale))
+            px = min(max(wa[0], px), max_x)
+            py = min(max(wa[1], py), max_y)
+            user32.SetWindowPos(hwnd, -1, px, py, 0, 0,
                                 SWP_NOSIZE | SWP_NOACTIVATE)   # -1 = HWND_TOPMOST
-            patch_win_state(mini={"x": x, "y": y})
-            return {"ok": True, "x": x, "y": y}
+            patch_win_state(mini={"x": int(px / scale), "y": int(py / scale)})
+            return {"ok": True, "x": int(px / scale), "y": int(py / scale)}
         except Exception as e:
             log(f"mini_move failed: {e}")
             return {"ok": False}
@@ -900,7 +924,11 @@ class Desktop:
         finally:
             self._dragging = False
             if rc.left or rc.top:
-                patch_win_state(mini={"x": rc.left, "y": rc.top})
+                # window.json 存逻辑坐标：create_window 会按 DPI 再乘回物理像素。
+                # 用窗口自己的 DPI（混合 DPI 下不同于系统值）。
+                scale = _win_scale(hwnd)
+                patch_win_state(mini={"x": int(rc.left / scale),
+                                      "y": int(rc.top / scale)})
 
     def mini_drag_start(self):
         hwnd = find_hwnd(MINI_TITLE)
@@ -1013,7 +1041,16 @@ class Desktop:
                 rc = RECT()
                 user32.GetWindowRect(hwnd, ctypes.byref(rc))
                 self._normal_rect = (rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top)
-                wa = work_area()
+                # 多显示器：在哪块屏幕上就铺满哪块，不要一律回主屏。
+                wa = None
+                mon = user32.MonitorFromWindow(hwnd, 2)      # MONITOR_DEFAULTTONEAREST
+                if mon:
+                    mi = MONITORINFO()
+                    mi.cbSize = ctypes.sizeof(MONITORINFO)
+                    if user32.GetMonitorInfoW(mon, ctypes.byref(mi)):
+                        wa = (mi.rcWork.left, mi.rcWork.top, mi.rcWork.right, mi.rcWork.bottom)
+                if not wa:
+                    wa = work_area()
                 user32.SetWindowPos(hwnd, None, wa[0], wa[1],
                                     wa[2] - wa[0], wa[3] - wa[1],
                                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)
@@ -1040,13 +1077,18 @@ class Desktop:
         user32.GetWindowRect(hwnd, ctypes.byref(wr))
         user32.GetClientRect(hwnd, ctypes.byref(cr))
         target_w, target_h = self.pop_size
+        # 客户区尺寸是物理像素：要和 target*scale 比，不能和逻辑值比。
+        # 否则高 DPI 下每次都判定“尺寸不对”，重复 SetWindowPos 就是小窗闪烁。
+        scale = _win_scale(hwnd)
+        target_w_phys = int(target_w * scale)
+        target_h_phys = int(target_h * scale)
 
-        if cr.right != target_w or cr.bottom != target_h:
+        if cr.right != target_w_phys or cr.bottom != target_h_phys:
             frame_w = (wr.right - wr.left) - cr.right
             frame_h = (wr.bottom - wr.top) - cr.bottom
             user32.SetWindowPos(hwnd, None, 0, 0,
-                                int(target_w * self.scale) + frame_w,
-                                int(target_h * self.scale) + frame_h,
+                                target_w_phys + frame_w,
+                                target_h_phys + frame_h,
                                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE)
             user32.GetWindowRect(hwnd, ctypes.byref(wr))
             user32.GetClientRect(hwnd, ctypes.byref(cr))
@@ -1173,6 +1215,9 @@ class Desktop:
 
     def _watch_digest(self):
         """22:00 之后推一条当日小结，一天只推一次（发过就落盘记住）。"""
+        # 界面启动后会把“晚间小结”开关推过来（set_digest）；
+        # 先等几秒，避免用户已关闭小结、开机却又收到一条。
+        time.sleep(8)
         while not self.quitting:
             try:
                 now = dt.datetime.now()
@@ -1388,32 +1433,6 @@ class Api:
         """成长计划任务进度（活动卡第四格用，带 30 分钟缓存）。"""
         return self._desk.checkin.tasks()
 
-    def export_ledger_csv(self):
-        """把云端逐笔流水导出成 CSV（utf-8-sig，Excel 直接打开不乱码）。"""
-        try:
-            rows = self._desk.account.state.get("usageRows") or []
-            if not rows:
-                return {"ok": False, "error": "还没有可导出的流水，先同步一次云端"}
-            win = self._desk.main or self._desk.popup
-            name = "WorkBuddy-流水-%s.csv" % dt.datetime.now().strftime("%Y%m%d-%H%M")
-            picked = win.create_file_dialog(webview.SAVE_DIALOG, save_filename=name)
-            if not picked:
-                return {"ok": False, "cancelled": True}
-            path = picked[0] if isinstance(picked, (list, tuple)) else picked
-            with open(path, "w", encoding="utf-8-sig", newline="") as f:
-                w = csv.writer(f)
-                # 来源列：界面已经按 WorkBuddy / CodeBuddy 拆开，导出也得对得上
-                w.writerow(["时间", "来源", "模型", "用途", "积分"])
-                for r in rows:
-                    w.writerow([_csv_cell(r.get("t")), _csv_cell(r.get("client") or "未标注"),
-                                _csv_cell(r.get("model")),
-                                _csv_cell(r.get("purpose")), r.get("credit") or 0])
-            log("export_ledger_csv -> %s (%d 行)" % (path, len(rows)))
-            return {"ok": True, "path": path, "count": len(rows)}
-        except Exception as e:
-            log(f"export_ledger_csv error: {e}")
-            return {"ok": False, "error": str(e)[:160]}
-
     def export_rows_csv(self, name="汇总", head_json="[]", rows_json="[]"):
         """导出前端算好的汇总表。
 
@@ -1605,7 +1624,7 @@ class Api:
             acc = self._desk.account.snapshot() or {}
             cloud = acc.get("cloud") or {}
             avail = cloud.get("available")
-            cycle = (cloud.get("cycleEnd") or "")[:10]
+            cycle = (cloud.get("cycleEndText") or cloud.get("expireAtText") or "")[:10]
 
             lines = ["# WorkBuddy 用量周报（%s ~ %s）" % (first, last), "", "## 概览", ""]
             lines.append("- 本周消耗：**%s 分**" % _fmt_num(total))
@@ -1626,9 +1645,10 @@ class Api:
                     lines.append("| %s | %s | %.1f%% |" % (str(p.get("name") or "").replace("|", "\\|"),
                                                            _fmt_num(p.get("points") or 0),
                                                            float(p.get("share") or 0) * 100))
-            mods = (d.get("models30") or (d.get("cloudModels") or []))[:5]
+            all_mods = d.get("models30") or (self._desk.account.state.get("cloudModels") or [])
+            mods = all_mods[:5]
             if mods:
-                msum = sum(float(m.get("points") or 0) for m in mods) or 1
+                msum = sum(float(m.get("points") or 0) for m in all_mods) or 1
                 lines += ["", "## 模型 Top（近 30 天）", "", "| 模型 | 积分 | 占比 |", "|---|---:|---:|"]
                 for m in mods:
                     lines.append("| %s | %s | %.1f%% |" % (str(m.get("name") or "").replace("|", "\\|"),
@@ -1676,7 +1696,7 @@ class Api:
                 "签到状态": _g(lambda: (self._desk.checkin.snapshot().get("result") or {}).get("checkin")),
                 "旅行状态": _g(lambda: ((self._desk.checkin.snapshot().get("result") or {}).get("travel") or {}).get("state")),
                 "开机自启": _g(autostart.is_enabled),
-                "本地数据目录": _g(lambda: (self._desk.usage.snapshot() or {}).get("home")),
+                "本地数据目录": _g(lambda: (self._desk.usage.source or {}).get("home")),
             }
             path = diagnostics.build(
                 dest,
@@ -1970,6 +1990,27 @@ def main():
                   "程序已在运行，但没能把窗口叫到前面。\n"
                   "请在右下角通知区找到托盘图标（蓝色柱状图标），单击即可打开。")
         return
+
+    # 上次退出登录时没能清掉的 httpOnly Cookie：
+    # 现在 WebView2 还没启动，profile 不被占用，直接从 Cookie 库里删。
+    try:
+        purged = purge_pending_cookies()
+        if purged:
+            log("purged %s pending httpOnly cookies" % purged)
+    except Exception as e:
+        log("purge pending cookies error: %s" % e)
+
+    # 从旧版（数据写在程序目录）升级上来时，把设置/会话带到可写目录。
+    # 源码运行时 data_dir==app_dir，函数会直接返回空列表。
+    try:
+        moved = app_paths.migrate_legacy((
+            "account.json", "session.bin", "points_config.json", "checkin.json",
+            "usage-ledger.json", "aliases.json", "digest.json", "window.json",
+        ))
+        if moved:
+            log("migrated legacy data: %s" % ", ".join(moved))
+    except Exception as e:
+        log("migrate legacy data error: %s" % e)
 
     app = Desktop()
     app.build()

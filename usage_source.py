@@ -140,14 +140,30 @@ def _load_config():
     try:
         with open(CONFIG_PATH, encoding="utf-8") as f:
             cfg = json.load(f)
-        return {
-            "total": float(cfg.get("total") or 0),
-            "cycle_start": cfg.get("cycle_start") or "",
-            "cycle_end": cfg.get("cycle_end") or "",
-            "cover_days": int(cfg.get("cover_days") or 0),
-        }
     except Exception:
-        return {"total": 0, "cycle_start": "", "cycle_end": "", "cover_days": 0}
+        cfg = {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    def _f(v):
+        try:
+            return float(v or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _i(v):
+        try:
+            return max(0, int(v or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    # 逐字段容错：cover_days 坏了不能把额度/周期一起清成 0
+    return {
+        "total": _f(cfg.get("total")),
+        "cycle_start": str(cfg.get("cycle_start") or ""),
+        "cycle_end": str(cfg.get("cycle_end") or ""),
+        "cover_days": _i(cfg.get("cover_days")),
+    }
 
 
 def save_config(total, cycle_start, cycle_end):
@@ -217,6 +233,22 @@ def _head_sig(path, n=4096):
         return ""
 
 
+def _at_line_start(path, offset):
+    """快照里的读取偏移是否仍在行首。
+
+    文件被重写但高位不变时，head 指纹可能没变；
+    从旧 offset 继续读会从半截 JSON 开始，这一小步能把它拦住。
+    """
+    if offset <= 0:
+        return True
+    try:
+        with open(path, "rb") as f:
+            f.seek(offset - 1)
+            return f.read(1) == b"\n"
+    except OSError:
+        return False
+
+
 def _scan_file(path, offset=0):
     """从 offset 起增量解析一个 jsonl，返回 (records, 新偏移)。
 
@@ -253,11 +285,19 @@ def _scan_file(path, offset=0):
         if not ts:
             continue
         try:
+            ts = int(float(ts))
+        except (TypeError, ValueError):
+            continue                    # 时间戳格式不认识：跳过这一条，别让整次扫描崩掉
+        try:
             credit = float(ru.get("credit") or 0)
         except (TypeError, ValueError):
             credit = 0.0
         usage = pd.get("usage") or {}
         tokens = usage.get("totalTokens") or ru.get("total_tokens") or 0
+        try:
+            tokens = int(float(tokens or 0))
+        except (TypeError, ValueError):
+            tokens = 0
         model = pd.get("model") or ""
         tool = obj.get("name") or ""
         # 去重键：优先 messageId / id，缺失时退回"内容指纹"。
@@ -265,10 +305,10 @@ def _scan_file(path, offset=0):
         mid = pd.get("messageId") or obj.get("id") or "%s|%s|%s|%s" % (ts, model, credit, tool)
         out.append({
             "mid": str(mid),
-            "ts": int(ts),
+            "ts": ts,
             "credit": credit,
             "model": model,
-            "tokens": int(tokens or 0),
+            "tokens": tokens,
             "cwd": obj.get("cwd") or "",
             "tool": tool,
             "type": obj.get("type") or "",
@@ -326,7 +366,9 @@ class UsageService:
     def refresh(self):
         # 不再 force：_build 内部按文件 (mtime,size) 增量读，只有变动的文件才重新解析。
         # 以前这里强制全量重扫，127MB 会话目录每次约 0.6s，且随历史线性变慢。
-        self._build_safe()
+        # 用户主动刷新（保存配置/别名）：尽量等当前构建结束，
+        # 不要拿上一次的旧数据当成“已生效”。
+        self._build_safe(wait=5)
         return self.get(3)
 
     def clear_cache(self):
@@ -350,8 +392,10 @@ class UsageService:
 
     # ---------- 构建 ----------
 
-    def _build_safe(self, force=False):
-        if not self._build_lock.acquire(blocking=False):
+    def _build_safe(self, force=False, wait=0):
+        got = (self._build_lock.acquire(timeout=wait) if wait > 0
+               else self._build_lock.acquire(blocking=False))
+        if not got:
             # 已经有一次构建在跑（另一个窗口刚触发）：直接返回现有结果，
             # 让调用方 get() 去等那一次，别两倍 IO 扫同一个目录。
             log("build skipped: another build in progress")
@@ -442,7 +486,8 @@ class UsageService:
                 # 所以先比一下文件头部指纹，变了就整文件重扫。
                 sig = _head_sig(path)
                 # 没有旧指纹也算"可能变了"：宁可整文件重扫一次，也不要从半行开始读
-                if sig and ent.get("head") != sig:
+                if ((sig and ent.get("head") != sig)
+                        or not _at_line_start(path, int(ent.get("offset") or 0))):
                     recs, offset = _scan_file(path, 0)
                     dirty = True
                 else:
@@ -1042,7 +1087,15 @@ class UsageService:
         data = self._empty()
         by_day = {}
         for rec in (summary.get("daily") or []):
-            d = _monthday_to_date(rec.get("date"), dt.date.today()) if rec.get("date") else None
+            raw = str(rec.get("date") or "")
+            d = None
+            if len(raw) >= 10:
+                try:
+                    d = dt.date.fromisoformat(raw[:10])
+                except ValueError:
+                    d = None
+            if d is None and raw:
+                d = _monthday_to_date(raw, dt.date.today())
             if d:
                 by_day[d] = rec
         today = dt.date.today()

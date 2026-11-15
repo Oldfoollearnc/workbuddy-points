@@ -67,9 +67,21 @@
     m = s.match(/^(\d{1,2})-(\d{1,2})$/);
     if (m) {
       const now = new Date();
-      let d = new Date(now.getFullYear(), +m[1] - 1, +m[2]);
-      if (d < startOfDay(now)) d = new Date(now.getFullYear() + 1, +m[1] - 1, +m[2]);
-      return d;
+      const today = startOfDay(now);
+      const y = now.getFullYear();
+      const cands = [new Date(y, +m[1] - 1, +m[2]),
+                     new Date(y + 1, +m[1] - 1, +m[2]),
+                     new Date(y - 1, +m[1] - 1, +m[2])];
+      // 取离今天最近的那一次：已经过了 1–2 天的过期日不要被推到明年。
+      let best = cands[0];
+      let bestDiff = Math.abs(best - today);
+      for (let i = 1; i < cands.length; i++) {
+        const diff = Math.abs(cands[i] - today);
+        if (diff < bestDiff || (diff === bestDiff && cands[i] > best)) {
+          best = cands[i]; bestDiff = diff;
+        }
+      }
+      return best;
     }
     return null;
   }
@@ -257,7 +269,7 @@
    * 连上云端 = 云端逐笔 + 同步后本机逐笔；未连接才退回本机记录。
    */
   function todayStat(clientId) {
-    const { D } = ctx();
+    const { D, ACCOUNT } = ctx();
     const want = String(clientId || '');
     const rows = cloudRows();
     if (rows) {
@@ -293,7 +305,9 @@
         fold(d, credit, r.model);
       });
       // 本机 tail 只有 WorkBuddy 会产生：筛到别的来源时不能并进来
-      if (isWorkBuddyClient(want)) localTail().forEach(e => {
+      let tailTodaySum = 0, tailTodayCalls = 0;
+      const tail = isWorkBuddyClient(want) ? localTail() : [];
+      tail.forEach(e => {
         const d = e.time instanceof Date ? e.time : new Date(e.time);
         if (isNaN(d.getTime())) return;
         const key = dayKeyOf(d);
@@ -303,20 +317,31 @@
           return;
         }
         if (key !== todayKey) return;
+        tailTodaySum += credit; tailTodayCalls += 1;
         fold(d, credit, e.model);
       });
       const models = Array.from(map.values()).sort((a, b) => b.points - a.points);
       models.forEach((m, i) => { m.points = round2(m.points); m.tone = 'c' + ((i % 6) + 1); });
       hours.forEach(h => { h.points = round2(h.points); });
       const peak = hours.reduce((a, b) => (b.points > a.points ? b : a), hours[0]);
+      // 逐笔列表可能被 1500 条截断；云端按天聚合是完整的。
+      // “全部来源”时取两者较大值，避免重度账号今日总数偏低。
+      let totalConsumed = sum, totalCalls = calls;
+      if (!want && ACCOUNT && Array.isArray(ACCOUNT.daily)) {
+        const rec = ACCOUNT.daily.find(x => x && String(x.date).slice(0, 10) === todayKey);
+        if (rec) {
+          totalConsumed = Math.max(sum, (Number(rec.points) || 0) + tailTodaySum);
+          totalCalls = Math.max(calls, (Number(rec.calls) || 0) + tailTodayCalls);
+        }
+      }
       return {
         cloud: true,
         client: want,
-        consumed: round2(sum),
-        requests: calls,
+        consumed: round2(totalConsumed),
+        requests: totalCalls,
         tokens: (D.today && D.today.tokens) || 0,   // 云端逐笔不含 Token
-        avgPerRequest: calls ? sum / calls : 0,
-        deltaPct: yday ? (sum / yday - 1) * 100 : 0,
+        avgPerRequest: totalCalls ? totalConsumed / totalCalls : 0,
+        deltaPct: yday ? (totalConsumed / yday - 1) * 100 : 0,
         hours, models,
         peakHour: peak ? peak.hour : 0,
         peakPoints: peak ? peak.points : 0
